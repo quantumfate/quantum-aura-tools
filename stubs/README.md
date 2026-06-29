@@ -1,29 +1,31 @@
 # ESO API stubs (drop-in, untracked)
 
-`.luarc.json` adds this folder to `workspace.library`, so anything here becomes
-type information / autocomplete in Neovim (lua-language-server) without appearing
-in the addon or in git. Everything in `stubs/` is gitignored except this README.
+`.luarc.json` points `workspace.library` here, so these become type information /
+autocomplete in Neovim (lua-language-server) without appearing in the addon or in
+git. Everything in `stubs/` is gitignored.
 
-## esoui decompiled source (recommended)
+## Why two pieces
 
-Clone the official decompiled ESO UI source here — it defines every `ZO_*`
-object and every `EVENT_*` / `CT_*` / anchor / `SI_*` constant, so the language
-server resolves them for real:
+ESO's constants, events and native functions are injected into the Lua VM by the
+C++ engine. The decompiled Lua only *uses* them, so the language server reports
+them as undefined globals. The real definitions live in `ESOUIDocumentation.txt`,
+which isn't Lua. So two things are needed:
 
-```sh
-git clone --depth 1 https://github.com/esoui/esoui.git stubs/esoui
-```
+1. **`esoui/`** — the decompiled UI source, for all `ZO_*` objects/helpers and the
+   `ESOUIDocumentation.txt` reference:
 
-Refresh it each patch with `git -C stubs/esoui pull`.
+   ```sh
+   git clone --depth 1 https://github.com/esoui/esoui.git stubs/esoui
+   git -C stubs/esoui pull        # refresh each patch
+   ```
 
-It also ships `stubs/esoui/ESOUIDocumentation.txt` — the reference for the
-engine-native functions (`GetUnitBuffInfo`, `GetGameTimeSeconds`, the
-`EVENT_MANAGER` methods, …). Those are implemented in C, so they are *not* in the
-Lua source; the curated `diagnostics.globals` list in `.luarc.json` keeps them
-quiet. (A future improvement: generate LuaCATS annotations from that doc for full
-signatures.)
+2. **`eso_api.lua`** — a generated `---@meta` stub that *declares* every engine
+   constant, event and native function (with `---@param`/`---@return` types parsed
+   from the documentation), so the language server resolves them:
 
-## Anything else
+   ```sh
+   python3 tools/gen_eso_stubs.py stubs/esoui/ESOUIDocumentation.txt stubs/eso_api.lua
+   ```
 
-Drop any other LuaCATS / EmmyLua `.lua` annotation files directly in this folder
-and restart the language server.
+Regenerate `eso_api.lua` whenever you update `stubs/esoui` to a new patch. Both
+files are local-only; the generator (`tools/gen_eso_stubs.py`) is tracked.

@@ -4,17 +4,19 @@
   "runtime.pathStrict": true,
   "workspace.checkThirdParty": false,
   "workspace.ignoreDir": [
-    ".legacy-hypertools",
-    "stubs"
+    ".legacy-hypertools"
   ],
   "workspace.library": [
-    "stubs"
+    "stubs/eso_api.lua",
+    "stubs/esoui/esoui"
   ],
   "diagnostics.disable": [
     "lowercase-global",
     "duplicate-set-field"
   ],
   "diagnostics.globals": [
+    "QAT",
+    "QAT_ToggleEditor",
     "EVENT_MANAGER",
     "CALLBACK_MANAGER",
     "SLASH_COMMANDS",
