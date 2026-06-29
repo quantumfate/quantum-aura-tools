@@ -33,6 +33,9 @@ Editor/Widgets.lua
 Editor/Window.lua
 Editor/Tree.lua
 Editor/Inspector.lua
+Editor/PhasesTab.lua
+Editor/ConditionsTab.lua
+Editor/LoadTab.lua
 Settings/Settings.lua
 Bindings.lua
 Bindings.xml

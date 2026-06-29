@@ -3,6 +3,8 @@
 -- entirely from that def, refreshing on the "QAT_TrackerChanged" callback, so any
 -- number of inspector instances on the same tracker stay in sync.
 
+local WM = GetWindowManager()
+
 local function findDef(defs, id)
 	for _, def in ipairs(defs or {}) do
 		if def.id == id then
@@ -71,9 +73,22 @@ function QAT.Editor_Inspector_Build(pane)
 	placeholder:SetVerticalAlignment(TEXT_ALIGN_TOP)
 	insp.placeholder = placeholder
 
+	-- One container per tab, each filling the body; only the active one is shown.
+	insp.tabContainers = {}
+	for _, tabName in ipairs({ "Phases", "Conditions", "Load" }) do
+		local c = WM:CreateControl("QAT_Insp_Tab_" .. tabName, body, CT_CONTROL)
+		c:SetAnchor(TOPLEFT, body, TOPLEFT, 0, 0)
+		c:SetAnchor(BOTTOMRIGHT, body, BOTTOMRIGHT, 0, 0)
+		c:SetHidden(true)
+		insp.tabContainers[tabName] = c
+	end
+
 	-- Start with nothing selected: hide the per-tracker actions and tabs.
 	QAT.Editor_Inspector_Show(nil)
 end
+
+-- Tab modules register their renderer here: QAT.editor.tabRenderers[name](container, def).
+QAT.editor.tabRenderers = QAT.editor.tabRenderers or {}
 
 local function refreshBody()
 	local insp = QAT.editor.inspector
@@ -82,12 +97,28 @@ local function refreshBody()
 	end
 	local tab = QAT.editor.activeTab or "Phases"
 	local def = insp.currentId and findDef(QAT.sv.trackers, insp.currentId)
+
+	for _, container in pairs(insp.tabContainers or {}) do
+		container:SetHidden(true)
+	end
+
 	if not def then
+		insp.placeholder:SetHidden(false)
 		insp.placeholder:SetText("Select a tracker in the tree, or add one with + Tracker.")
 		return
 	end
-	insp.placeholder:SetText(('%s editor for "%s" — not yet implemented.'):format(tab, def.name or def.id))
+	insp.placeholder:SetHidden(true)
+
+	local container = insp.tabContainers and insp.tabContainers[tab]
+	local renderer = QAT.editor.tabRenderers[tab]
+	if container and renderer then
+		container:SetHidden(false)
+		QAT.Safe("tab " .. tab, function()
+			renderer(container, def)
+		end)
+	end
 end
+QAT.Editor_Inspector_Refresh = refreshBody
 
 function QAT.Editor_Inspector_Show(id)
 	local insp = QAT.editor.inspector
