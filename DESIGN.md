@@ -245,14 +245,26 @@ everything but styling already done.
 
 ## Display kit
 
-Per-phase, so a single tracker changes look per state:
+A tracker has phases; each phase renders as one **display kind**, set per phase so
+a single tracker changes look per state. Display kind is a plain field on the
+phase's `look`, freely switchable (icon ↔ bar) without rebuilding the tracker —
+its triggers, conditions, position and other phases are preserved.
 
-- **Icon** — cooldown swipe + desaturate for lockout phases, stack count, timer
-  overlay
-- **Progress bar** — horizontal / vertical
-- **Text-only**
-- **Alert** — audio cue + optional screen flash, for incoming-boss-mechanic
-  trackers ("X is being cast now")
+Display kinds:
+
+- **bar** — progress bar (horizontal / vertical)
+- **icon** — ability icon; desaturate + cooldown swipe for lockout phases, stack
+  count, timer overlay
+- **text** — label only
+- **none** — no on-screen element; used for cue-only phases (e.g. "X is being
+  cast now")
+
+**Cues** are *additive* per-phase effects fired when a phase is entered, separate
+from the display kind — so a phase can be a bar that also flashes and beeps, or a
+`none` phase that only beeps:
+
+- **sound** — a momentary audio cue
+- **flash** — a brief full-screen color flash
 
 Media (fonts / textures / sounds) via **LibMediaProvider**, interoperating with
 other addons' media registries.

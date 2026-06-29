@@ -35,6 +35,18 @@ end
 ---  :SetHidden(hidden) and :SetBarColor(rgba)
 function QAT.display.Create(def)
 	local kind = def.display or "bar"
+
+	-- A "none" phase has no on-screen element (cue-only). Return a no-op control
+	-- so the tracker state machine can drive it uniformly.
+	if kind == "none" then
+		return {
+			kind = "none",
+			SetHidden = function() end,
+			SetBarColor = function() end,
+			SetState = function() end,
+		}
+	end
+
 	local name = "QAT_Tracker_" .. tostring(def.id)
 	local w, h = value(def, "width"), value(def, "height")
 

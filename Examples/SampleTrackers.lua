@@ -1,51 +1,74 @@
 -- Hand-authored example trackers, loaded by the runtime alongside saved ones.
 --
--- Two def shapes are shown:
---   1. Single-phase defs (no `phases`) - the normalizer wraps each in one
---      implicit "active" phase that shows while a buff is up.
---   2. A phased def - a proc with a lockout as ONE tracker that changes
---      appearance across Ready -> Active -> Cooldown -> Ready.
+-- All trackers use the canonical phased shape: a tracker has `phases`, and each
+-- phase's `look.display` is its render kind (bar / icon / text / none). A
+-- single-phase tracker is simply one phase. (A flat shorthand without `phases`
+-- is also accepted on import and expanded to this shape; these examples are
+-- written canonically to show the real model.)
 --
 -- The ability ids here are placeholders for wiring; confirm real values with the
 -- in-game ID viewer.
 
 QAT.Examples = {
-	-- 1) Single-phase buff-uptime trackers.
+	-- Single-phase bar: shows a buff's remaining time, red under 3s.
 	{
 		id = "sample_major_resolve",
 		kind = "tracker",
-		display = "bar",
 		name = "Major Resolve",
-		abilityIds = { 61694 },
 		unit = "player",
-		effectType = "buff",
-		point = CENTER,
-		x = 0,
-		y = -220,
-		color = { 0.20, 0.55, 0.90, 1 },
-		-- Runtime condition: turn the bar red when under 3s remaining.
+		pos = { point = CENTER, x = 0, y = -220, width = 220, height = 30 },
+		phases = {
+			{
+				id = "active",
+				look = { display = "bar", name = "Major Resolve", color = { 0.20, 0.55, 0.90, 1 } },
+				duration = { type = "effect", abilityIds = { 61694 } },
+				enter = { { kind = "effect", abilityIds = { 61694 }, result = "gained" } },
+			},
+		},
 		runtime = {
 			{ stat = "remaining", op = "<", value = 3, action = "color", color = { 0.85, 0.15, 0.15, 1 } },
 		},
 	},
+
+	-- Single-phase text.
 	{
 		id = "sample_rapid_text",
 		kind = "tracker",
-		display = "text",
 		name = "Rapid Maneuver",
-		abilityIds = { 40211 },
 		unit = "player",
-		effectType = "buff",
-		point = CENTER,
-		x = 0,
-		y = -185,
-		color = { 0.20, 0.80, 0.35, 1 },
+		pos = { point = CENTER, x = 0, y = -185 },
+		phases = {
+			{
+				id = "active",
+				look = { display = "text", name = "Rapid Maneuver", color = { 0.20, 0.80, 0.35, 1 } },
+				duration = { type = "effect", abilityIds = { 40211 } },
+				enter = { { kind = "effect", abilityIds = { 40211 }, result = "gained" } },
+			},
+		},
 	},
 
-	-- 2) Phased proc with a fixed-timer lockout.
+	-- Single-phase icon: an ability icon that desaturates when not active.
+	{
+		id = "sample_icon",
+		kind = "tracker",
+		name = "Inner Light",
+		unit = "player",
+		pos = { point = CENTER, x = -120, y = -150, width = 40, height = 40 },
+		phases = {
+			{
+				id = "active",
+				look = { display = "icon", name = "Inner Light", icon = "/esoui/art/icons/ability_mageguild_002.dds" },
+				duration = { type = "effect", abilityIds = { 30920 } },
+				enter = { { kind = "effect", abilityIds = { 30920 }, result = "gained" } },
+			},
+		},
+	},
+
+	-- Phased proc with a fixed-timer lockout: one tracker, three looks.
 	{
 		id = "sample_huntsman",
 		kind = "tracker",
+		name = "Huntsman",
 		unit = "player",
 		pos = { point = CENTER, x = 0, y = -150, width = 240, height = 34 },
 		initial = "ready",
@@ -59,10 +82,9 @@ QAT.Examples = {
 			{
 				id = "active",
 				look = { display = "bar", name = "Huntsman", color = { 0.20, 0.80, 0.35, 1 } },
-				duration = { type = "effect", abilityIds = { 999001 }, unit = "player" },
-				enter = {
-					{ kind = "effect", abilityIds = { 999001 }, result = "gained", unit = "player" },
-				},
+				duration = { type = "effect", abilityIds = { 999001 } },
+				enter = { { kind = "effect", abilityIds = { 999001 }, result = "gained" } },
+				cues = { flash = { color = { 0.2, 0.8, 0.3, 0.35 }, duration = 250 } },
 			},
 			{
 				id = "cooldown",
@@ -70,13 +92,7 @@ QAT.Examples = {
 				duration = { type = "fixed", seconds = 60 },
 				onExpire = "ready",
 				enter = {
-					{
-						kind = "effect",
-						abilityIds = { 999001 },
-						result = "faded",
-						unit = "player",
-						from = { "active" },
-					},
+					{ kind = "effect", abilityIds = { 999001 }, result = "faded", from = { "active" } },
 				},
 			},
 		},

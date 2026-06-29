@@ -18,6 +18,12 @@ QAT.migrations = {
 			treeWidth = 260,
 		}
 	end,
+
+	-- schema 2 -> 3: rewrite stored trackers into the canonical phased shape so
+	-- flat single-phase defs are no longer kept alongside phased ones.
+	[2] = function(sv)
+		QAT.CanonicalizeTree(sv.trackers)
+	end,
 }
 
 function QAT.RunMigrations(sv)

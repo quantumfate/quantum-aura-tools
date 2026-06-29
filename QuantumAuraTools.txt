@@ -20,10 +20,12 @@
 Core/Init.lua
 Core/Log.lua
 Core/Strings.lua
+Core/Schema.lua
 Core/Migrations.lua
 Core/Util.lua
 Engine/Conditions.lua
 Display/Display.lua
+Display/Cues.lua
 Engine/Tracker.lua
 Engine/Runtime.lua
 Examples/SampleTrackers.lua

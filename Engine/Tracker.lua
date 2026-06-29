@@ -25,58 +25,22 @@ local function contains(arr, v)
 	return false
 end
 
---- Normalize an authored def into runtime phase tables.
---- A def with no `phases` becomes a single "active" phase shown while the buff is
---- up and hidden when it fades.
----@param def table authored tracker def
+--- Build runtime phase tables (each with its display control) from a canonical
+--- def. The def must already be canonical (see QAT.CanonicalizeDef).
+---@param def table canonical tracker def
 ---@return table phases map of phaseId -> phase
 ---@return string[] order phase ids in declared order
 ---@return string|nil initial starting phase id, or nil to start idle
 local function Normalize(def)
 	local pos = def.pos
-		or {
-			point = def.point,
-			x = def.x,
-			y = def.y,
-			width = def.width,
-			height = def.height,
-		}
-	local unit = def.unit or "player"
-
-	local rawPhases
-	local initial = def.initial
-
-	if def.phases then
-		rawPhases = def.phases
-	else
-		rawPhases = {
-			{
-				id = "active",
-				look = {
-					display = def.display,
-					name = def.name,
-					color = def.color,
-					icon = def.icon,
-					font = def.font,
-					decimals = def.decimals,
-				},
-				duration = { type = "effect", abilityIds = def.abilityIds, unit = unit },
-				enter = {
-					{ kind = "effect", abilityIds = def.abilityIds, result = "gained", unit = unit },
-				},
-			},
-		}
-		initial = nil -- starts idle, shows when the buff is gained
-	end
-
 	local phases, order = {}, {}
-	for _, p in ipairs(rawPhases) do
-		local look = p.look or {}
+	for _, p in ipairs(def.phases) do
+		local look = p.look
 		-- A phase's display combines the tracker's shared position with the
 		-- phase's own look (display kind, name, color, icon, font).
 		local displayDef = {
 			id = def.id .. "_" .. p.id,
-			display = look.display or "bar",
+			display = look.display,
 			name = look.name or def.name or def.id,
 			color = look.color,
 			icon = look.icon,
@@ -89,19 +53,18 @@ local function Normalize(def)
 			height = pos.height,
 			bgColor = look.bgColor,
 		}
-		local duration = p.duration or { type = "none" }
-		duration.unit = duration.unit or unit
 		phases[p.id] = {
 			id = p.id,
 			control = QAT.display.Create(displayDef),
-			duration = duration,
+			duration = p.duration,
 			onExpire = p.onExpire,
-			enter = p.enter or {},
+			enter = p.enter,
+			cues = p.cues,
 		}
 		table.insert(order, p.id)
 	end
 
-	return phases, order, initial
+	return phases, order, def.initial
 end
 
 --- Construct a tracker from an authored def.
@@ -110,6 +73,7 @@ end
 ---  AND-ed together to decide whether the tracker is loaded
 ---@return table tracker
 function QAT.Tracker.New(def, loadChain)
+	QAT.CanonicalizeDef(def) -- idempotent; guarantees canonical shape
 	local self = setmetatable({}, QAT.Tracker)
 	self.def = def
 	self.id = def.id
@@ -193,6 +157,7 @@ function QAT.Tracker:Enter(phaseId, timing)
 		self.expiresAt = nil
 	end
 
+	QAT.FireCues(phase.cues)
 	self:Render(now)
 end
 

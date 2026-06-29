@@ -9,7 +9,7 @@ QAT = {
 	-- Internal data-schema version. Independent of the ZO_SavedVars version
 	-- (which we keep pinned at 1 so it never wipes data); migrations below own
 	-- all schema evolution. See Core/Migrations.lua.
-	schemaVersion = 2,
+	schemaVersion = 3,
 	slash = "/qat",
 }
 
