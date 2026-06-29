@@ -104,8 +104,8 @@ e.g. `just link pts`, `just logs D pts`, `just errors pts`.
 | **M3** | ID-based load conditions (class/role/zone/skill/set incl. cross-bar logic) + runtime conditions | ✅ |
 | **M4** | Custom editor window (see [EDITOR.md](EDITOR.md)) | 🔨 in progress |
 | M4.1 | Resizable two-pane frame + tree + inspector shell | ✅ |
-| M4.2 | Phases tab: detail editor + state-machine graph | ⬜ |
-| M4.3 | Conditions + Load tabs | ⬜ |
+| M4.2 | Phases tab: phase editor + flow summary (drawn-arrow graph pending) | ✅ |
+| M4.3 | Conditions + Load tabs | ✅ |
 | M4.4 | Pickers (ability / set / color / media) | ⬜ |
 | M4.5 | Move mode (ghost previews, arming, off-screen clamping) | ⬜ |
 | M4.6 | Detach, drag-drop reorder, multi-select, alignment guides | ⬜ |
