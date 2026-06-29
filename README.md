@@ -81,7 +81,12 @@ shell profile:
 export ESO_USER_DIR="$HOME/…/Elder Scrolls Online"
 export ESO_LIVE_ADDONS_DIR="$ESO_USER_DIR/live/AddOns"
 export ESO_LIVE_SV_DIR="$ESO_USER_DIR/live/SavedVariables"
+export ESO_PTS_ADDONS_DIR="$ESO_USER_DIR/pts/AddOns"
+export ESO_PTS_SV_DIR="$ESO_USER_DIR/pts/SavedVariables"
 ```
+
+Each of those recipes takes an `env` argument selecting `live` (default) or `pts`,
+e.g. `just link pts`, `just logs D pts`, `just errors pts`.
 
 ## Commands
 
