@@ -180,6 +180,21 @@ function QAT.Editor_Tree_Build(pane)
 		row:SetHidden(true)
 	end
 	buildRows(QAT.editor.treeContent, QAT.sv.trackers, 0, QAT.editor.treeScroll or 0)
+
+	zo_callLater(function()
+		local r = rows["QAT_TreeRow_sample_major_resolve"]
+		if r then
+			QAT.log.editor:Debug(
+				"ROW RECT major_resolve w=%s h=%s hidden=%s mouse=%s",
+				tostring(r:GetWidth()),
+				tostring(r:GetHeight()),
+				tostring(r:IsHidden()),
+				tostring(r:IsMouseEnabled())
+			)
+		end
+		local c = QAT.editor.treeContent
+		QAT.log.editor:Debug("CONTENT RECT w=%s h=%s", tostring(c:GetWidth()), tostring(c:GetHeight()))
+	end, 800)
 end
 
 function QAT.Editor_Tree_Relayout()
