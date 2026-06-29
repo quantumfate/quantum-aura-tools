@@ -49,6 +49,7 @@ function QAT.widgets.TextButton(parent, name, text, onClick)
 	local b = QAT.widgets.Clickable(parent, name, IDLE_COLOR)
 	b.bg:SetEdgeColor(0, 0, 0, 1)
 	b.baseColor = IDLE_COLOR
+	b.onClick = onClick -- read at fire time, so a pooled button can be rebound
 	local label = QAT.widgets.Label(b, name .. "_Label", text)
 	label:SetAnchor(CENTER)
 	label:SetHorizontalAlignment(TEXT_ALIGN_CENTER)
@@ -66,9 +67,9 @@ function QAT.widgets.TextButton(parent, name, text, onClick)
 	b:SetHandler("OnMouseExit", function(self)
 		self.bg:SetCenterColor(unpack(self.baseColor))
 	end)
-	b:SetHandler("OnMouseUp", function(_, button, upInside)
-		if upInside and button == MOUSE_BUTTON_INDEX_LEFT and onClick then
-			onClick()
+	b:SetHandler("OnMouseUp", function(self, button, upInside)
+		if upInside and button == MOUSE_BUTTON_INDEX_LEFT and self.onClick then
+			self.onClick()
 		end
 	end)
 	return b
@@ -106,10 +107,13 @@ function QAT.widgets.SectionHeader(parent, name, text)
 end
 
 -- A single-line text entry (backdrop + ZO_DefaultEditForBackdrop edit box).
--- onChange(text) fires when the field commits (focus lost or Enter).
+-- The commit callback is read from frame.onChange at fire time (not captured), so
+-- a pooled box can be rebound to the current target on each render. Commits on
+-- focus loss or Enter.
 function QAT.widgets.EditBox(parent, name, width, height, initial, onChange)
 	local frame = QAT.widgets.Panel(parent, name, { 0.03, 0.04, 0.05, 1 })
 	frame:SetDimensions(width, height or 24)
+	frame.onChange = onChange
 	local edit = CreateControlFromVirtual(name .. "_Edit", frame, "ZO_DefaultEditForBackdrop")
 	edit:SetAnchor(TOPLEFT, frame, TOPLEFT, 4, 0)
 	edit:SetAnchor(BOTTOMRIGHT, frame, BOTTOMRIGHT, -4, 0)
@@ -118,8 +122,8 @@ function QAT.widgets.EditBox(parent, name, width, height, initial, onChange)
 		self:LoseFocus()
 	end)
 	edit:SetHandler("OnFocusLost", function(self)
-		if onChange then
-			onChange(self:GetText())
+		if frame.onChange then
+			frame.onChange(self:GetText())
 		end
 	end)
 	frame.edit = edit
@@ -133,57 +137,75 @@ function QAT.widgets.EditBox(parent, name, width, height, initial, onChange)
 end
 
 -- A dropdown (CT_CONTROL base). options = { { label=, value= }, ... }.
--- onSelect(value) fires on choice. The option list draws above siblings (DT_HIGH).
+-- The select callback is read from dd.onSelect at fire time (rebindable per
+-- render). Options can be replaced with dd:SetOptions(options). The option list
+-- draws above siblings (DT_HIGH).
 function QAT.widgets.Dropdown(parent, name, width, options, current, onSelect)
 	local dd = QAT.widgets.Clickable(parent, name, { 0.12, 0.13, 0.16, 1 })
 	dd.bg:SetEdgeColor(0, 0, 0, 1)
 	dd:SetDimensions(width, 24)
+	dd.onSelect = onSelect
+	dd.options = options or {}
 
 	local label = QAT.widgets.Label(dd, name .. "_Label", "")
 	label:SetAnchor(LEFT, dd, LEFT, 6, 0)
 	label:SetAnchor(RIGHT, dd, RIGHT, -6, 0)
 
 	local function labelFor(val)
-		for _, o in ipairs(options) do
+		for _, o in ipairs(dd.options) do
 			if o.value == val then
 				return o.label
 			end
 		end
-		return tostring(val)
+		return val == nil and "" or tostring(val)
 	end
-	dd.value = current
-	label:SetText(labelFor(current))
 
 	local list = WM:CreateControl(name .. "_List", dd, CT_CONTROL)
 	list:SetAnchor(TOPLEFT, dd, BOTTOMLEFT, 0, 2)
-	list:SetDimensions(width, #options * 24)
 	list:SetDrawTier(DT_HIGH)
 	list:SetHidden(true)
 	local listBg = QAT.widgets.Panel(list, name .. "_ListBg", { 0.10, 0.11, 0.13, 1 })
 	listBg:SetAnchorFill()
+	local optControls = {}
 
-	for i, o in ipairs(options) do
-		local opt = QAT.widgets.Clickable(list, name .. "_Opt" .. i, { 0, 0, 0, 0 })
-		opt:SetDimensions(width, 24)
-		opt:SetAnchor(TOPLEFT, list, TOPLEFT, 0, (i - 1) * 24)
-		local ol = QAT.widgets.Label(opt, name .. "_Opt" .. i .. "_L", o.label)
-		ol:SetAnchor(LEFT, opt, LEFT, 6, 0)
-		opt:SetHandler("OnMouseEnter", function(self)
-			self.bg:SetCenterColor(0.22, 0.25, 0.30, 1)
-		end)
-		opt:SetHandler("OnMouseExit", function(self)
-			self.bg:SetCenterColor(0, 0, 0, 0)
-		end)
-		opt:SetHandler("OnMouseUp", function(_, button, upInside)
-			if upInside and button == MOUSE_BUTTON_INDEX_LEFT then
-				dd.value = o.value
-				label:SetText(o.label)
-				list:SetHidden(true)
-				if onSelect then
-					onSelect(o.value)
-				end
+	-- (Re)build the option rows. Option controls are pooled by index since ESO
+	-- controls cannot be destroyed.
+	function dd:SetOptions(opts)
+		self.options = opts or {}
+		list:SetDimensions(width, math.max(1, #self.options) * 24)
+		for i, o in ipairs(self.options) do
+			local opt = optControls[i]
+			if not opt then
+				opt = QAT.widgets.Clickable(list, name .. "_Opt" .. i, { 0, 0, 0, 0 })
+				opt:SetDimensions(width, 24)
+				opt:SetAnchor(TOPLEFT, list, TOPLEFT, 0, (i - 1) * 24)
+				opt.label = QAT.widgets.Label(opt, name .. "_Opt" .. i .. "_L", "")
+				opt.label:SetAnchor(LEFT, opt, LEFT, 6, 0)
+				opt:SetHandler("OnMouseEnter", function(self2)
+					self2.bg:SetCenterColor(0.22, 0.25, 0.30, 1)
+				end)
+				opt:SetHandler("OnMouseExit", function(self2)
+					self2.bg:SetCenterColor(0, 0, 0, 0)
+				end)
+				opt:SetHandler("OnMouseUp", function(self2, button, upInside)
+					if upInside and button == MOUSE_BUTTON_INDEX_LEFT then
+						dd.value = self2.optValue
+						label:SetText(labelFor(self2.optValue))
+						list:SetHidden(true)
+						if dd.onSelect then
+							dd.onSelect(self2.optValue)
+						end
+					end
+				end)
+				optControls[i] = opt
 			end
-		end)
+			opt.optValue = o.value
+			opt.label:SetText(o.label)
+			opt:SetHidden(false)
+		end
+		for i = #self.options + 1, #optControls do
+			optControls[i]:SetHidden(true)
+		end
 	end
 
 	dd:SetHandler("OnMouseUp", function(_, button, upInside)
@@ -195,14 +217,19 @@ function QAT.widgets.Dropdown(parent, name, width, options, current, onSelect)
 		dd.value = v
 		label:SetText(labelFor(v))
 	end
+
+	dd:SetOptions(dd.options)
+	dd:SetValue(current)
 	return dd
 end
 
--- A color swatch button that opens the native color picker. onChange({r,g,b,a}).
+-- A color swatch button that opens the native color picker. The change callback
+-- is read from sw.onChange at fire time (rebindable per render). onChange({r,g,b,a}).
 function QAT.widgets.ColorSwatch(parent, name, size, color, onChange)
 	local sw = QAT.widgets.Clickable(parent, name)
 	sw:SetDimensions(size, size)
 	sw.color = color or { 1, 1, 1, 1 }
+	sw.onChange = onChange
 	sw.bg:SetCenterColor(unpack(sw.color))
 	sw.bg:SetEdgeColor(0, 0, 0, 1)
 	sw:SetHandler("OnMouseUp", function(_, button, upInside)
@@ -211,8 +238,8 @@ function QAT.widgets.ColorSwatch(parent, name, size, color, onChange)
 			COLOR_PICKER:Show(function(r, g, b, a)
 				sw.color = { r, g, b, a }
 				sw.bg:SetCenterColor(r, g, b, a)
-				if onChange then
-					onChange(sw.color)
+				if sw.onChange then
+					sw.onChange(sw.color)
 				end
 			end, c[1], c[2], c[3], c[4] or 1)
 		end

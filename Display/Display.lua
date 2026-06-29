@@ -1,8 +1,12 @@
 --- Display control factory.
 ---
---- Builds a screen-anchored control of one display kind ("icon", "bar", "text")
---- for a phase. The runtime feeds the returned control (remaining, duration,
---- stacks) each render tick via :SetState.
+--- Builds (or reuses) a screen-anchored control for a phase. The runtime feeds the
+--- returned control (remaining, duration, stacks) each render tick via :SetState.
+---
+--- Controls are reused by name across rebuilds (ESO controls cannot be destroyed),
+--- so live editing can rebuild a tracker without leaking or name-colliding. Every
+--- control owns all sub-elements (background, icon, bar, label); the display kind
+--- only decides which are shown.
 
 QAT.display = {}
 
@@ -28,29 +32,25 @@ local function value(def, key)
 	return v
 end
 
---- Build a display control for a phase.
+-- Return an existing control by name, or create it via factory. ESO errors when
+-- creating a control whose name already exists, so reuse must be explicit.
+local function reuse(name, factory)
+	return WM:GetControlByName(name, "") or factory()
+end
+
+--- Build or reuse a display control for a phase.
 ---@param def table display def: display kind, name, color, icon, font, decimals,
 ---  and position (point, x, y, width, height)
 ---@return table control exposing :SetState(active, remaining, duration, stacks),
 ---  :SetHidden(hidden) and :SetBarColor(rgba)
 function QAT.display.Create(def)
 	local kind = def.display or "bar"
-
-	-- A "none" phase has no on-screen element (cue-only). Return a no-op control
-	-- so the tracker state machine can drive it uniformly.
-	if kind == "none" then
-		return {
-			kind = "none",
-			SetHidden = function() end,
-			SetBarColor = function() end,
-			SetState = function() end,
-		}
-	end
-
 	local name = "QAT_Tracker_" .. tostring(def.id)
 	local w, h = value(def, "width"), value(def, "height")
 
-	local tlw = WM:CreateTopLevelWindow(name)
+	local tlw = reuse(name, function()
+		return WM:CreateTopLevelWindow(name)
+	end)
 	tlw:SetDimensions(w, h)
 	tlw:SetMovable(true)
 	tlw:SetMouseEnabled(true)
@@ -59,42 +59,47 @@ function QAT.display.Create(def)
 	tlw:ClearAnchors()
 	tlw:SetAnchor(value(def, "point"), GuiRoot, value(def, "point"), value(def, "x"), value(def, "y"))
 
-	local bg = WM:CreateControl(name .. "_Bg", tlw, CT_BACKDROP)
+	local bg = reuse(name .. "_Bg", function()
+		return WM:CreateControl(name .. "_Bg", tlw, CT_BACKDROP)
+	end)
 	bg:SetAnchorFill()
 	bg:SetCenterColor(unpack(value(def, "bgColor")))
 	bg:SetEdgeColor(0, 0, 0, 1)
 	bg:SetEdgeTexture("", 1, 1, 1)
 
-	local icon
-	if kind == "icon" or def.icon then
-		icon = WM:CreateControl(name .. "_Icon", tlw, CT_TEXTURE)
-		icon:SetDimensions(h, h)
-		icon:SetAnchor(LEFT, tlw, LEFT, 0, 0)
-		if def.icon then
-			icon:SetTexture(def.icon)
-		end
-	end
+	local showIcon = (kind == "icon") or (def.icon ~= nil)
+	local icon = reuse(name .. "_Icon", function()
+		return WM:CreateControl(name .. "_Icon", tlw, CT_TEXTURE)
+	end)
+	icon:SetDimensions(h, h)
+	icon:ClearAnchors()
+	icon:SetAnchor(LEFT, tlw, LEFT, 0, 0)
+	icon:SetTexture(def.icon or "/esoui/art/icons/icon_missing.dds")
+	icon:SetHidden(not showIcon)
 
-	local bar
-	if kind == "bar" then
-		bar = WM:CreateControl(name .. "_Bar", tlw, CT_STATUSBAR)
-		bar:SetAnchorFill()
-		bar:SetColor(unpack(value(def, "color")))
-		bar:SetMinMax(0, 1)
-		bar:SetValue(1)
-	end
+	local bar = reuse(name .. "_Bar", function()
+		return WM:CreateControl(name .. "_Bar", tlw, CT_STATUSBAR)
+	end)
+	bar:SetAnchorFill()
+	bar:SetColor(unpack(value(def, "color")))
+	bar:SetMinMax(0, 1)
+	bar:SetValue(1)
+	bar:SetHidden(kind ~= "bar")
 
-	local label = WM:CreateControl(name .. "_Label", tlw, CT_LABEL)
+	local label = reuse(name .. "_Label", function()
+		return WM:CreateControl(name .. "_Label", tlw, CT_LABEL)
+	end)
 	label:SetFont(value(def, "font"))
-	label:SetAnchor(LEFT, icon or tlw, icon and RIGHT or LEFT, 6, 0)
+	label:ClearAnchors()
+	label:SetAnchor(LEFT, showIcon and icon or tlw, showIcon and RIGHT or LEFT, 6, 0)
 	label:SetVerticalAlignment(TEXT_ALIGN_CENTER)
 	label:SetColor(1, 1, 1, 1)
 
 	local control = {
 		tlw = tlw,
 		kind = kind,
-		bar = bar,
-		icon = icon,
+		bar = (kind == "bar") and bar or nil,
+		icon = showIcon and icon or nil,
 		label = label,
 		name = def.name or tostring(def.id),
 		decimals = def.decimals or 1,

@@ -57,92 +57,102 @@ local function render(container, def)
 
 	for i, cond in ipairs(def.runtime) do
 		local x = PAD
+		local idx = i
 
 		local statDD = get("stat" .. i, function()
-			return QAT.widgets.Dropdown(container, "QAT_Cond_Stat" .. i, 110, STAT_OPTS, "remaining", function(v)
-				cond.stat = v
-				commit(def)
-			end)
+			return QAT.widgets.Dropdown(container, "QAT_Cond_Stat" .. i, 110, STAT_OPTS, "remaining")
 		end)
+		statDD.onSelect = function(v)
+			cond.stat = v
+			commit(def)
+		end
 		statDD:SetValue(cond.stat or "remaining")
 		statDD:ClearAnchors()
 		statDD:SetAnchor(TOPLEFT, container, TOPLEFT, x, y)
 		x = x + 116
 
 		local opDD = get("op" .. i, function()
-			return QAT.widgets.Dropdown(container, "QAT_Cond_Op" .. i, 60, OP_OPTS, "<", function(v)
-				cond.op = v
-				commit(def)
-			end)
+			return QAT.widgets.Dropdown(container, "QAT_Cond_Op" .. i, 60, OP_OPTS, "<")
 		end)
+		opDD.onSelect = function(v)
+			cond.op = v
+			commit(def)
+		end
 		opDD:SetValue(cond.op or "<")
 		opDD:ClearAnchors()
 		opDD:SetAnchor(TOPLEFT, container, TOPLEFT, x, y)
 		x = x + 66
 
 		local valBox = get("val" .. i, function()
-			return QAT.widgets.EditBox(container, "QAT_Cond_Val" .. i, 70, ROW_H, "", function(text)
-				cond.value = tonumber(text) or 0
-				commit(def)
-			end)
+			return QAT.widgets.EditBox(container, "QAT_Cond_Val" .. i, 70, ROW_H)
 		end)
+		valBox.onChange = function(text)
+			cond.value = tonumber(text) or 0
+			commit(def)
+		end
 		valBox:SetText(tostring(cond.value or 0))
 		valBox:ClearAnchors()
 		valBox:SetAnchor(TOPLEFT, container, TOPLEFT, x, y)
 		x = x + 80
 
 		local actDD = get("act" .. i, function()
-			return QAT.widgets.Dropdown(container, "QAT_Cond_Act" .. i, 100, ACTION_OPTS, "color", function(v)
-				cond.action = v
-				commit(def)
-				render(container, def)
-			end)
+			return QAT.widgets.Dropdown(container, "QAT_Cond_Act" .. i, 100, ACTION_OPTS, "color")
 		end)
+		actDD.onSelect = function(v)
+			cond.action = v
+			commit(def)
+			render(container, def)
+		end
 		actDD:SetValue(cond.action or "color")
 		actDD:ClearAnchors()
 		actDD:SetAnchor(TOPLEFT, container, TOPLEFT, x, y)
 		x = x + 106
 
+		-- The color swatch is always pooled (so it can be reused), shown only for
+		-- the "color" action.
+		local sw = get("col" .. i, function()
+			return QAT.widgets.ColorSwatch(container, "QAT_Cond_Col" .. i, ROW_H, { 1, 0, 0, 1 })
+		end)
 		if cond.action == "color" then
-			local sw = get("col" .. i, function()
-				return QAT.widgets.ColorSwatch(container, "QAT_Cond_Col" .. i, ROW_H, { 1, 0, 0, 1 }, function(c)
-					cond.color = c
-					commit(def)
-				end)
-			end)
+			sw.onChange = function(c)
+				cond.color = c
+				commit(def)
+			end
 			sw:SetColor(cond.color or { 1, 0, 0, 1 })
+			sw:SetHidden(false)
 			sw:ClearAnchors()
 			sw:SetAnchor(TOPLEFT, container, TOPLEFT, x, y)
 			x = x + ROW_H + 6
+		else
+			sw:SetHidden(true)
 		end
 
 		local del = get("del" .. i, function()
-			return QAT.widgets.TextButton(container, "QAT_Cond_Del" .. i, "X", function()
-				table.remove(def.runtime, i)
-				commit(def)
-				render(container, def)
-			end)
+			return QAT.widgets.TextButton(container, "QAT_Cond_Del" .. i, "X", nil)
 		end)
 		del:SetDimensions(ROW_H, ROW_H)
 		del:ClearAnchors()
 		del:SetAnchor(TOPLEFT, container, TOPLEFT, x, y)
+		del.onClick = function()
+			table.remove(def.runtime, idx)
+			commit(def)
+			render(container, def)
+		end
 
 		y = y + ROW_H + GAP
 	end
 
 	local addBtn = get("add", function()
-		return QAT.widgets.TextButton(container, "QAT_Cond_Add", "+ Condition", function()
-			table.insert(
-				def.runtime,
-				{ stat = "remaining", op = "<", value = 3, action = "color", color = { 1, 0, 0, 1 } }
-			)
-			commit(def)
-			render(container, def)
-		end)
+		return QAT.widgets.TextButton(container, "QAT_Cond_Add", "+ Condition", nil)
 	end)
 	addBtn:SetDimensions(110, ROW_H)
 	addBtn:ClearAnchors()
 	addBtn:SetAnchor(TOPLEFT, container, TOPLEFT, PAD, y + GAP)
+	addBtn.onClick = function()
+		table.insert(def.runtime, { stat = "remaining", op = "<", value = 3, action = "color", color = { 1, 0, 0, 1 } })
+		commit(def)
+		render(container, def)
+	end
 
 	QAT.widgets.PoolEnd(pool)
 end

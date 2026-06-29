@@ -155,3 +155,53 @@ function QAT.Runtime_Init()
 		NonContiguousCount(QAT.runtime.byAbilityId)
 	)
 end
+
+-- Rebuild all live trackers from the current saved defs. Used when the editor
+-- changes a def, so the on-screen trackers update without a reload. Display
+-- controls are reused by name (see Display.Create), so this neither leaks nor
+-- collides; it only swaps the in-memory Tracker objects and event filters.
+local function rebuildAll()
+	-- Hide every current phase control so removed trackers/phases don't linger.
+	for _, tracker in ipairs(QAT.runtime.list) do
+		for _, phase in pairs(tracker.phases) do
+			phase.control:SetState(false)
+		end
+	end
+
+	-- Drop the per-ability effect subscriptions before rebuilding the index.
+	for abilityId in pairs(QAT.runtime.byAbilityId) do
+		EVENT_MANAGER:UnregisterForEvent(QAT.name .. "_eff_" .. abilityId, EVENT_EFFECT_CHANGED)
+	end
+
+	QAT.runtime.trackers = {}
+	QAT.runtime.list = {}
+	QAT.runtime.byAbilityId = {}
+
+	BuildTrackers(QAT.sv.trackers, {})
+	RegisterEffectFilters()
+	for _, tracker in ipairs(QAT.runtime.list) do
+		tracker:Start()
+	end
+	QAT.log.runtime:Debug("runtime rebuilt: %d tracker(s)", #QAT.runtime.list)
+end
+
+-- Coalesce rapid edits (e.g. typing) into one rebuild.
+local rebuildPending = false
+function QAT.Runtime_RequestRebuild()
+	if rebuildPending then
+		return
+	end
+	rebuildPending = true
+	zo_callLater(function()
+		rebuildPending = false
+		QAT.Safe("runtime rebuild", rebuildAll)
+	end, 80)
+end
+
+-- A def changed in the editor: rebuild the affected runtime. (A full rebuild is
+-- simple and cheap at these counts; per-tracker rebuild can come later.)
+CALLBACK_MANAGER:RegisterCallback("QAT_TrackerChanged", function()
+	if QAT.runtime then
+		QAT.Runtime_RequestRebuild()
+	end
+end)

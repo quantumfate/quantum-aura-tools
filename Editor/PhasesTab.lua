@@ -115,39 +115,39 @@ local function render(container, def)
 	-- Phase chips.
 	local x = PAD
 	for i, p in ipairs(def.phases) do
+		local pid = p.id
 		local chip = get("chip" .. i, function()
 			return QAT.widgets.TextButton(container, "QAT_Ph_Chip" .. i, "", nil)
 		end)
-		chip:SetSelected(p.id == QAT.editor.selectedPhaseId)
-		chip.label:SetText(p.id)
+		chip:SetSelected(pid == QAT.editor.selectedPhaseId)
+		chip.label:SetText(pid)
 		chip:SetDimensions(96, ROW_H)
 		chip:ClearAnchors()
 		chip:SetAnchor(TOPLEFT, container, TOPLEFT, x, y)
-		chip:SetHandler("OnMouseUp", function(_, button, upInside)
-			if upInside and button == MOUSE_BUTTON_INDEX_LEFT then
-				QAT.editor.selectedPhaseId = p.id
-				render(container, def)
-			end
-		end)
+		chip.onClick = function()
+			QAT.editor.selectedPhaseId = pid
+			render(container, def)
+		end
 		x = x + 96 + 4
 	end
 
-	-- Add / delete / set-initial controls.
+	-- Add phase.
 	local addBtn = get("add", function()
-		return QAT.widgets.TextButton(container, "QAT_Ph_Add", "+ Phase", function()
-			local n = #def.phases + 1
-			table.insert(
-				def.phases,
-				{ id = "phase" .. n, look = { display = "bar" }, duration = { type = "none" }, enter = {} }
-			)
-			QAT.editor.selectedPhaseId = "phase" .. n
-			commit(def)
-			render(container, def)
-		end)
+		return QAT.widgets.TextButton(container, "QAT_Ph_Add", "+ Phase", nil)
 	end)
 	addBtn:SetDimensions(80, ROW_H)
 	addBtn:ClearAnchors()
 	addBtn:SetAnchor(TOPLEFT, container, TOPLEFT, x, y)
+	addBtn.onClick = function()
+		local n = #def.phases + 1
+		table.insert(
+			def.phases,
+			{ id = "phase" .. n, look = { display = "bar" }, duration = { type = "none" }, enter = {} }
+		)
+		QAT.editor.selectedPhaseId = "phase" .. n
+		commit(def)
+		render(container, def)
+	end
 	y = y + ROW_H + GAP
 
 	-- Detail editor for the selected phase.
@@ -156,6 +156,8 @@ local function render(container, def)
 		QAT.widgets.PoolEnd(pool)
 		return
 	end
+	local trig = phase.enter[1] or { kind = "effect", abilityIds = {}, result = "gained" }
+	phase.enter[1] = trig
 
 	local function fieldLabel(key, text, yy)
 		local l = get(key, function()
@@ -172,18 +174,19 @@ local function render(container, def)
 	-- Phase id.
 	fieldLabel("lId", "Phase id", y)
 	local idBox = get("idBox", function()
-		return QAT.widgets.EditBox(container, "QAT_Ph_IdBox", 180, ROW_H, "", function(text)
-			text = zo_strtrim(text)
-			if text ~= "" then
-				phase.id = text
-				if def.initial == QAT.editor.selectedPhaseId then
-					def.initial = text
-				end
-				QAT.editor.selectedPhaseId = text
-				commit(def)
-			end
-		end)
+		return QAT.widgets.EditBox(container, "QAT_Ph_IdBox", 180, ROW_H)
 	end)
+	idBox.onChange = function(text)
+		text = zo_strtrim(text)
+		if text ~= "" then
+			phase.id = text
+			if def.initial == QAT.editor.selectedPhaseId then
+				def.initial = text
+			end
+			QAT.editor.selectedPhaseId = text
+			commit(def)
+		end
+	end
 	idBox:SetText(phase.id)
 	idBox:ClearAnchors()
 	idBox:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
@@ -192,11 +195,12 @@ local function render(container, def)
 	-- Display kind.
 	fieldLabel("lDisp", "Display", y)
 	local dispDD = get("dispDD", function()
-		return QAT.widgets.Dropdown(container, "QAT_Ph_Disp", 180, DISPLAY_OPTS, "bar", function(v)
-			phase.look.display = v
-			commit(def)
-		end)
+		return QAT.widgets.Dropdown(container, "QAT_Ph_Disp", 180, DISPLAY_OPTS, "bar")
 	end)
+	dispDD.onSelect = function(v)
+		phase.look.display = v
+		commit(def)
+	end
 	dispDD:SetValue(phase.look.display or "bar")
 	dispDD:ClearAnchors()
 	dispDD:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
@@ -205,11 +209,12 @@ local function render(container, def)
 	-- Display name.
 	fieldLabel("lName", "Label text", y)
 	local nameBox = get("nameBox", function()
-		return QAT.widgets.EditBox(container, "QAT_Ph_NameBox", 220, ROW_H, "", function(text)
-			phase.look.name = text
-			commit(def)
-		end)
+		return QAT.widgets.EditBox(container, "QAT_Ph_NameBox", 220, ROW_H)
 	end)
+	nameBox.onChange = function(text)
+		phase.look.name = text
+		commit(def)
+	end
 	nameBox:SetText(phase.look.name or "")
 	nameBox:ClearAnchors()
 	nameBox:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
@@ -218,11 +223,12 @@ local function render(container, def)
 	-- Color.
 	fieldLabel("lColor", "Color", y)
 	local colorSw = get("colorSw", function()
-		return QAT.widgets.ColorSwatch(container, "QAT_Ph_Color", ROW_H, { 1, 1, 1, 1 }, function(c)
-			phase.look.color = c
-			commit(def)
-		end)
+		return QAT.widgets.ColorSwatch(container, "QAT_Ph_Color", ROW_H, { 1, 1, 1, 1 })
 	end)
+	colorSw.onChange = function(c)
+		phase.look.color = c
+		commit(def)
+	end
 	colorSw:SetColor(phase.look.color or { 1, 1, 1, 1 })
 	colorSw:ClearAnchors()
 	colorSw:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
@@ -231,12 +237,13 @@ local function render(container, def)
 	-- Duration type.
 	fieldLabel("lDur", "Duration", y)
 	local durDD = get("durDD", function()
-		return QAT.widgets.Dropdown(container, "QAT_Ph_Dur", 180, DURATION_OPTS, "none", function(v)
-			phase.duration.type = v
-			commit(def)
-			render(container, def)
-		end)
+		return QAT.widgets.Dropdown(container, "QAT_Ph_Dur", 180, DURATION_OPTS, "none")
 	end)
+	durDD.onSelect = function(v)
+		phase.duration.type = v
+		commit(def)
+		render(container, def)
+	end
 	durDD:SetValue(phase.duration.type or "none")
 	durDD:ClearAnchors()
 	durDD:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
@@ -246,11 +253,12 @@ local function render(container, def)
 	if phase.duration.type == "fixed" then
 		fieldLabel("lSecs", "Seconds", y)
 		local secsBox = get("secsBox", function()
-			return QAT.widgets.EditBox(container, "QAT_Ph_Secs", 100, ROW_H, "", function(text)
-				phase.duration.seconds = tonumber(text) or 0
-				commit(def)
-			end)
+			return QAT.widgets.EditBox(container, "QAT_Ph_Secs", 100, ROW_H)
 		end)
+		secsBox.onChange = function(text)
+			phase.duration.seconds = tonumber(text) or 0
+			commit(def)
+		end
 		secsBox:SetText(tostring(phase.duration.seconds or 0))
 		secsBox:ClearAnchors()
 		secsBox:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
@@ -258,55 +266,53 @@ local function render(container, def)
 	elseif phase.duration.type == "effect" then
 		fieldLabel("lDurIds", "Effect ids", y)
 		local durIdBox = get("durIdBox", function()
-			return QAT.widgets.EditBox(container, "QAT_Ph_DurIds", 220, ROW_H, "", function(text)
-				phase.duration.abilityIds = textToIds(text)
-				commit(def)
-			end)
+			return QAT.widgets.EditBox(container, "QAT_Ph_DurIds", 220, ROW_H)
 		end)
+		durIdBox.onChange = function(text)
+			phase.duration.abilityIds = textToIds(text)
+			commit(def)
+		end
 		durIdBox:SetText(idsToText(phase.duration.abilityIds))
 		durIdBox:ClearAnchors()
 		durIdBox:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
 		y = y + ROW_H + GAP
 	end
 
-	-- Enter trigger (single, common case): result + ability ids + from phase.
-	local trig = phase.enter[1]
-	if not trig then
-		trig = { kind = "effect", abilityIds = {}, result = "gained" }
-	end
-	phase.enter[1] = trig
-
+	-- Enter trigger (single, common case): result + ability ids.
 	fieldLabel("lEnter", "Enter on", y)
 	local resDD = get("resDD", function()
-		return QAT.widgets.Dropdown(container, "QAT_Ph_Res", 110, RESULT_OPTS, "gained", function(v)
-			trig.result = v
-			commit(def)
-		end)
+		return QAT.widgets.Dropdown(container, "QAT_Ph_Res", 110, RESULT_OPTS, "gained")
 	end)
+	resDD.onSelect = function(v)
+		trig.result = v
+		commit(def)
+	end
 	resDD:SetValue(trig.result or "gained")
 	resDD:ClearAnchors()
 	resDD:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
 
 	local enterIdBox = get("enterIdBox", function()
-		return QAT.widgets.EditBox(container, "QAT_Ph_EnterIds", 200, ROW_H, "", function(text)
-			trig.abilityIds = textToIds(text)
-			commit(def)
-		end)
+		return QAT.widgets.EditBox(container, "QAT_Ph_EnterIds", 200, ROW_H)
 	end)
+	enterIdBox.onChange = function(text)
+		trig.abilityIds = textToIds(text)
+		commit(def)
+	end
 	enterIdBox:SetText(idsToText(trig.abilityIds))
 	enterIdBox:ClearAnchors()
 	enterIdBox:SetAnchor(TOPLEFT, container, TOPLEFT, LX + 120, y)
 	y = y + ROW_H + GAP
 
-	-- On-expire transition.
+	-- On-expire transition. Options are rebuilt each render (the phase list changes).
 	fieldLabel("lExpire", "On expire", y)
 	local expireDD = get("expireDD", function()
-		return QAT.widgets.Dropdown(container, "QAT_Ph_Expire", 180, phaseOptions(def, true), nil, function(v)
-			phase.onExpire = v
-			commit(def)
-		end)
+		return QAT.widgets.Dropdown(container, "QAT_Ph_Expire", 180, {}, nil)
 	end)
-	-- Rebuild options each render (phase list can change); simplest is a fresh value set.
+	expireDD:SetOptions(phaseOptions(def, true))
+	expireDD.onSelect = function(v)
+		phase.onExpire = v
+		commit(def)
+	end
 	expireDD:SetValue(phase.onExpire)
 	expireDD:ClearAnchors()
 	expireDD:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
@@ -314,35 +320,37 @@ local function render(container, def)
 
 	-- Set-initial / delete buttons for the selected phase.
 	local initBtn = get("initBtn", function()
-		return QAT.widgets.TextButton(container, "QAT_Ph_Init", "Set as initial", function()
-			def.initial = phase.id
-			commit(def)
-			render(container, def)
-		end)
+		return QAT.widgets.TextButton(container, "QAT_Ph_Init", "Set as initial", nil)
 	end)
 	initBtn:SetDimensions(120, ROW_H)
 	initBtn:ClearAnchors()
 	initBtn:SetAnchor(TOPLEFT, container, TOPLEFT, PAD, y)
+	initBtn.onClick = function()
+		def.initial = phase.id
+		commit(def)
+		render(container, def)
+	end
 
 	local delBtn = get("delBtn", function()
-		return QAT.widgets.TextButton(container, "QAT_Ph_Del", "Delete phase", function()
-			if #def.phases <= 1 then
-				return
-			end
-			for i, p in ipairs(def.phases) do
-				if p.id == phase.id then
-					table.remove(def.phases, i)
-					break
-				end
-			end
-			QAT.editor.selectedPhaseId = def.phases[1].id
-			commit(def)
-			render(container, def)
-		end)
+		return QAT.widgets.TextButton(container, "QAT_Ph_Del", "Delete phase", nil)
 	end)
 	delBtn:SetDimensions(120, ROW_H)
 	delBtn:ClearAnchors()
 	delBtn:SetAnchor(TOPLEFT, container, TOPLEFT, PAD + 130, y)
+	delBtn.onClick = function()
+		if #def.phases <= 1 then
+			return
+		end
+		for i, p in ipairs(def.phases) do
+			if p.id == phase.id then
+				table.remove(def.phases, i)
+				break
+			end
+		end
+		QAT.editor.selectedPhaseId = def.phases[1].id
+		commit(def)
+		render(container, def)
+	end
 
 	QAT.widgets.PoolEnd(pool)
 end
