@@ -131,29 +131,41 @@ local function makeRow(parent, def, depth, y)
 		end
 	end)
 
-	-- Left glyph: a folder's expand arrow (toggles collapse) or a tracker's icon.
-	local icon = row.icon
-	if not icon then
-		icon = WM:CreateControl(name .. "_Icon", row, CT_TEXTURE)
-		row.icon = icon
+	-- Left glyph: a folder's expand arrow (clickable, toggles collapse) or a
+	-- tracker's icon (non-interactive; clicks fall through to the row).
+	local arrow = row.arrow
+	if not arrow then
+		arrow = QAT.widgets.IconButton(row, name .. "_Arrow", nil, ICON_SIZE)
+		row.arrow = arrow
 	end
-	icon:SetDimensions(ICON_SIZE, ICON_SIZE)
-	icon:ClearAnchors()
-	icon:SetAnchor(LEFT, row, LEFT, 6 + depth * INDENT, 0)
+	arrow:ClearAnchors()
+	arrow:SetAnchor(LEFT, row, LEFT, 6 + depth * INDENT, 0)
+
+	local iconTex = row.iconTex
+	if not iconTex then
+		iconTex = WM:CreateControl(name .. "_Icon", row, CT_TEXTURE)
+		row.iconTex = iconTex
+	end
+	iconTex:SetDimensions(ICON_SIZE, ICON_SIZE)
+	iconTex:ClearAnchors()
+	iconTex:SetAnchor(LEFT, row, LEFT, 6 + depth * INDENT, 0)
+
+	local leftGlyph
 	if isFolder then
-		icon:SetTexture(QAT.editor.collapsed[def.id] and ARROW_CLOSED or ARROW_OPEN)
-		icon:SetColor(1, 1, 1, 1)
-		icon:SetMouseEnabled(true)
-		icon:SetHandler("OnMouseUp", function(_, button, upInside)
-			if upInside and button == MOUSE_BUTTON_INDEX_LEFT then
-				QAT.editor.collapsed[def.id] = not QAT.editor.collapsed[def.id]
-				QAT.Editor_Tree_Build()
-			end
-		end)
+		arrow:SetHidden(false)
+		arrow:SetTexture(QAT.editor.collapsed[def.id] and ARROW_CLOSED or ARROW_OPEN)
+		arrow.onClick = function()
+			QAT.editor.collapsed[def.id] = not QAT.editor.collapsed[def.id]
+			QAT.Editor_Tree_Build()
+		end
+		iconTex:SetHidden(true)
+		leftGlyph = arrow
 	else
-		icon:SetTexture(trackerIcon(def))
-		icon:SetColor(1, 1, 1, enabled and 1 or 0.35)
-		icon:SetMouseEnabled(false)
+		arrow:SetHidden(true)
+		iconTex:SetHidden(false)
+		iconTex:SetTexture(trackerIcon(def))
+		iconTex:SetColor(1, 1, 1, enabled and 1 or 0.35)
+		leftGlyph = iconTex
 	end
 
 	-- Name (dimmed when disabled).
@@ -162,27 +174,23 @@ local function makeRow(parent, def, depth, y)
 	label:SetText(def.name or def.id)
 	label:SetColor(0.9, 0.92, 0.95, enabled and 1 or 0.4)
 	label:ClearAnchors()
-	label:SetAnchor(LEFT, icon, RIGHT, 6, 0)
+	label:SetAnchor(LEFT, leftGlyph, RIGHT, 6, 0)
 	label:SetAnchor(RIGHT, row, RIGHT, -28, 0)
 
 	-- Enable checkbox on the right edge.
-	local check = row.checkTex
+	local check = row.check
 	if not check then
-		check = WM:CreateControl(name .. "_Check", row, CT_TEXTURE)
-		check:SetMouseEnabled(true)
-		row.checkTex = check
+		check = QAT.widgets.IconButton(row, name .. "_Check", nil, ICON_SIZE)
+		row.check = check
 	end
-	check:SetDimensions(ICON_SIZE, ICON_SIZE)
 	check:ClearAnchors()
 	check:SetAnchor(RIGHT, row, RIGHT, -6, 0)
 	check:SetTexture(enabled and CHECK_ON or CHECK_OFF)
-	check:SetHandler("OnMouseUp", function(_, button, upInside)
-		if upInside and button == MOUSE_BUTTON_INDEX_LEFT then
-			def.enabled = not (def.enabled ~= false)
-			QAT.widgets.NotifyTrackerChanged(def.id)
-			QAT.Editor_Tree_Build()
-		end
-	end)
+	check.onClick = function()
+		def.enabled = not (def.enabled ~= false)
+		QAT.widgets.NotifyTrackerChanged(def.id)
+		QAT.Editor_Tree_Build()
+	end
 
 	return ROW_H
 end

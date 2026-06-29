@@ -99,6 +99,34 @@ function QAT.widgets.Checkbox(parent, name, checked, onToggle)
 	return box
 end
 
+-- A clickable icon: a mouse-enabled CT_CONTROL with a CT_TEXTURE child (a bare
+-- texture, like a bare backdrop, does not reliably receive mouse input). The
+-- click callback is read from button.onClick at fire time (rebindable per render).
+function QAT.widgets.IconButton(parent, name, texture, size, onClick)
+	local b = WM:CreateControl(name, parent, CT_CONTROL)
+	b:SetMouseEnabled(true)
+	b:SetDimensions(size, size)
+	b.onClick = onClick
+	local tex = WM:CreateControl(name .. "_Tex", b, CT_TEXTURE)
+	tex:SetAnchorFill()
+	if texture then
+		tex:SetTexture(texture)
+	end
+	b.tex = tex
+	function b:SetTexture(t)
+		tex:SetTexture(t)
+	end
+	function b:SetTextureColor(...)
+		tex:SetColor(...)
+	end
+	b:SetHandler("OnMouseUp", function(self, button, upInside)
+		if upInside and button == MOUSE_BUTTON_INDEX_LEFT and self.onClick then
+			self.onClick()
+		end
+	end)
+	return b
+end
+
 -- A bold section header label.
 function QAT.widgets.SectionHeader(parent, name, text)
 	local l = QAT.widgets.Label(parent, name, text, "$(BOLD_FONT)|18|soft-shadow-thin")

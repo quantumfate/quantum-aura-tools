@@ -70,7 +70,10 @@ end
 -- (no display); their load defs cascade to children via the loadChain.
 local function BuildTrackers(defs, parentLoads)
 	for _, def in ipairs(defs or {}) do
-		if def.kind == "folder" then
+		if def.enabled == false then
+			-- A disabled tracker or folder is skipped entirely (a disabled folder
+			-- disables its whole subtree). Its controls were hidden before rebuild.
+		elseif def.kind == "folder" then
 			local childLoads = QAT.util.DeepCopy(parentLoads)
 			if def.load then
 				table.insert(childLoads, def.load)

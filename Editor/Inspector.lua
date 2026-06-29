@@ -32,20 +32,21 @@ function QAT.Editor_Inspector_Build(pane)
 	header:SetHeight(QAT.editor.HEADER_H)
 	insp.header = header
 
-	local nameLabel = QAT.widgets.Label(header, "QAT_Insp_Name", "(no tracker selected)")
-	nameLabel:SetAnchor(TOPLEFT, header, TOPLEFT, 10, 6)
-	insp.nameLabel = nameLabel
+	-- Editable tracker name (organizational; distinct from a phase's drawn label).
+	local nameLabelCaption = QAT.widgets.Label(header, "QAT_Insp_NameCaption", "Name")
+	nameLabelCaption:SetAnchor(TOPLEFT, header, TOPLEFT, 10, 6)
+	insp.nameCaption = nameLabelCaption
 
-	insp.enable = QAT.widgets.TextButton(header, "QAT_Insp_Enable", "Enabled", function()
+	insp.nameBox = QAT.widgets.EditBox(header, "QAT_Insp_NameBox", 220, 22)
+	insp.nameBox:SetAnchor(LEFT, nameLabelCaption, RIGHT, 8, 0)
+	insp.nameBox.onChange = function(text)
 		local def = insp.currentId and findDef(QAT.sv.trackers, insp.currentId)
-		if def then
-			def.enabled = not (def.enabled ~= false)
+		text = zo_strtrim(text or "")
+		if def and text ~= "" then
+			def.name = text
 			QAT.widgets.NotifyTrackerChanged(def.id)
-			QAT.Editor_Inspector_Show(def.id)
 		end
-	end)
-	insp.enable:SetDimensions(80, 22)
-	insp.enable:SetAnchor(BOTTOMLEFT, header, BOTTOMLEFT, 10, -6)
+	end
 
 	insp.move = QAT.widgets.TextButton(header, "QAT_Insp_Move", "Move on screen", function()
 		if QAT.Editor_MoveTracker and insp.currentId then
@@ -53,7 +54,7 @@ function QAT.Editor_Inspector_Build(pane)
 		end
 	end)
 	insp.move:SetDimensions(120, 22)
-	insp.move:SetAnchor(LEFT, insp.enable, RIGHT, 6, 0)
+	insp.move:SetAnchor(BOTTOMLEFT, header, BOTTOMLEFT, 10, -6)
 
 	insp.popout = QAT.widgets.TextButton(header, "QAT_Insp_Popout", "Pop out", function()
 		d(QAT.displayName .. ": detachable inspector is not yet available.")
@@ -129,16 +130,16 @@ function QAT.Editor_Inspector_Show(id)
 	local def = id and findDef(QAT.sv.trackers, id)
 
 	-- The per-tracker actions and tabs are meaningless with nothing selected.
-	insp.enable:SetHidden(not def)
+	insp.nameCaption:SetHidden(not def)
+	insp.nameBox:SetHidden(not def)
 	insp.move:SetHidden(not def)
 	insp.popout:SetHidden(not def)
 	if QAT.editor.tabBar then
 		QAT.editor.tabBar:SetHidden(not def)
 	end
 
-	insp.nameLabel:SetText(def and (def.name or def.id) or "(no tracker selected)")
 	if def then
-		insp.enable.label:SetText(def.enabled ~= false and "Enabled" or "Disabled")
+		insp.nameBox:SetText(def.name or def.id)
 	end
 	refreshBody()
 end
