@@ -40,6 +40,14 @@ function QAT.widgets.TextButton(parent, name, text, onClick)
 	-- Consume the press so a movable parent window does not capture it as a drag.
 	b:SetHandler("OnMouseDown", function() end)
 	b:SetHandler("OnMouseUp", function(_, button, upInside)
+		if QAT.log then
+			QAT.log.editor:Debug(
+				"button '%s' OnMouseUp button=%s upInside=%s",
+				name,
+				tostring(button),
+				tostring(upInside)
+			)
+		end
 		if upInside and button == MOUSE_BUTTON_INDEX_LEFT and onClick then
 			onClick()
 		end

@@ -110,8 +110,11 @@ local function makeRow(parent, def, depth, y)
 	label:SetAnchor(RIGHT, row, RIGHT, -4, 0)
 
 	-- Consume the press so the movable editor window does not capture it as a drag.
-	row:SetHandler("OnMouseDown", function() end)
+	row:SetHandler("OnMouseDown", function(_, button)
+		QAT.log.editor:Debug("row OnMouseDown id=%s button=%s", def.id, tostring(button))
+	end)
 	row:SetHandler("OnMouseUp", function(_, button, upInside)
+		QAT.log.editor:Debug("row OnMouseUp id=%s button=%s upInside=%s", def.id, tostring(button), tostring(upInside))
 		if upInside and button == MOUSE_BUTTON_INDEX_LEFT then
 			selectNode(def.id)
 		end
