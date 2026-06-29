@@ -63,6 +63,16 @@ folder:
 Dependencies (install via [Minion](https://minion.mmoui.com/) or ESOUI):
 `LibAddonMenu-2.0`, `LibSets`, `LibMediaProvider`. Optional: `LibDebugLogger`.
 
+Set up editor tooling (clones the decompiled `esoui` source and generates the ESO
+API stubs the language server uses) with [just](https://github.com/casey/just):
+
+```
+just setup        # one-time: fetch esoui + generate LSP stubs, then restart the LSP
+just update-esoui # after a game patch: refresh esoui and regenerate stubs
+just fmt          # format all Lua (stylua)
+just check        # verify formatting + Lua syntax
+```
+
 ## Commands
 
 - `/qat` — open settings
