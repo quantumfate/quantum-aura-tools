@@ -70,6 +70,9 @@ function QAT.Editor_Inspector_Build(pane)
 	placeholder:SetAnchor(TOPRIGHT, body, TOPRIGHT, -12, 12)
 	placeholder:SetVerticalAlignment(TEXT_ALIGN_TOP)
 	insp.placeholder = placeholder
+
+	-- Start with nothing selected: hide the per-tracker actions and tabs.
+	QAT.Editor_Inspector_Show(nil)
 end
 
 local function refreshBody()
@@ -93,8 +96,19 @@ function QAT.Editor_Inspector_Show(id)
 	end
 	insp.currentId = id
 	local def = id and findDef(QAT.sv.trackers, id)
+
+	-- The per-tracker actions and tabs are meaningless with nothing selected.
+	insp.enable:SetHidden(not def)
+	insp.move:SetHidden(not def)
+	insp.popout:SetHidden(not def)
+	if QAT.editor.tabBar then
+		QAT.editor.tabBar:SetHidden(not def)
+	end
+
 	insp.nameLabel:SetText(def and (def.name or def.id) or "(no tracker selected)")
-	insp.enable.label:SetText(def and (def.enabled ~= false and "Enabled" or "Disabled") or "Enabled")
+	if def then
+		insp.enable.label:SetText(def.enabled ~= false and "Enabled" or "Disabled")
+	end
 	refreshBody()
 end
 
