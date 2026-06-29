@@ -76,17 +76,16 @@ local rows = {}
 
 local function makeRow(parent, def, depth, y)
 	local name = "QAT_TreeRow_" .. def.id
-	local row = rows[name] or QAT.widgets.Panel(parent, name, { 0, 0, 0, 0 })
+	local row = rows[name] or QAT.widgets.Clickable(parent, name, { 0, 0, 0, 0 })
 	rows[name] = row
 	row:SetHidden(false)
-	row:SetMouseEnabled(true)
 	row:ClearAnchors()
 	row:SetAnchor(TOPLEFT, parent, TOPLEFT, 0, y)
 	row:SetAnchor(TOPRIGHT, parent, TOPRIGHT, 0, y)
 	row:SetHeight(ROW_H)
 
 	local selected = QAT.editor.selectedId == def.id
-	row:SetCenterColor(unpack(selected and { 0.20, 0.28, 0.40, 1 } or { 0, 0, 0, 0 }))
+	row.bg:SetCenterColor(unpack(selected and { 0.20, 0.28, 0.40, 1 } or { 0, 0, 0, 0 }))
 
 	local check = row.check or QAT.widgets.Checkbox(row, name .. "_En", def.enabled ~= false, nil)
 	row.check = check
@@ -109,12 +108,7 @@ local function makeRow(parent, def, depth, y)
 	label:SetAnchor(LEFT, check, RIGHT, 6, 0)
 	label:SetAnchor(RIGHT, row, RIGHT, -4, 0)
 
-	-- Consume the press so the movable editor window does not capture it as a drag.
-	row:SetHandler("OnMouseDown", function(_, button)
-		QAT.log.editor:Debug("row OnMouseDown id=%s button=%s", def.id, tostring(button))
-	end)
 	row:SetHandler("OnMouseUp", function(_, button, upInside)
-		QAT.log.editor:Debug("row OnMouseUp id=%s button=%s upInside=%s", def.id, tostring(button), tostring(upInside))
 		if upInside and button == MOUSE_BUTTON_INDEX_LEFT then
 			selectNode(def.id)
 		end
@@ -164,9 +158,6 @@ function QAT.Editor_Tree_Build(pane)
 		content:SetAnchor(TOPLEFT, pane, TOPLEFT, 0, TOOLBAR_H)
 		content:SetAnchor(BOTTOMRIGHT, pane, BOTTOMRIGHT, 0, 0)
 		content:SetMouseEnabled(true)
-		content:SetHandler("OnMouseUp", function(_, button, upInside)
-			QAT.log.editor:Debug("CONTENT OnMouseUp button=%s upInside=%s", tostring(button), tostring(upInside))
-		end)
 		QAT.editor.treeScroll = 0
 		content:SetHandler("OnMouseWheel", function(_, delta)
 			QAT.editor.treeScroll = zo_min(0, QAT.editor.treeScroll + delta * 30)
@@ -180,21 +171,6 @@ function QAT.Editor_Tree_Build(pane)
 		row:SetHidden(true)
 	end
 	buildRows(QAT.editor.treeContent, QAT.sv.trackers, 0, QAT.editor.treeScroll or 0)
-
-	zo_callLater(function()
-		local r = rows["QAT_TreeRow_sample_major_resolve"]
-		if r then
-			QAT.log.editor:Debug(
-				"ROW RECT major_resolve w=%s h=%s hidden=%s mouse=%s",
-				tostring(r:GetWidth()),
-				tostring(r:GetHeight()),
-				tostring(r:IsHidden()),
-				tostring(r:IsMouseEnabled())
-			)
-		end
-		local c = QAT.editor.treeContent
-		QAT.log.editor:Debug("CONTENT RECT w=%s h=%s", tostring(c:GetWidth()), tostring(c:GetHeight()))
-	end, 800)
 end
 
 function QAT.Editor_Tree_Relayout()
