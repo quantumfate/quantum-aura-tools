@@ -1,6 +1,6 @@
--- The editor's main window: a resizable two-pane frame (tree | inspector) with a
--- draggable splitter and persisted geometry. Fixes HyperTools' non-resizable,
--- auto-grow, custom-arrow-scroll window.
+-- The editor's main window: a user-resizable two-pane frame (tree | inspector)
+-- with a draggable splitter. Window geometry and the splitter position are
+-- persisted in sv.editor and restored on open.
 
 QAT.editor = QAT.editor or {}
 

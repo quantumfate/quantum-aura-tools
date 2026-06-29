@@ -1,6 +1,6 @@
--- Registered settings panel (the "properly registered settings" goal).
--- Appears in the native Settings -> Addons menu via LibAddonMenu-2.
--- Global/account options only; tracker authoring lives in the custom editor (M4).
+--- Account-wide options panel, registered in the native Settings -> Addons menu
+--- via LibAddonMenu-2. Global options only; per-tracker authoring is in the
+--- editor window.
 
 function QAT.Settings_Register()
 	local LAM = LibAddonMenu2

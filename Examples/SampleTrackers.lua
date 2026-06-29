@@ -1,16 +1,16 @@
--- Hand-authored test trackers (no editor yet).
+-- Hand-authored example trackers, loaded by the runtime alongside saved ones.
 --
--- Two shapes are shown:
---   1. Legacy single-phase defs (M1) - still valid; the normalizer wraps them
---      in one implicit "active" phase.
---   2. A phased def (M2) - the Huntsman warmask aura as ONE tracker that changes
+-- Two def shapes are shown:
+--   1. Single-phase defs (no `phases`) - the normalizer wraps each in one
+--      implicit "active" phase that shows while a buff is up.
+--   2. A phased def - a proc with a lockout as ONE tracker that changes
 --      appearance across Ready -> Active -> Cooldown -> Ready.
 --
--- All ability ids here are placeholders to verify wiring; swap them once the
--- M5 ID viewer can confirm live values.
+-- The ability ids here are placeholders for wiring; confirm real values with the
+-- in-game ID viewer.
 
 QAT.Examples = {
-	-- 1) Simple buff-uptime trackers (legacy shape).
+	-- 1) Single-phase buff-uptime trackers.
 	{
 		id = "sample_major_resolve",
 		kind = "tracker",
@@ -42,7 +42,7 @@ QAT.Examples = {
 		color = { 0.20, 0.80, 0.35, 1 },
 	},
 
-	-- 2) Phased proc-with-lockout (the design's flagship example).
+	-- 2) Phased proc with a fixed-timer lockout.
 	{
 		id = "sample_huntsman",
 		kind = "tracker",

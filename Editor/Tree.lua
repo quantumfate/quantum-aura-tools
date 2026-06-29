@@ -1,6 +1,7 @@
--- Tree pane: the tracker/folder hierarchy with a toolbar. Rows are rebuilt from
--- the def tree on change. (Virtualized ZO_ScrollList is a later optimization;
--- this rebuilds anchored rows inside a scroll container.)
+-- Tree pane: the tracker/folder hierarchy with an add/delete toolbar. Rows are
+-- rebuilt from the def tree whenever it changes. Rows are anchored inside a
+-- scroll container and rebuilt wholesale rather than virtualized, which is fine
+-- for the expected node counts.
 
 local WM = GetWindowManager()
 local TOOLBAR_H, ROW_H, INDENT = 28, 24, 16

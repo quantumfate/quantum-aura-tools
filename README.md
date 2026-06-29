@@ -71,17 +71,25 @@ Dependencies (install via [Minion](https://minion.mmoui.com/) or ESOUI):
 
 ## Roadmap
 
-| Milestone | Scope |
-| --- | --- |
-| **M0** | Skeleton: manifest, SavedVars + migrations, registered settings, keybinds ✅ |
-| **M1** | Event-driven tracker engine (icon/bar/text, screen-anchored) ✅ |
-| **M2** | Phases + per-phase display (state-machine trackers) ✅ |
-| **M3** | ID-based load conditions (incl. cross-bar sets) + runtime conditions ✅ |
-| M4 | Custom editor window |
-| M5 | ID viewers + capture + build-tracker |
-| M6 | Bundled raid mechanic library |
-| M7 | Polish & release |
-| v2 | 3D group-anchored trackers, group sync (LibGroupBroadcast), profiles, editor UI polish (persistent detached-window geometry, layout presets) |
+| Milestone | Scope | Status |
+| --- | --- | --- |
+| **M0** | Skeleton: manifest, SavedVars + versioned migrations, registered settings panel, keybinds | ✅ |
+| **M1** | Event-driven tracker engine (filtered effect events + render tick; icon/bar/text, screen-anchored) | ✅ |
+| **M2** | Phases + per-phase display (state-machine trackers; the proc-with-lockout primitive) | ✅ |
+| **M3** | ID-based load conditions (class/role/zone/skill/set incl. cross-bar logic) + runtime conditions | ✅ |
+| **M4** | Custom editor window (see [EDITOR.md](EDITOR.md)) | 🔨 in progress |
+| M4.1 | Resizable two-pane frame + tree + inspector shell | ✅ |
+| M4.2 | Phases tab: detail editor + state-machine graph | ⬜ |
+| M4.3 | Conditions + Load tabs | ⬜ |
+| M4.4 | Pickers (ability / set / color / media) | ⬜ |
+| M4.5 | Move mode (ghost previews, arming, off-screen clamping) | ⬜ |
+| M4.6 | Detach, drag-drop reorder, multi-select, alignment guides | ⬜ |
+| **M5** | ID viewers (nearby + recently-seen) + capture + one-click build-tracker | ⬜ |
+| **M6** | Bundled raid mechanic ID library + browser + soft back-reference updates | ⬜ |
+| **M7** | Polish, screenshots, ESOUI release | ⬜ |
+| **v2** | 3D group-anchored trackers · group sync (LibGroupBroadcast) · named profiles · persistent detached-window geometry · group auto-stack layout presets | ⬜ |
+
+See [DESIGN.md](DESIGN.md) for the architecture and [EDITOR.md](EDITOR.md) for the editor design.
 
 ## Troubleshooting / logs
 

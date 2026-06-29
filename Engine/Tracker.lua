@@ -1,17 +1,17 @@
--- Tracker object (M2: phased state machine).
---
--- A tracker is a set of PHASES plus an optional initial phase. At any moment it
--- is in one phase (or idle/hidden). Each phase has its own display, its own
--- countdown source, and is entered by triggers:
---
---   * effect triggers  - an EVENT_EFFECT_CHANGED gained/faded for some ability id
---   * onExpire         - when the current phase's timed countdown runs out, it
---                        advances to the named phase
---
--- The Huntsman warmask aura (Ready -> Active -> Cooldown -> Ready) is one tracker
--- with three phases. A simple "buff uptime" tracker is one implicit phase; the
--- normalizer below builds that from the M1 legacy def shape, so old defs keep
--- working.
+--- Tracker: a phase-based state machine for an on-screen aura.
+---
+--- A tracker holds a set of named phases and is in exactly one of them at a time
+--- (or idle/hidden). Each phase owns its display and its countdown source, plus
+--- the triggers that enter it:
+---   * effect trigger - an EVENT_EFFECT_CHANGED gained/faded for an ability id,
+---     optionally guarded by the phase it must transition from
+---   * onExpire       - when a timed phase's countdown reaches zero it advances
+---     to a named phase (or to idle)
+---
+--- Example: a set proc with a lockout is one tracker with three phases —
+--- Ready -> Active (while the buff is up) -> Cooldown (a fixed timer) -> Ready.
+--- The common case (show a buff's remaining time) is a single phase; a def that
+--- omits `phases` is normalized into one implicit "active" phase.
 
 QAT.Tracker = {}
 QAT.Tracker.__index = QAT.Tracker
@@ -25,9 +25,13 @@ local function contains(arr, v)
 	return false
 end
 
--- Normalize a def into { phases = { [id]=phase }, order = {ids}, initial }.
--- Legacy (no .phases) -> a single "active" phase: shown while the buff is up,
--- back to idle when it fades.
+--- Normalize an authored def into runtime phase tables.
+--- A def with no `phases` becomes a single "active" phase shown while the buff is
+--- up and hidden when it fades.
+---@param def table authored tracker def
+---@return table phases map of phaseId -> phase
+---@return string[] order phase ids in declared order
+---@return string|nil initial starting phase id, or nil to start idle
 local function Normalize(def)
 	local pos = def.pos
 		or {
@@ -68,7 +72,8 @@ local function Normalize(def)
 	local phases, order = {}, {}
 	for _, p in ipairs(rawPhases) do
 		local look = p.look or {}
-		-- Per-phase display = shared position + this phase's look.
+		-- A phase's display combines the tracker's shared position with the
+		-- phase's own look (display kind, name, color, icon, font).
 		local displayDef = {
 			id = def.id .. "_" .. p.id,
 			display = look.display or "bar",
@@ -99,8 +104,11 @@ local function Normalize(def)
 	return phases, order, initial
 end
 
--- loadChain: array of load defs (ancestor folders first, this tracker last) all
--- AND-ed together to decide whether the tracker is loaded.
+--- Construct a tracker from an authored def.
+---@param def table authored tracker def
+---@param loadChain table[] load defs (ancestor folders first, this tracker last),
+---  AND-ed together to decide whether the tracker is loaded
+---@return table tracker
 function QAT.Tracker.New(def, loadChain)
 	local self = setmetatable({}, QAT.Tracker)
 	self.def = def

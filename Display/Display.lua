@@ -1,8 +1,8 @@
--- Display control factory.
---
--- M1 ships the three screen-anchored display kinds: icon, bar, text. Each tracker
--- owns one control built here; the Runtime feeds it (remaining, duration, stacks)
--- on the render tick. Per-phase styling and the Alert kind arrive in M2.
+--- Display control factory.
+---
+--- Builds a screen-anchored control of one display kind ("icon", "bar", "text")
+--- for a phase. The runtime feeds the returned control (remaining, duration,
+--- stacks) each render tick via :SetState.
 
 QAT.display = {}
 
@@ -28,8 +28,11 @@ local function value(def, key)
 	return v
 end
 
--- Returns a control table exposing :SetState(active, remaining, duration, stacks)
--- and :SetHidden(hidden). Kind is one of "bar" | "icon" | "text".
+--- Build a display control for a phase.
+---@param def table display def: display kind, name, color, icon, font, decimals,
+---  and position (point, x, y, width, height)
+---@return table control exposing :SetState(active, remaining, duration, stacks),
+---  :SetHidden(hidden) and :SetBarColor(rgba)
 function QAT.display.Create(def)
 	local kind = def.display or "bar"
 	local name = "QAT_Tracker_" .. tostring(def.id)

@@ -1,9 +1,11 @@
--- Conditions: load conditions (does this tracker exist right now?) and the
--- comparison helper used by runtime conditions (reactive look changes).
---
--- All predicates match STABLE IDs, never localized name strings (the HyperTools
--- fragility fix). Set conditions use the cross-bar theoretical maximum so a
--- one-barred set doesn't make the tracker flicker on weapon swap; see DESIGN.md.
+--- Load conditions (is a tracker active right now?) and the comparison helper
+--- used by runtime conditions.
+---
+--- All predicates match stable numeric IDs (setId / abilityId / zoneId / classId),
+--- never localized name strings, so conditions are language-independent. Set
+--- conditions count the cross-bar theoretical maximum (body/jewelry pieces plus
+--- the better of the two weapon bars) so a set placed on a single weapon bar does
+--- not make a tracker flicker on weapon swap.
 
 QAT.conditions = {}
 
@@ -41,7 +43,11 @@ local function countSetInSlots(setId, slots)
 	return n
 end
 
--- cond = { setId, pieces, mode = "any" | "current" }
+--- Whether an equipped-set condition is satisfied.
+---@param cond table { setId:number, pieces:number, mode:"any"|"current" }
+---  mode "any" (default) counts the cross-bar maximum; "current" counts only the
+---  drawn weapon bar's pieces (live bonus state).
+---@return boolean
 function QAT.conditions.SetSatisfied(cond)
 	local body = countSetInSlots(cond.setId, BODY_JEWELRY_SLOTS)
 	local front = countSetInSlots(cond.setId, FRONT_WEAPON_SLOTS)
@@ -139,8 +145,10 @@ local function evaluateOne(load)
 	return true
 end
 
--- A tracker loads only if its own load def AND every ancestor folder's load def
--- pass (folder conditions cascade to children).
+--- Evaluate a chain of load defs. A tracker loads only if its own def and every
+--- ancestor folder's def pass (folder conditions cascade to children).
+---@param loadChain table[] load defs, ancestors first
+---@return boolean
 function QAT.conditions.EvaluateLoad(loadChain)
 	for _, load in ipairs(loadChain or {}) do
 		if not evaluateOne(load) then

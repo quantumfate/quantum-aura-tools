@@ -1,9 +1,7 @@
--- Inspector shell: persistent header (name, enable, move, pop-out) + the tab body
--- host. M4 step 1 ships the shell with placeholder tab bodies; the Phases editor,
--- graph, Conditions and Load tabs fill in next.
---
--- The inspector is bound to a trackerId and renders from the def, refreshing on
--- QAT_TrackerChanged — so docked and (future) detached instances stay consistent.
+-- Inspector: a persistent header (name, enable, move, pop-out) plus the tab body
+-- host (Phases / Conditions / Load). It is bound to a tracker id and renders
+-- entirely from that def, refreshing on the "QAT_TrackerChanged" callback, so any
+-- number of inspector instances on the same tracker stay in sync.
 
 local function findDef(defs, id)
 	for _, def in ipairs(defs or {}) do
@@ -56,8 +54,7 @@ function QAT.Editor_Inspector_Build(pane)
 	insp.move:SetAnchor(LEFT, insp.enable, RIGHT, 6, 0)
 
 	insp.popout = QAT.widgets.TextButton(header, "QAT_Insp_Popout", "Pop out", function()
-		-- Detached inspector instance arrives with the multi-instance work.
-		d(QAT.displayName .. ": detachable inspector comes in a later M4 step.")
+		d(QAT.displayName .. ": detachable inspector is not yet available.")
 	end)
 	insp.popout:SetDimensions(70, 22)
 	insp.popout:SetAnchor(LEFT, insp.move, RIGHT, 6, 0)
@@ -86,7 +83,7 @@ local function refreshBody()
 		insp.placeholder:SetText("Select a tracker in the tree, or add one with + Tracker.")
 		return
 	end
-	insp.placeholder:SetText(('[%s] editor for "%s" — coming in the next M4 step.'):format(tab, def.name or def.id))
+	insp.placeholder:SetText(('%s editor for "%s" — not yet implemented.'):format(tab, def.name or def.id))
 end
 
 function QAT.Editor_Inspector_Show(id)

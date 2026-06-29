@@ -20,11 +20,11 @@ QAT.defaults = {
 	account = {
 		enabled = true,
 		backgroundCapture = false, -- passive recently-seen recording; off by default
-		capturePopupSeen = false, -- one-time editor popup (shown in a later milestone)
+		capturePopupSeen = false, -- whether the one-time capture popup has been dismissed
 	},
-	trackers = {}, -- tree of trackers / folder-groups (M1+)
-	userLibrary = {}, -- user-captured raid IDs, separate from the bundled library (M6)
-	editor = { -- editor window geometry (schema 2)
+	trackers = {}, -- tree of tracker and folder defs
+	userLibrary = {}, -- user-captured ability ids, kept separate from the bundled library
+	editor = { -- editor window geometry
 		x = 200,
 		y = 200,
 		width = 900,
