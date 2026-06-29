@@ -74,8 +74,8 @@ Dependencies (install via [Minion](https://minion.mmoui.com/) or ESOUI):
 | Milestone | Scope |
 | --- | --- |
 | **M0** | Skeleton: manifest, SavedVars + migrations, registered settings, keybinds ✅ |
-| M1 | Single-phase tracker engine (icon/bar/text, screen-anchored) |
-| M2 | Phases + per-phase display |
+| **M1** | Event-driven tracker engine (icon/bar/text, screen-anchored) ✅ |
+| **M2** | Phases + per-phase display (state-machine trackers) ✅ |
 | M3 | ID-based load + runtime conditions |
 | M4 | Custom editor window |
 | M5 | ID viewers + capture + build-tracker |

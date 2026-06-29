@@ -85,6 +85,8 @@ function QAT.display.Create(def)
         self.tlw:SetHidden(hidden)
     end
 
+    -- remaining/duration may be nil for a timer-less phase (e.g. "Ready"):
+    -- then the bar shows full and the label shows just the name.
     function control:SetState(active, remaining, duration, stacks)
         if not active then
             self.tlw:SetHidden(true)
@@ -92,19 +94,22 @@ function QAT.display.Create(def)
         end
         self.tlw:SetHidden(false)
 
-        if self.bar and duration and duration > 0 then
-            self.bar:SetValue(zo_clamp(remaining / duration, 0, 1))
+        local hasTimer = duration ~= nil and duration > 0
+        if self.bar then
+            self.bar:SetValue(hasTimer and zo_clamp(remaining / duration, 0, 1) or 1)
         end
 
-        local timeText = string.format("%." .. self.decimals .. "f", remaining or 0)
-        local text = self.name .. "  " .. timeText
+        local text = self.name
+        if hasTimer then
+            text = text .. "  " .. string.format("%." .. self.decimals .. "f", remaining or 0)
+        end
         if stacks and stacks > 1 then
             text = text .. " (" .. stacks .. ")"
         end
         self.label:SetText(text)
 
         if self.icon then
-            self.icon:SetDesaturation(remaining and remaining <= 0 and 1 or 0)
+            self.icon:SetDesaturation((hasTimer and remaining <= 0) and 1 or 0)
         end
     end
 
