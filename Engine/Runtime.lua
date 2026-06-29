@@ -37,6 +37,13 @@ local function OnEffectChanged(
 	if not listeners then
 		return
 	end
+	QAT.log.runtime:Verbose(
+		"effect %d on %s change=%d (%d listener(s))",
+		abilityId,
+		tostring(unitTag),
+		changeType,
+		#listeners
+	)
 	for _, tracker in ipairs(listeners) do
 		tracker:OnEffect(unitTag, abilityId, changeType, beginTime, endTime, stackCount)
 	end
@@ -103,6 +110,7 @@ local function RequestLoadRecompute()
 	loadCheckPending = true
 	zo_callLater(function()
 		loadCheckPending = false
+		QAT.log.runtime:Debug("load recompute (debounced)")
 		QAT.Runtime_RefreshLoad()
 	end, 100)
 end
@@ -144,11 +152,9 @@ function QAT.Runtime_Init()
 	EVENT_MANAGER:UnregisterForUpdate(QAT.name .. "_tick")
 	EVENT_MANAGER:RegisterForUpdate(QAT.name .. "_tick", TICK_MS, OnUpdate)
 
-	if QAT.Log then
-		QAT.Log(
-			"runtime up: %d tracker(s), %d ability filter(s)",
-			#QAT.runtime.list,
-			NonContiguousCount(QAT.runtime.byAbilityId)
-		)
-	end
+	QAT.log.runtime:Info(
+		"runtime up: %d tracker(s), %d ability filter(s)",
+		#QAT.runtime.list,
+		NonContiguousCount(QAT.runtime.byAbilityId)
+	)
 end

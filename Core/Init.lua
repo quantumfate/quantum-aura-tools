@@ -33,34 +33,27 @@ QAT.defaults = {
 	},
 }
 
-local logger
-local function Log(...)
-	if logger then
-		logger:Info(...)
-	end
-end
-QAT.Log = Log
-
 local function OnAddOnLoaded(_, addonName)
 	if addonName ~= QAT.name then
 		return
 	end
 	EVENT_MANAGER:UnregisterForEvent(QAT.name, EVENT_ADD_ON_LOADED)
 
-	if LibDebugLogger then
-		logger = LibDebugLogger.Create(QAT.name)
-		QAT.logger = logger
-	end
+	QAT.SetupLogging()
+	QAT.log.root:Info("OnAddOnLoaded: bootstrapping %s v%s", QAT.displayName, QAT.version)
 
 	-- ZO version pinned at 1 on purpose; QAT.RunMigrations handles schema drift.
 	QAT.sv = ZO_SavedVars:NewAccountWide("QuantumAuraToolsSV", 1, nil, QAT.defaults)
 	QAT.RunMigrations(QAT.sv)
+	QAT.log.root:Debug("SavedVars ready: %d top-level tracker(s), schema %d", #QAT.sv.trackers, QAT.sv.schemaVersion)
 
-	QAT.Settings_Register()
-	QAT.Runtime_Init()
-	QAT.Editor_Init()
+	-- Each subsystem is guarded so a failure logs with context instead of
+	-- aborting the rest of load (critical while the UI is unverified in-game).
+	QAT.Safe("Settings_Register", QAT.Settings_Register)
+	QAT.Safe("Runtime_Init", QAT.Runtime_Init)
+	QAT.Safe("Editor_Init", QAT.Editor_Init)
 
-	Log("%s v%s loaded (schema %d)", QAT.displayName, QAT.version, QAT.sv.schemaVersion)
+	QAT.log.root:Info("%s v%s loaded (schema %d)", QAT.displayName, QAT.version, QAT.sv.schemaVersion)
 end
 
 -- /qat                -> open the settings panel

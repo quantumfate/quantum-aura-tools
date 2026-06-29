@@ -98,6 +98,14 @@ end
 
 function QAT.Editor_Init()
 	local sv = QAT.sv.editor
+	QAT.log.editor:Debug(
+		"Editor_Init: restoring geometry %dx%d @ (%d,%d), treeWidth=%d",
+		sv.width,
+		sv.height,
+		sv.x,
+		sv.y,
+		sv.treeWidth
+	)
 
 	local f = WM:CreateTopLevelWindow("QAT_Editor")
 	f:SetDimensions(sv.width, sv.height)
@@ -158,12 +166,16 @@ function QAT.Editor_Init()
 
 	QAT.Editor_Relayout()
 	selectTab("Phases")
+	QAT.log.editor:Info("Editor_Init complete")
 end
 
 function QAT.Editor_Toggle()
 	local f = QAT.editor.frame
 	if not f then
+		QAT.log.editor:Warning("Editor_Toggle before Editor_Init")
 		return
 	end
-	f:SetHidden(not f:IsHidden())
+	local show = f:IsHidden()
+	f:SetHidden(not show)
+	QAT.log.editor:Debug("editor %s", show and "shown" or "hidden")
 end

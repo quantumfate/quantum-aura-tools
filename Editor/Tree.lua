@@ -26,6 +26,7 @@ local function removeById(defs, id)
 end
 
 local function selectNode(id)
+	QAT.log.editor:Debug("select node '%s'", tostring(id))
 	QAT.editor.selectedId = id
 	QAT.Editor_Tree_Build()
 	if QAT.Editor_Inspector_Show then
@@ -48,17 +49,20 @@ local function addTracker()
 		enabled = true,
 	}
 	table.insert(QAT.sv.trackers, def)
+	QAT.log.editor:Debug("added tracker '%s'", def.id)
 	selectNode(def.id)
 end
 
 local function addGroup()
 	local def = { id = newId("group_"), kind = "folder", name = "New Group", children = {}, enabled = true }
 	table.insert(QAT.sv.trackers, def)
+	QAT.log.editor:Debug("added group '%s'", def.id)
 	selectNode(def.id)
 end
 
 local function deleteSelected()
 	if QAT.editor.selectedId and removeById(QAT.sv.trackers, QAT.editor.selectedId) then
+		QAT.log.editor:Debug("deleted node '%s'", tostring(QAT.editor.selectedId))
 		QAT.editor.selectedId = nil
 		QAT.Editor_Tree_Build()
 		if QAT.Editor_Inspector_Show then

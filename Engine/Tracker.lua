@@ -124,6 +124,7 @@ function QAT.Tracker:RefreshLoad()
 		return
 	end
 	self.loaded = want
+	QAT.log.engine:Debug("tracker '%s' loaded=%s", self.id, tostring(want))
 	if want then
 		self:Enter(self.initial)
 	else
@@ -160,6 +161,7 @@ function QAT.Tracker:Enter(phaseId, timing)
 		self.phases[self.current].control:SetState(false)
 	end
 
+	QAT.log.engine:Debug("tracker '%s': %s -> %s", self.id, tostring(self.current), tostring(phaseId or "idle"))
 	self.current = phaseId
 	if not phaseId then
 		self.expiresAt, self.duration, self.stacks = nil, nil, 0

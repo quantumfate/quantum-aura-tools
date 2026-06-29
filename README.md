@@ -83,6 +83,14 @@ Dependencies (install via [Minion](https://minion.mmoui.com/) or ESOUI):
 | M7 | Polish & release |
 | v2 | 3D group-anchored trackers, group sync (LibGroupBroadcast), profiles, editor UI polish (persistent detached-window geometry, layout presets) |
 
+## Troubleshooting / logs
+
+Install **LibDebugLogger** to capture diagnostics. QAT logs to sub-loggers
+(`Engine`, `Editor`, `Runtime`, `Conditions`, `Capture`) — set the minimum level
+in LibDebugLogger's UI (`Debug` or `Verbose` for the most detail), reproduce the
+issue, then export the log. Critical init paths are `pcall`-guarded, so a failure
+is logged with context (and printed to chat) instead of breaking addon load.
+
 ## License & credits
 
 [MIT](LICENSE). Independent rewrite inspired by **HyperTools** by **Hyperioxes**
