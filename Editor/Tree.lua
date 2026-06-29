@@ -37,7 +37,9 @@ end
 QAT.Editor_SelectNode = selectNode
 
 local function addTracker()
-	local def = {
+	-- Build a flat default and canonicalize it so the stored def is a complete
+	-- single-phase tracker the inspector can render immediately.
+	local def = QAT.CanonicalizeDef({
 		id = newId("tracker_"),
 		kind = "tracker",
 		display = "bar",
@@ -48,7 +50,7 @@ local function addTracker()
 		x = 0,
 		y = 0,
 		enabled = true,
-	}
+	})
 	table.insert(QAT.sv.trackers, def)
 	QAT.log.editor:Debug("added tracker '%s'", def.id)
 	selectNode(def.id)

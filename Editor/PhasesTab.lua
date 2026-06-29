@@ -92,6 +92,10 @@ local function render(container, def)
 		return
 	end
 
+	-- Defensive: guarantee a canonical (phased) def so the editor never renders a
+	-- flat shorthand from an import or older data.
+	QAT.CanonicalizeDef(def)
+
 	-- Ensure a valid selected phase.
 	if not selectedPhase(def) then
 		QAT.editor.selectedPhaseId = def.phases[1] and def.phases[1].id
