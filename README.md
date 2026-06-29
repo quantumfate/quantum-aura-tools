@@ -73,6 +73,16 @@ just fmt          # format all Lua (stylua)
 just check        # verify formatting + Lua syntax
 ```
 
+The `link`, `logs`, and `errors` recipes find your ESO install through environment
+variables (so no machine-specific paths live in the repo). Export these in your
+shell profile:
+
+```sh
+export ESO_USER_DIR="$HOME/…/Elder Scrolls Online"
+export ESO_LIVE_ADDONS_DIR="$ESO_USER_DIR/live/AddOns"
+export ESO_LIVE_SV_DIR="$ESO_USER_DIR/live/SavedVariables"
+```
+
 ## Commands
 
 - `/qat` — open settings
@@ -103,11 +113,27 @@ See [DESIGN.md](DESIGN.md) for the architecture and [EDITOR.md](EDITOR.md) for t
 
 ## Troubleshooting / logs
 
-Install **LibDebugLogger** to capture diagnostics. QAT logs to sub-loggers
-(`Engine`, `Editor`, `Runtime`, `Conditions`, `Capture`) — set the minimum level
-in LibDebugLogger's UI (`Debug` or `Verbose` for the most detail), reproduce the
-issue, then export the log. Critical init paths are `pcall`-guarded, so a failure
-is logged with context (and printed to chat) instead of breaking addon load.
+QAT logs to LibDebugLogger sub-loggers (`Engine`, `Editor`, `Runtime`,
+`Conditions`, `Capture`). Critical init paths are `pcall`-guarded, so a failure is
+logged with context (and printed to chat) instead of breaking addon load.
+
+LibDebugLogger writes to `SavedVariables/LibDebugLogger.lua`, which the dev tasks
+read directly:
+
+```
+just link           # symlink this repo into live AddOns as QuantumAuraTools
+just logs           # this addon's log entries (level D; pass V for effect detail)
+just errors         # tail ESO's plaintext script-error log
+```
+
+Two things to know:
+
+- **Lower the log level.** LibDebugLogger's `minLogLevel` defaults to `Info`, which
+  drops QAT's `Debug`/`Verbose` lines. Set it to `Debug` (or `Verbose`) — via the
+  DebugLogViewer addon in-game, or by editing `minLogLevel` in
+  `SavedVariables/LibDebugLogger.lua` while the game is closed.
+- **Reload first.** ESO only flushes SavedVariables to disk on `/reloadui` or
+  logout, so reproduce the issue, `/reloadui`, *then* read the log.
 
 ## License & credits
 

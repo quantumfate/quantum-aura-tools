@@ -4,6 +4,15 @@ esoui_dir := "stubs/esoui"
 api_doc := "stubs/esoui/ESOUIDocumentation.txt"
 api_stub := "stubs/eso_api.lua"
 
+# ESO install paths come from the environment so no local paths are committed.
+# Export these in your shell profile (live shown; pts variants also supported):
+#   ESO_USER_DIR, ESO_LIVE_ADDONS_DIR, ESO_LIVE_SV_DIR
+eso_user := env_var_or_default("ESO_USER_DIR", "")
+addons_dir := env_var_or_default("ESO_LIVE_ADDONS_DIR", "")
+sv_dir := env_var_or_default("ESO_LIVE_SV_DIR", "")
+ddl_sv := sv_dir / "LibDebugLogger.lua"
+errors_log := eso_user / "live/Logs/interface.log"
+
 # List available recipes.
 default:
     @just --list
@@ -38,6 +47,33 @@ stubs:
         exit 1
     fi
     python3 tools/gen_eso_stubs.py "{{api_doc}}" "{{api_stub}}"
+
+# Show this addon's LibDebugLogger entries. LEVEL = V/D/I/W/E (default D).
+# Reload the game UI (/reloadui) before running so SavedVariables are flushed.
+logs level="D":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    [ -n "{{sv_dir}}" ] || { echo "Set ESO_LIVE_SV_DIR in your environment." >&2; exit 1; }
+    python3 tools/extract_logs.py "{{ddl_sv}}" --tag Quantum --level {{level}}
+
+# Tail ESO's plaintext script-error log (hard Lua errors / stack traces).
+errors:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    [ -n "{{eso_user}}" ] || { echo "Set ESO_USER_DIR in your environment." >&2; exit 1; }
+    tail -n 100 "{{errors_log}}"
+
+# Symlink this repo into live AddOns as QuantumAuraTools (run once; safe to re-run).
+link:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    [ -n "{{addons_dir}}" ] || { echo "Set ESO_LIVE_ADDONS_DIR in your environment." >&2; exit 1; }
+    target="{{addons_dir}}/QuantumAuraTools"
+    if [ -e "$target" ] && [ ! -L "$target" ]; then
+        echo "Refusing: $target exists and is not a symlink." >&2; exit 1
+    fi
+    ln -sfn "$(pwd)" "$target"
+    echo "Linked $target -> $(pwd)"
 
 # Format all Lua with stylua.
 fmt:
