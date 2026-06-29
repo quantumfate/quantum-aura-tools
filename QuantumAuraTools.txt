@@ -21,6 +21,7 @@ Core/Init.lua
 Core/Strings.lua
 Core/Migrations.lua
 Core/Util.lua
+Engine/Conditions.lua
 Display/Display.lua
 Engine/Tracker.lua
 Engine/Runtime.lua

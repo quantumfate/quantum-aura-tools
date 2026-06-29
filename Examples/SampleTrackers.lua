@@ -21,6 +21,10 @@ QAT.Examples = {
         effectType = "buff",
         point = CENTER, x = 0, y = -220,
         color = { 0.20, 0.55, 0.90, 1 },
+        -- Runtime condition: turn the bar red when under 3s remaining.
+        runtime = {
+            { stat = "remaining", op = "<", value = 3, action = "color", color = { 0.85, 0.15, 0.15, 1 } },
+        },
     },
     {
         id = "sample_rapid_text",

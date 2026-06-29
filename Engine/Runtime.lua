@@ -42,14 +42,19 @@ local function RegisterEffectFilters()
     end
 end
 
--- Build Tracker objects from a list of defs (folders are walked for children;
--- they are pass-through containers with no display of their own).
-local function BuildTrackers(defs)
+-- Build Tracker objects from a list of defs. Folders are pass-through containers
+-- (no display); their load defs cascade to children via the loadChain.
+local function BuildTrackers(defs, parentLoads)
     for _, def in ipairs(defs or {}) do
         if def.kind == "folder" then
-            BuildTrackers(def.children)
+            local childLoads = QAT.util.DeepCopy(parentLoads)
+            if def.load then table.insert(childLoads, def.load) end
+            BuildTrackers(def.children, childLoads)
         else
-            local tracker = QAT.Tracker.New(def)
+            local chain = QAT.util.DeepCopy(parentLoads)
+            if def.load then table.insert(chain, def.load) end
+
+            local tracker = QAT.Tracker.New(def, chain)
             QAT.runtime.trackers[def.id] = tracker
             table.insert(QAT.runtime.list, tracker)
             for id in pairs(tracker:AbilityIds()) do
@@ -60,16 +65,53 @@ local function BuildTrackers(defs)
     end
 end
 
+-- Re-evaluate every tracker's load conditions.
+function QAT.Runtime_RefreshLoad()
+    for _, tracker in ipairs(QAT.runtime.list) do
+        tracker:RefreshLoad()
+    end
+end
+
+-- Load conditions are checked on the events that can change them (not polled).
+-- A short debounce coalesces bursts (e.g. swapping a full gear set).
+local loadCheckPending = false
+local function RequestLoadRecompute()
+    if loadCheckPending then return end
+    loadCheckPending = true
+    zo_callLater(function()
+        loadCheckPending = false
+        QAT.Runtime_RefreshLoad()
+    end, 100)
+end
+
+local function RegisterLoadEvents()
+    local events = {
+        EVENT_SKILLS_FULL_UPDATE,
+        EVENT_ACTION_SLOTS_ALL_HOTBARS_UPDATED, -- skill slotted in/out
+        EVENT_ACTIVE_WEAPON_PAIR_CHANGED,       -- bar swap (current-bar set mode)
+        EVENT_INVENTORY_SINGLE_SLOT_UPDATE,     -- gear changes
+        EVENT_PLAYER_ACTIVATED,                 -- zone load
+        EVENT_BOSSES_CHANGED,                   -- boss conditions
+        EVENT_PLAYER_COMBAT_STATE,              -- in-combat conditions
+    }
+    for _, ev in ipairs(events) do
+        EVENT_MANAGER:RegisterForEvent(QAT.name .. "_load", ev, RequestLoadRecompute)
+    end
+    EVENT_MANAGER:AddFilterForEvent(QAT.name .. "_load", EVENT_INVENTORY_SINGLE_SLOT_UPDATE,
+        REGISTER_FILTER_INVENTORY_UPDATE_REASON, INVENTORY_UPDATE_REASON_DEFAULT)
+end
+
 function QAT.Runtime_Init()
-    BuildTrackers(QAT.sv.trackers)
+    BuildTrackers(QAT.sv.trackers, {})
     if QAT.Examples then
-        BuildTrackers(QAT.Examples)
+        BuildTrackers(QAT.Examples, {})
     end
 
     RegisterEffectFilters()
+    RegisterLoadEvents()
 
     for _, tracker in ipairs(QAT.runtime.list) do
-        tracker:Start()
+        tracker:Start() -- evaluates load conditions, enters initial phase if loaded
     end
 
     EVENT_MANAGER:UnregisterForUpdate(QAT.name .. "_tick")

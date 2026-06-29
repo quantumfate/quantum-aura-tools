@@ -76,7 +76,7 @@ Dependencies (install via [Minion](https://minion.mmoui.com/) or ESOUI):
 | **M0** | Skeleton: manifest, SavedVars + migrations, registered settings, keybinds ✅ |
 | **M1** | Event-driven tracker engine (icon/bar/text, screen-anchored) ✅ |
 | **M2** | Phases + per-phase display (state-machine trackers) ✅ |
-| M3 | ID-based load + runtime conditions |
+| **M3** | ID-based load conditions (incl. cross-bar sets) + runtime conditions ✅ |
 | M4 | Custom editor window |
 | M5 | ID viewers + capture + build-tracker |
 | M6 | Bundled raid mechanic library |

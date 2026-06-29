@@ -90,17 +90,34 @@ local function Normalize(def)
     return phases, order, initial
 end
 
-function QAT.Tracker.New(def)
+-- loadChain: array of load defs (ancestor folders first, this tracker last) all
+-- AND-ed together to decide whether the tracker is loaded.
+function QAT.Tracker.New(def, loadChain)
     local self = setmetatable({}, QAT.Tracker)
     self.def = def
     self.id = def.id
     self.phases, self.order, self.initial = Normalize(def)
+    self.loadChain = loadChain or {}
 
+    self.loaded = false  -- gated by load conditions; set by RefreshLoad/Start
     self.current = nil   -- current phase id, or nil = idle/hidden
     self.expiresAt = nil
     self.duration = nil
     self.stacks = 0
     return self
+end
+
+-- Re-evaluate load conditions; enter the initial phase when newly loaded, hide
+-- when newly unloaded. Called on the debounced load-recompute events.
+function QAT.Tracker:RefreshLoad()
+    local want = QAT.conditions.EvaluateLoad(self.loadChain)
+    if want == self.loaded then return end
+    self.loaded = want
+    if want then
+        self:Enter(self.initial)
+    else
+        self:Enter(nil)
+    end
 end
 
 -- All ability ids referenced by any trigger or effect-duration (for filter
@@ -156,6 +173,7 @@ end
 
 -- Handle an effect event; returns true if it changed state or refreshed timing.
 function QAT.Tracker:OnEffect(unitTag, abilityId, result, beginTime, endTime, stacks)
+    if not self.loaded then return false end
     local rstr = (result == EFFECT_RESULT_FADED) and "faded" or "gained"
     local timing = { beginTime = beginTime, endTime = endTime, stacks = stacks }
 
@@ -194,14 +212,37 @@ function QAT.Tracker:OnEffect(unitTag, abilityId, result, beginTime, endTime, st
     return false
 end
 
+-- Runtime conditions: reactive look changes on the current phase, evaluated each
+-- render against the live stat (remaining time or stacks). Pure: returns
+-- (hidden, colorOverride). def.runtime = { { stat, op, value, action, color }, ... }
+function QAT.Tracker:EvalRuntime(remaining)
+    local hidden, colorOverride = false, nil
+    for _, c in ipairs(self.def.runtime or {}) do
+        local statVal = (c.stat == "stacks") and self.stacks or (remaining or 0)
+        if QAT.conditions.Compare(statVal, c.op, c.value) then
+            if c.action == "hide" then
+                hidden = true
+            elseif c.action == "color" then
+                colorOverride = c.color
+            end
+        end
+    end
+    return hidden, colorOverride
+end
+
 function QAT.Tracker:Render(now)
     if not self.current then return end
     local control = self.phases[self.current].control
-    if self.expiresAt == nil then
-        control:SetState(true, nil, nil, self.stacks) -- timer-less phase (static)
-    else
-        control:SetState(true, self.expiresAt - now, self.duration, self.stacks)
+    local remaining = self.expiresAt and (self.expiresAt - now) or nil
+
+    local hidden, colorOverride = self:EvalRuntime(remaining)
+    if hidden then
+        control:SetState(false)
+        return
     end
+
+    control:SetState(true, remaining, self.duration, self.stacks)
+    if colorOverride then control:SetBarColor(colorOverride) end -- after SetState's reset
 end
 
 -- Render tick. Advances the state machine when a timed phase expires.
@@ -218,7 +259,7 @@ function QAT.Tracker:Tick(now)
     self:Render(now)
 end
 
--- Put the tracker into its starting state (initial phase, or idle).
+-- Put the tracker into its starting state by evaluating load conditions.
 function QAT.Tracker:Start()
-    self:Enter(self.initial)
+    self:RefreshLoad()
 end

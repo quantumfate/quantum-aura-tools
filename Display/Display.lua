@@ -79,10 +79,17 @@ function QAT.display.Create(def)
         label = label,
         name = def.name or tostring(def.id),
         decimals = def.decimals or 1,
+        baseColor = value(def, "color"),
     }
 
     function control:SetHidden(hidden)
         self.tlw:SetHidden(hidden)
+    end
+
+    -- Override the bar color (used by runtime conditions). SetState resets to the
+    -- phase's base color first, so an override only lasts while its condition holds.
+    function control:SetBarColor(c)
+        if self.bar and c then self.bar:SetColor(unpack(c)) end
     end
 
     -- remaining/duration may be nil for a timer-less phase (e.g. "Ready"):
@@ -97,6 +104,7 @@ function QAT.display.Create(def)
         local hasTimer = duration ~= nil and duration > 0
         if self.bar then
             self.bar:SetValue(hasTimer and zo_clamp(remaining / duration, 0, 1) or 1)
+            self.bar:SetColor(unpack(self.baseColor)) -- reset; runtime conds re-apply after
         end
 
         local text = self.name
