@@ -35,21 +35,50 @@ QAT.defaults = {
 }
 
 -- Copy the bundled example trackers into saved data once, so they appear in the
+-- Add any bundled example trackers not already present (matched by id), as
+-- canonical copies. Returns how many were added. Used both for the one-time seed
+-- and for an explicit restore.
+local function addMissingExamples()
+	if not QAT.Examples then
+		return 0
+	end
+	local present = {}
+	for _, def in ipairs(QAT.sv.trackers) do
+		present[def.id] = true
+	end
+	local added = 0
+	for _, example in ipairs(QAT.Examples) do
+		if not present[example.id] then
+			local copy = QAT.util.DeepCopy(example)
+			QAT.CanonicalizeDef(copy)
+			table.insert(QAT.sv.trackers, copy)
+			added = added + 1
+		end
+	end
+	return added
+end
+
+-- Copy the bundled example trackers into saved data once, so they appear in the
 -- editor tree and are editable. After this one-time seed the trackers live solely
--- in SavedVariables; deleting them is permanent (they are not re-seeded).
+-- in SavedVariables; deleting them is permanent unless explicitly restored.
 local function SeedExamples()
 	if QAT.sv.account.examplesSeeded then
 		return
 	end
 	QAT.sv.account.examplesSeeded = true
-	if not QAT.Examples then
-		return
+	local n = addMissingExamples()
+	QAT.log.root:Info("seeded %d example tracker(s)", n)
+end
+
+-- Re-add any deleted example trackers. They are restored into SavedVariables and
+-- the editor tree immediately; a /reloadui makes them render on the HUD.
+function QAT.RestoreExamples()
+	local n = addMissingExamples()
+	if QAT.widgets and QAT.widgets.NotifyTrackerChanged then
+		QAT.widgets.NotifyTrackerChanged()
 	end
-	for _, example in ipairs(QAT.Examples) do
-		table.insert(QAT.sv.trackers, QAT.util.DeepCopy(example))
-	end
-	QAT.CanonicalizeTree(QAT.sv.trackers)
-	QAT.log.root:Info("seeded %d example tracker(s)", #QAT.Examples)
+	d(QAT.displayName .. ": restored " .. n .. " example tracker(s). /reloadui to show them on screen.")
+	return n
 end
 
 local function OnAddOnLoaded(_, addonName)
@@ -93,9 +122,14 @@ local function HandleSlash(args)
 		d(QAT.displayName .. ": background capture " .. (on and "ENABLED" or "DISABLED"))
 		return
 	end
+	if args == "restore examples" or args == "examples" then
+		QAT.RestoreExamples()
+		return
+	end
 	d(QAT.displayName .. " commands:")
 	d("  /qat                 open settings")
 	d("  /qat capture on|off  toggle passive ID capture")
+	d("  /qat restore examples  re-add deleted example trackers")
 end
 SLASH_COMMANDS["/qat"] = HandleSlash
 
