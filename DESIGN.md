@@ -117,6 +117,10 @@ theoreticalMax(setId) = bodyJewelryCount               -- 7 bar-independent slot
 If `theoreticalMax >= requiredPieces`, the set *can* be active in this build →
 keep the tracker loaded. No swap-flicker.
 
+A weapon bar's count follows ESO's set-piece rules: a **two-handed** weapon
+(greatsword/maul/axe, bow, or staff) counts as **2 pieces** and fills only the
+main hand (the off hand is empty); each one-handed weapon or shield counts as 1.
+
 The set condition exposes an **"Active on" mode** toggle:
 
 - **Any bar (theoretical)** — default; shows whenever the set can be active.

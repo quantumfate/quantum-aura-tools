@@ -21,8 +21,10 @@ local BODY_JEWELRY_SLOTS = {
 	EQUIP_SLOT_RING1,
 	EQUIP_SLOT_RING2,
 }
-local FRONT_WEAPON_SLOTS = { EQUIP_SLOT_MAIN_HAND, EQUIP_SLOT_OFF_HAND }
-local BACK_WEAPON_SLOTS = { EQUIP_SLOT_BACKUP_MAIN, EQUIP_SLOT_BACKUP_OFF }
+-- A weapon bar's two slots: main hand and off hand. A two-handed weapon (greatsword,
+-- bow, staff) occupies only the main-hand slot and leaves the off hand empty.
+local FRONT_WEAPON_SLOTS = { main = EQUIP_SLOT_MAIN_HAND, off = EQUIP_SLOT_OFF_HAND }
+local BACK_WEAPON_SLOTS = { main = EQUIP_SLOT_BACKUP_MAIN, off = EQUIP_SLOT_BACKUP_OFF }
 
 local function setIdInSlot(slot)
 	local link = GetItemLink(BAG_WORN, slot)
@@ -43,6 +45,24 @@ local function countSetInSlots(setId, slots)
 	return n
 end
 
+-- Count a single weapon bar's set pieces. A two-handed weapon counts as 2 set
+-- pieces (and fills only the main hand); each one-handed weapon or shield counts
+-- as 1.
+local function countSetOnWeaponBar(setId, slots)
+	local n = 0
+	local mainLink = GetItemLink(BAG_WORN, slots.main)
+	if mainLink and mainLink ~= "" then
+		local _, _, _, _, _, mainSetId = GetItemLinkSetInfo(mainLink, false)
+		if mainSetId == setId then
+			n = n + (GetItemLinkEquipType(mainLink) == EQUIP_TYPE_TWO_HAND and 2 or 1)
+		end
+	end
+	if setIdInSlot(slots.off) == setId then
+		n = n + 1
+	end
+	return n
+end
+
 --- Whether an equipped-set condition is satisfied.
 ---@param cond table { setId:number, pieces:number, mode:"any"|"current" }
 ---  mode "any" (default) counts the cross-bar maximum; "current" counts only the
@@ -50,8 +70,8 @@ end
 ---@return boolean
 function QAT.conditions.SetSatisfied(cond)
 	local body = countSetInSlots(cond.setId, BODY_JEWELRY_SLOTS)
-	local front = countSetInSlots(cond.setId, FRONT_WEAPON_SLOTS)
-	local back = countSetInSlots(cond.setId, BACK_WEAPON_SLOTS)
+	local front = countSetOnWeaponBar(cond.setId, FRONT_WEAPON_SLOTS)
+	local back = countSetOnWeaponBar(cond.setId, BACK_WEAPON_SLOTS)
 	local need = cond.pieces or 5
 
 	if cond.mode == "current" then
