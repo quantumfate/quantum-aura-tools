@@ -82,6 +82,8 @@ local function buildTitleBar(f)
 	close:SetAnchor(RIGHT, bar, RIGHT, -4, 0)
 end
 
+local TAB_W, TAB_GAP = 110, 8
+
 local function selectTab(name)
 	QAT.editor.activeTab = name
 	for _, tabName in ipairs(TABS) do
@@ -93,18 +95,41 @@ local function selectTab(name)
 end
 QAT.Editor_SelectTab = selectTab
 
+-- Show only the tabs that apply to the selection. Folders have no phases or
+-- runtime conditions, so only the Load tab is shown for them.
+function QAT.Editor_SetAvailableTabs(isFolder)
+	local visible = isFolder and { "Load" } or TABS
+	for _, name in ipairs(TABS) do
+		QAT.editor.tabButtons[name]:SetHidden(true)
+	end
+	local x = 0
+	local activeOk = false
+	for _, name in ipairs(visible) do
+		local btn = QAT.editor.tabButtons[name]
+		btn:SetHidden(false)
+		btn:ClearAnchors()
+		btn:SetAnchor(TOPLEFT, QAT.editor.tabBar, TOPLEFT, x, 0)
+		x = x + TAB_W + TAB_GAP
+		if QAT.editor.activeTab == name then
+			activeOk = true
+		end
+	end
+	if not activeOk then
+		selectTab(visible[1])
+	end
+end
+
 local function buildTabBar(pane)
 	QAT.editor.tabButtons = {}
 	local x = 0
-	local tabW = 110
 	for _, name in ipairs(TABS) do
 		local btn = QAT.widgets.TextButton(pane, "QAT_Editor_Tab_" .. name, name, function()
 			selectTab(name)
 		end)
-		btn:SetDimensions(tabW, TAB_H)
+		btn:SetDimensions(TAB_W, TAB_H)
 		btn:SetAnchor(TOPLEFT, pane, TOPLEFT, x, 0)
 		QAT.editor.tabButtons[name] = btn
-		x = x + tabW + 2
+		x = x + TAB_W + TAB_GAP
 	end
 end
 

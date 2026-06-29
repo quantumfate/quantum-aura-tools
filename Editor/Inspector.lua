@@ -60,7 +60,7 @@ function QAT.Editor_Inspector_Build(pane)
 		d(QAT.displayName .. ": detachable inspector is not yet available.")
 	end)
 	insp.popout:SetDimensions(70, 22)
-	insp.popout:SetAnchor(LEFT, insp.move, RIGHT, 6, 0)
+	insp.popout:SetAnchor(LEFT, insp.move, RIGHT, 10, 0)
 
 	-- Tab body host (below the tab bar).
 	local body = QAT.widgets.Panel(pane, "QAT_Insp_Body", { 0.06, 0.07, 0.09, 1 })
@@ -136,6 +136,10 @@ function QAT.Editor_Inspector_Show(id)
 	insp.popout:SetHidden(not def)
 	if QAT.editor.tabBar then
 		QAT.editor.tabBar:SetHidden(not def)
+	end
+	-- Folders only have a Load tab (no phases / runtime conditions).
+	if def and QAT.Editor_SetAvailableTabs then
+		QAT.Editor_SetAvailableTabs(def.kind == "folder")
 	end
 
 	if def then

@@ -226,7 +226,7 @@ function QAT.Editor_Tree_Build(pane)
 			local btn = QAT.widgets.TextButton(tb, "QAT_Tree_Btn_" .. b[1], b[1], b[2])
 			btn:SetDimensions(b[3], TOOLBAR_H - 6)
 			btn:SetAnchor(LEFT, tb, LEFT, x, 0)
-			x = x + b[3] + 2
+			x = x + b[3] + 8
 		end
 
 		-- Fixed viewport filling the pane below the toolbar. It needs a real rect

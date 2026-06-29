@@ -128,7 +128,7 @@ local function render(container, def)
 			QAT.editor.selectedPhaseId = pid
 			render(container, def)
 		end
-		x = x + 96 + 4
+		x = x + 96 + 8
 	end
 
 	-- Add phase.
@@ -336,7 +336,7 @@ local function render(container, def)
 	end)
 	delBtn:SetDimensions(120, ROW_H)
 	delBtn:ClearAnchors()
-	delBtn:SetAnchor(TOPLEFT, container, TOPLEFT, PAD + 130, y)
+	delBtn:SetAnchor(TOPLEFT, container, TOPLEFT, PAD + 140, y)
 	delBtn.onClick = function()
 		if #def.phases <= 1 then
 			return
