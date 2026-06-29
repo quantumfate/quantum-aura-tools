@@ -53,13 +53,17 @@ couldn't cleanly swap appearance.
 
 ### Group
 
-A pure **organizational/layout container**, rendered in the editor as a
-folder/header — never as a tracker row. A group:
+A purely **logical container**, rendered in the editor as a folder/header — never
+as a tracker row, and with **no spatial representation** (no area/box, the
+HyperTools confusion). A group:
 
 - carries load conditions that **cascade to its children** (set once for a whole
   bar-pack)
-- owns layout (anchor, stack direction, order)
-- has **no display, no phases, no track affordance**
+- offers **bulk move**: dragging a group's transient move handle translates every
+  descendant by the same `(dx, dy)`. The group stores no position; each tracker
+  keeps its own absolute position. (See the editor's move model in EDITOR.md.)
+- has **no display, no phases, no track affordance, no auto-layout** (stacking /
+  bar-pack auto-arrange is a v2 maybe; v1 positions every tracker explicitly)
 
 ### Update model (engine)
 

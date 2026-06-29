@@ -9,7 +9,7 @@ QAT = {
 	-- Internal data-schema version. Independent of the ZO_SavedVars version
 	-- (which we keep pinned at 1 so it never wipes data); migrations below own
 	-- all schema evolution. See Core/Migrations.lua.
-	schemaVersion = 1,
+	schemaVersion = 2,
 	slash = "/qat",
 }
 
@@ -24,6 +24,13 @@ QAT.defaults = {
 	},
 	trackers = {}, -- tree of trackers / folder-groups (M1+)
 	userLibrary = {}, -- user-captured raid IDs, separate from the bundled library (M6)
+	editor = { -- editor window geometry (schema 2)
+		x = 200,
+		y = 200,
+		width = 900,
+		height = 560,
+		treeWidth = 260,
+	},
 }
 
 local logger
@@ -51,6 +58,7 @@ local function OnAddOnLoaded(_, addonName)
 
 	QAT.Settings_Register()
 	QAT.Runtime_Init()
+	QAT.Editor_Init()
 
 	Log("%s v%s loaded (schema %d)", QAT.displayName, QAT.version, QAT.sv.schemaVersion)
 end

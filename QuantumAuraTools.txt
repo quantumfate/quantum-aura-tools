@@ -26,6 +26,10 @@ Display/Display.lua
 Engine/Tracker.lua
 Engine/Runtime.lua
 Examples/SampleTrackers.lua
+Editor/Widgets.lua
+Editor/Window.lua
+Editor/Tree.lua
+Editor/Inspector.lua
 Settings/Settings.lua
 Bindings.lua
 Bindings.xml

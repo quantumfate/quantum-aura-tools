@@ -8,7 +8,16 @@
 --   QAT.migrations[2] = function(sv) ... end  -- migrate schema 2 -> 3
 
 QAT.migrations = {
-	-- No migrations yet; v0.1.0 ships at schema 1.
+	-- schema 1 -> 2: add editor window geometry.
+	[1] = function(sv)
+		sv.editor = sv.editor or {
+			x = 200,
+			y = 200,
+			width = 900,
+			height = 560,
+			treeWidth = 260,
+		}
+	end,
 }
 
 function QAT.RunMigrations(sv)

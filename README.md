@@ -81,7 +81,7 @@ Dependencies (install via [Minion](https://minion.mmoui.com/) or ESOUI):
 | M5 | ID viewers + capture + build-tracker |
 | M6 | Bundled raid mechanic library |
 | M7 | Polish & release |
-| v2 | 3D group-anchored trackers, group sync (LibGroupBroadcast), profiles |
+| v2 | 3D group-anchored trackers, group sync (LibGroupBroadcast), profiles, editor UI polish (persistent detached-window geometry, layout presets) |
 
 ## License & credits
 
