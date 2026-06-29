@@ -109,6 +109,8 @@ local function makeRow(parent, def, depth, y)
 	label:SetAnchor(LEFT, check, RIGHT, 6, 0)
 	label:SetAnchor(RIGHT, row, RIGHT, -4, 0)
 
+	-- Consume the press so the movable editor window does not capture it as a drag.
+	row:SetHandler("OnMouseDown", function() end)
 	row:SetHandler("OnMouseUp", function(_, button, upInside)
 		if upInside and button == MOUSE_BUTTON_INDEX_LEFT then
 			selectNode(def.id)

@@ -37,6 +37,8 @@ function QAT.widgets.TextButton(parent, name, text, onClick)
 	b:SetHandler("OnMouseExit", function(self)
 		self:SetCenterColor(0.16, 0.18, 0.22, 1)
 	end)
+	-- Consume the press so a movable parent window does not capture it as a drag.
+	b:SetHandler("OnMouseDown", function() end)
 	b:SetHandler("OnMouseUp", function(_, button, upInside)
 		if upInside and button == MOUSE_BUTTON_INDEX_LEFT and onClick then
 			onClick()
@@ -58,6 +60,7 @@ function QAT.widgets.Checkbox(parent, name, checked, onToggle)
 		self.checked = v
 		tick:SetText(v and "x" or "")
 	end
+	box:SetHandler("OnMouseDown", function() end)
 	box:SetHandler("OnMouseUp", function(self, button, upInside)
 		if upInside and button == MOUSE_BUTTON_INDEX_LEFT then
 			self:SetChecked(not self.checked)
