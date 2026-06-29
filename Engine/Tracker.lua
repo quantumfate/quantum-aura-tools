@@ -37,13 +37,18 @@ local function Normalize(def)
 	for _, p in ipairs(def.phases) do
 		local look = p.look
 		-- A phase's display combines the tracker's shared position with the
-		-- phase's own look (display kind, name, color, icon, font).
+		-- phase's own look (display kind, name, color, icon, font). Icon-display
+		-- phases without an explicit icon fall back to the tracked ability's icon.
+		local icon = look.icon
+		if look.display == "icon" and (not icon or icon == "") then
+			icon = QAT.util.PhaseIcon(p)
+		end
 		local displayDef = {
 			id = def.id .. "_" .. p.id,
 			display = look.display,
 			name = look.name or def.name or def.id,
 			color = look.color,
-			icon = look.icon,
+			icon = icon,
 			font = look.font,
 			decimals = look.decimals,
 			point = pos.point,

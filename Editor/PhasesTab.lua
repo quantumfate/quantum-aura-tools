@@ -4,6 +4,7 @@
 -- set-initial). Below: the detail editor for the selected phase — its look,
 -- duration source, enter trigger and on-expire transition.
 
+local WM = GetWindowManager()
 local PAD = 12
 local ROW_H = 26
 local GAP = 8
@@ -200,11 +201,51 @@ local function render(container, def)
 	dispDD.onSelect = function(v)
 		phase.look.display = v
 		commit(def)
+		render(container, def) -- show/hide the icon field for the new kind
 	end
 	dispDD:SetValue(phase.look.display or "bar")
 	dispDD:ClearAnchors()
 	dispDD:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
 	y = y + ROW_H + GAP
+
+	-- Icon override (icon display only). Empty = auto from the tracked ability.
+	local iconBox = get("iconBox", function()
+		return QAT.widgets.EditBox(container, "QAT_Ph_IconBox", 260, ROW_H)
+	end)
+	local iconLabel = get("lIcon", function()
+		return QAT.widgets.Label(container, "QAT_Ph_lIcon", "Icon")
+	end)
+	local iconPreview = get("iconPreview", function()
+		return WM:CreateControl("QAT_Ph_IconPreview", container, CT_TEXTURE)
+	end)
+	if phase.look.display == "icon" then
+		iconLabel:SetHidden(false)
+		iconLabel:SetText("Icon")
+		iconLabel:ClearAnchors()
+		iconLabel:SetAnchor(TOPLEFT, container, TOPLEFT, PAD, y + 3)
+
+		iconBox:SetHidden(false)
+		iconBox.onChange = function(text)
+			text = zo_strtrim(text or "")
+			phase.look.icon = (text ~= "" and text) or nil
+			commit(def)
+			render(container, def)
+		end
+		iconBox:SetText(phase.look.icon or "")
+		iconBox:ClearAnchors()
+		iconBox:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
+
+		iconPreview:SetHidden(false)
+		iconPreview:SetDimensions(ROW_H, ROW_H)
+		iconPreview:SetTexture(QAT.util.PhaseIcon(phase) or "/esoui/art/icons/icon_missing.dds")
+		iconPreview:ClearAnchors()
+		iconPreview:SetAnchor(LEFT, iconBox, RIGHT, 8, 0)
+		y = y + ROW_H + GAP
+	else
+		iconLabel:SetHidden(true)
+		iconBox:SetHidden(true)
+		iconPreview:SetHidden(true)
+	end
 
 	-- Display name.
 	fieldLabel("lName", "Label text", y)

@@ -85,26 +85,13 @@ local ICON_MISSING = "/esoui/art/icons/icon_missing.dds"
 -- Per-folder collapse state (editor-session only, not persisted).
 QAT.editor.collapsed = QAT.editor.collapsed or {}
 
--- Best icon to represent a tracker: an explicit phase icon, else the game icon
--- of the first tracked ability id, else a placeholder.
+-- Best icon to represent a tracker in the tree: the resolved icon of the first
+-- phase that has one, else a placeholder.
 local function trackerIcon(def)
 	for _, p in ipairs(def.phases or {}) do
-		if p.look and p.look.icon then
-			return p.look.icon
-		end
-	end
-	for _, p in ipairs(def.phases or {}) do
-		local sources = { p.duration and p.duration.abilityIds }
-		for _, trig in ipairs(p.enter or {}) do
-			table.insert(sources, trig.abilityIds)
-		end
-		for _, ids in ipairs(sources) do
-			for _, id in ipairs(ids or {}) do
-				local ic = GetAbilityIcon(id)
-				if ic and ic ~= "" then
-					return ic
-				end
-			end
+		local ic = QAT.util.PhaseIcon(p)
+		if ic then
+			return ic
 		end
 	end
 	return ICON_MISSING

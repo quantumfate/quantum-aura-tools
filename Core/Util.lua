@@ -14,6 +14,27 @@ function QAT.util.DeepCopy(t)
 	return out
 end
 
+-- Resolve a phase's icon: an explicit look.icon override, else the game icon of
+-- the first tracked ability id (duration or enter trigger), else nil.
+function QAT.util.PhaseIcon(phase)
+	if phase.look and phase.look.icon and phase.look.icon ~= "" then
+		return phase.look.icon
+	end
+	local sources = { phase.duration and phase.duration.abilityIds }
+	for _, trig in ipairs(phase.enter or {}) do
+		table.insert(sources, trig.abilityIds)
+	end
+	for _, ids in ipairs(sources) do
+		for _, id in ipairs(ids or {}) do
+			local ic = GetAbilityIcon(id)
+			if ic and ic ~= "" then
+				return ic
+			end
+		end
+	end
+	return nil
+end
+
 -- Build a lookup set { [value] = true } from an array.
 function QAT.util.ToSet(arr)
 	local set = {}
