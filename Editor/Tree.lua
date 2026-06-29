@@ -152,25 +152,26 @@ function QAT.Editor_Tree_Build(pane)
 			x = x + b[3] + 2
 		end
 
+		-- Fixed viewport filling the pane below the toolbar. It needs a real rect
+		-- (top + bottom anchored) so its child rows are hit-testable; scrolling is
+		-- done by offsetting the rows' y, not by moving this container.
 		local content = WM:CreateControl("QAT_Tree_Content", pane, CT_CONTROL)
 		content:SetAnchor(TOPLEFT, pane, TOPLEFT, 0, TOOLBAR_H)
-		content:SetAnchor(TOPRIGHT, pane, TOPRIGHT, 0, TOOLBAR_H)
+		content:SetAnchor(BOTTOMRIGHT, pane, BOTTOMRIGHT, 0, 0)
 		content:SetMouseEnabled(true)
 		QAT.editor.treeScroll = 0
-		content:SetHandler("OnMouseWheel", function(self, delta)
+		content:SetHandler("OnMouseWheel", function(_, delta)
 			QAT.editor.treeScroll = zo_min(0, QAT.editor.treeScroll + delta * 30)
-			self:ClearAnchors()
-			self:SetAnchor(TOPLEFT, pane, TOPLEFT, 0, TOOLBAR_H + QAT.editor.treeScroll)
-			self:SetAnchor(TOPRIGHT, pane, TOPRIGHT, 0, TOOLBAR_H + QAT.editor.treeScroll)
+			QAT.Editor_Tree_Build()
 		end)
 		QAT.editor.treeContent = content
 	end
 
-	-- Hide old rows, then (re)build.
+	-- Hide old rows, then (re)build from the scroll offset.
 	for _, row in pairs(rows) do
 		row:SetHidden(true)
 	end
-	buildRows(QAT.editor.treeContent, QAT.sv.trackers, 0, 0)
+	buildRows(QAT.editor.treeContent, QAT.sv.trackers, 0, QAT.editor.treeScroll or 0)
 end
 
 function QAT.Editor_Tree_Relayout()
