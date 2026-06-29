@@ -75,9 +75,46 @@ local function deleteSelected()
 end
 
 local rows = {}
+local ICON_SIZE = 18
+local CHECK_ON = "EsoUI/Art/Buttons/checkbox_checked.dds"
+local CHECK_OFF = "EsoUI/Art/Buttons/checkbox_unchecked.dds"
+local ARROW_OPEN = "EsoUI/Art/Buttons/tree_open_up.dds"
+local ARROW_CLOSED = "EsoUI/Art/Buttons/tree_closed_up.dds"
+local ICON_MISSING = "/esoui/art/icons/icon_missing.dds"
+
+-- Per-folder collapse state (editor-session only, not persisted).
+QAT.editor.collapsed = QAT.editor.collapsed or {}
+
+-- Best icon to represent a tracker: an explicit phase icon, else the game icon
+-- of the first tracked ability id, else a placeholder.
+local function trackerIcon(def)
+	for _, p in ipairs(def.phases or {}) do
+		if p.look and p.look.icon then
+			return p.look.icon
+		end
+	end
+	for _, p in ipairs(def.phases or {}) do
+		local sources = { p.duration and p.duration.abilityIds }
+		for _, trig in ipairs(p.enter or {}) do
+			table.insert(sources, trig.abilityIds)
+		end
+		for _, ids in ipairs(sources) do
+			for _, id in ipairs(ids or {}) do
+				local ic = GetAbilityIcon(id)
+				if ic and ic ~= "" then
+					return ic
+				end
+			end
+		end
+	end
+	return ICON_MISSING
+end
 
 local function makeRow(parent, def, depth, y)
 	local name = "QAT_TreeRow_" .. def.id
+	local isFolder = def.kind == "folder"
+	local enabled = def.enabled ~= false
+
 	local row = rows[name] or QAT.widgets.Clickable(parent, name, { 0, 0, 0, 0 })
 	rows[name] = row
 	row:SetHidden(false)
@@ -88,31 +125,62 @@ local function makeRow(parent, def, depth, y)
 
 	local selected = QAT.editor.selectedId == def.id
 	row.bg:SetCenterColor(unpack(selected and { 0.20, 0.28, 0.40, 1 } or { 0, 0, 0, 0 }))
-
-	local check = row.check or QAT.widgets.Checkbox(row, name .. "_En", def.enabled ~= false, nil)
-	row.check = check
-	check:SetChecked(def.enabled ~= false)
-	check:ClearAnchors()
-	check:SetAnchor(LEFT, row, LEFT, 4 + depth * INDENT, 0)
-	check:SetHandler("OnMouseUp", function(self, button, upInside)
-		if upInside and button == MOUSE_BUTTON_INDEX_LEFT then
-			def.enabled = not (def.enabled ~= false)
-			self:SetChecked(def.enabled)
-			QAT.widgets.NotifyTrackerChanged(def.id)
-		end
-	end)
-
-	local prefix = def.kind == "folder" and "[+] " or "- "
-	local label = row.label or QAT.widgets.Label(row, name .. "_Label", "")
-	row.label = label
-	label:SetText(prefix .. (def.name or def.id))
-	label:ClearAnchors()
-	label:SetAnchor(LEFT, check, RIGHT, 6, 0)
-	label:SetAnchor(RIGHT, row, RIGHT, -4, 0)
-
 	row:SetHandler("OnMouseUp", function(_, button, upInside)
 		if upInside and button == MOUSE_BUTTON_INDEX_LEFT then
 			selectNode(def.id)
+		end
+	end)
+
+	-- Left glyph: a folder's expand arrow (toggles collapse) or a tracker's icon.
+	local icon = row.icon
+	if not icon then
+		icon = WM:CreateControl(name .. "_Icon", row, CT_TEXTURE)
+		row.icon = icon
+	end
+	icon:SetDimensions(ICON_SIZE, ICON_SIZE)
+	icon:ClearAnchors()
+	icon:SetAnchor(LEFT, row, LEFT, 6 + depth * INDENT, 0)
+	if isFolder then
+		icon:SetTexture(QAT.editor.collapsed[def.id] and ARROW_CLOSED or ARROW_OPEN)
+		icon:SetColor(1, 1, 1, 1)
+		icon:SetMouseEnabled(true)
+		icon:SetHandler("OnMouseUp", function(_, button, upInside)
+			if upInside and button == MOUSE_BUTTON_INDEX_LEFT then
+				QAT.editor.collapsed[def.id] = not QAT.editor.collapsed[def.id]
+				QAT.Editor_Tree_Build()
+			end
+		end)
+	else
+		icon:SetTexture(trackerIcon(def))
+		icon:SetColor(1, 1, 1, enabled and 1 or 0.35)
+		icon:SetMouseEnabled(false)
+	end
+
+	-- Name (dimmed when disabled).
+	local label = row.label or QAT.widgets.Label(row, name .. "_Label", "")
+	row.label = label
+	label:SetText(def.name or def.id)
+	label:SetColor(0.9, 0.92, 0.95, enabled and 1 or 0.4)
+	label:ClearAnchors()
+	label:SetAnchor(LEFT, icon, RIGHT, 6, 0)
+	label:SetAnchor(RIGHT, row, RIGHT, -28, 0)
+
+	-- Enable checkbox on the right edge.
+	local check = row.checkTex
+	if not check then
+		check = WM:CreateControl(name .. "_Check", row, CT_TEXTURE)
+		check:SetMouseEnabled(true)
+		row.checkTex = check
+	end
+	check:SetDimensions(ICON_SIZE, ICON_SIZE)
+	check:ClearAnchors()
+	check:SetAnchor(RIGHT, row, RIGHT, -6, 0)
+	check:SetTexture(enabled and CHECK_ON or CHECK_OFF)
+	check:SetHandler("OnMouseUp", function(_, button, upInside)
+		if upInside and button == MOUSE_BUTTON_INDEX_LEFT then
+			def.enabled = not (def.enabled ~= false)
+			QAT.widgets.NotifyTrackerChanged(def.id)
+			QAT.Editor_Tree_Build()
 		end
 	end)
 
@@ -122,7 +190,7 @@ end
 local function buildRows(parent, defs, depth, y)
 	for _, def in ipairs(defs or {}) do
 		y = y + makeRow(parent, def, depth, y)
-		if def.kind == "folder" then
+		if def.kind == "folder" and not QAT.editor.collapsed[def.id] then
 			y = buildRows(parent, def.children, depth + 1, y)
 		end
 	end
