@@ -1,0 +1,25 @@
+## Title: Quantum's Aura Tools
+## Author: Quantum (quantumfate)
+## Version: 0.1.0
+## AddOnVersion: 100
+## APIVersion: 101050
+## Description: Phase-based aura, uptime and raid-mechanic tracker. Build trackers for buffs, debuffs, procs and cooldowns.
+## SavedVariables: QuantumAuraToolsSV
+## DependsOn: LibAddonMenu-2.0 LibSets LibMediaProvider
+## OptionalDependsOn: LibDebugLogger
+
+; Quantum's Aura Tools — independent clean-room rewrite of HyperTools.
+; Credits: Hyperioxes & Shadowwolf136 (original HyperTools). MIT licensed.
+;
+; This Add-on is not created by, affiliated with or sponsored by ZeniMax Media
+; Inc. or its affiliates. The Elder Scrolls and related logos are registered
+; trademarks or trademarks of ZeniMax Media Inc. in the United States and/or
+; other countries. All rights reserved. Terms:
+; https://account.elderscrollsonline.com/add-on-terms
+
+Core/Init.lua
+Core/Strings.lua
+Core/Migrations.lua
+Settings/Settings.lua
+Bindings.lua
+Bindings.xml
