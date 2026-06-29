@@ -85,8 +85,7 @@ end
 local function selectTab(name)
 	QAT.editor.activeTab = name
 	for _, tabName in ipairs(TABS) do
-		local btn = QAT.editor.tabButtons[tabName]
-		btn:SetCenterColor(unpack(tabName == name and { 0.22, 0.25, 0.30, 1 } or { 0.13, 0.14, 0.17, 1 }))
+		QAT.editor.tabButtons[tabName]:SetSelected(tabName == name)
 	end
 	if QAT.Editor_Inspector_SetTab then
 		QAT.Editor_Inspector_SetTab(name)

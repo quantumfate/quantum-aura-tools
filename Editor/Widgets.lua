@@ -40,19 +40,31 @@ function QAT.widgets.Label(parent, name, text, font)
 end
 
 -- A text button (CT_CONTROL base + backdrop visual), fires onClick on left
--- mouse-up inside.
+-- mouse-up inside. Supports a persistent selected state (button:SetSelected(bool))
+-- that survives hover, for tab/chip-style toggles.
+local IDLE_COLOR = { 0.16, 0.18, 0.22, 1 }
+local SELECTED_COLOR = { 0.20, 0.30, 0.45, 1 }
+
 function QAT.widgets.TextButton(parent, name, text, onClick)
-	local b = QAT.widgets.Clickable(parent, name, { 0.16, 0.18, 0.22, 1 })
+	local b = QAT.widgets.Clickable(parent, name, IDLE_COLOR)
 	b.bg:SetEdgeColor(0, 0, 0, 1)
+	b.baseColor = IDLE_COLOR
 	local label = QAT.widgets.Label(b, name .. "_Label", text)
 	label:SetAnchor(CENTER)
 	label:SetHorizontalAlignment(TEXT_ALIGN_CENTER)
 	b.label = label
+
+	function b:SetSelected(sel)
+		self.baseColor = sel and SELECTED_COLOR or IDLE_COLOR
+		self.bg:SetCenterColor(unpack(self.baseColor))
+	end
+
 	b:SetHandler("OnMouseEnter", function(self)
-		self.bg:SetCenterColor(0.22, 0.25, 0.30, 1)
+		local c = self.baseColor
+		self.bg:SetCenterColor(c[1] + 0.06, c[2] + 0.07, c[3] + 0.08, 1)
 	end)
 	b:SetHandler("OnMouseExit", function(self)
-		self.bg:SetCenterColor(0.16, 0.18, 0.22, 1)
+		self.bg:SetCenterColor(unpack(self.baseColor))
 	end)
 	b:SetHandler("OnMouseUp", function(_, button, upInside)
 		if upInside and button == MOUSE_BUTTON_INDEX_LEFT and onClick then
