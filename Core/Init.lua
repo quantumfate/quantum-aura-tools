@@ -21,6 +21,7 @@ QAT.defaults = {
 		enabled = true,
 		backgroundCapture = false, -- passive recently-seen recording; off by default
 		capturePopupSeen = false, -- whether the one-time capture popup has been dismissed
+		examplesSeeded = false, -- whether starter example trackers were seeded once
 	},
 	trackers = {}, -- tree of tracker and folder defs
 	userLibrary = {}, -- user-captured ability ids, kept separate from the bundled library
@@ -32,6 +33,24 @@ QAT.defaults = {
 		treeWidth = 260,
 	},
 }
+
+-- Copy the bundled example trackers into saved data once, so they appear in the
+-- editor tree and are editable. After this one-time seed the trackers live solely
+-- in SavedVariables; deleting them is permanent (they are not re-seeded).
+local function SeedExamples()
+	if QAT.sv.account.examplesSeeded then
+		return
+	end
+	QAT.sv.account.examplesSeeded = true
+	if not QAT.Examples then
+		return
+	end
+	for _, example in ipairs(QAT.Examples) do
+		table.insert(QAT.sv.trackers, QAT.util.DeepCopy(example))
+	end
+	QAT.CanonicalizeTree(QAT.sv.trackers)
+	QAT.log.root:Info("seeded %d example tracker(s)", #QAT.Examples)
+end
 
 local function OnAddOnLoaded(_, addonName)
 	if addonName ~= QAT.name then
@@ -45,6 +64,7 @@ local function OnAddOnLoaded(_, addonName)
 	-- ZO version pinned at 1 on purpose; QAT.RunMigrations handles schema drift.
 	QAT.sv = ZO_SavedVars:NewAccountWide("QuantumAuraToolsSV", 1, nil, QAT.defaults)
 	QAT.RunMigrations(QAT.sv)
+	SeedExamples()
 	QAT.log.root:Debug("SavedVars ready: %d top-level tracker(s), schema %d", #QAT.sv.trackers, QAT.sv.schemaVersion)
 
 	-- Each subsystem is guarded so a failure logs with context instead of

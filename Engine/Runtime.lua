@@ -138,9 +138,6 @@ end
 
 function QAT.Runtime_Init()
 	BuildTrackers(QAT.sv.trackers, {})
-	if QAT.Examples then
-		BuildTrackers(QAT.Examples, {})
-	end
 
 	RegisterEffectFilters()
 	RegisterLoadEvents()
