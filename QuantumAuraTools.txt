@@ -20,6 +20,11 @@
 Core/Init.lua
 Core/Strings.lua
 Core/Migrations.lua
+Core/Util.lua
+Display/Display.lua
+Engine/Tracker.lua
+Engine/Runtime.lua
+Examples/SampleTrackers.lua
 Settings/Settings.lua
 Bindings.lua
 Bindings.xml

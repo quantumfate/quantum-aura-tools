@@ -46,6 +46,7 @@ local function OnAddOnLoaded(_, addonName)
     QAT.RunMigrations(QAT.sv)
 
     QAT.Settings_Register()
+    QAT.Runtime_Init()
 
     Log("%s v%s loaded (schema %d)", QAT.displayName, QAT.version, QAT.sv.schemaVersion)
 end

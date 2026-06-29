@@ -1,2 +1,6 @@
 # Old HyperTools source, kept locally for reference during the rewrite. Untracked.
 .legacy-hypertools/
+
+# Drop-in ESO API type stubs for the language server (local only, except the README).
+stubs/*
+!stubs/README.md
