@@ -59,6 +59,21 @@ local function buildTitleBar(f)
 	bar:SetAnchor(TOPRIGHT, f, TOPRIGHT, 0, 0)
 	bar:SetHeight(TITLE_H)
 
+	-- Dragging the title bar moves the window. The frame is left non-movable
+	-- otherwise; a permanently movable window captures all mouse-down across its
+	-- area and starves child controls of clicks. Movability is enabled only for
+	-- the duration of a title-bar drag.
+	bar:SetMouseEnabled(true)
+	bar:SetHandler("OnMouseDown", function()
+		f:SetMovable(true)
+		f:StartMoving()
+	end)
+	bar:SetHandler("OnMouseUp", function()
+		f:StopMovingOrResizing()
+		f:SetMovable(false)
+		saveGeometry()
+	end)
+
 	local title = QAT.widgets.Label(bar, "QAT_Editor_TitleText", QAT.displayName .. "  —  Editor")
 	title:SetAnchor(LEFT, bar, LEFT, 10, 0)
 
@@ -110,8 +125,10 @@ function QAT.Editor_Init()
 	local f = WM:CreateTopLevelWindow("QAT_Editor")
 	f:SetDimensions(sv.width, sv.height)
 	f:SetClampedToScreen(true)
+	-- Mouse-enabled for the resize handles, but NOT permanently movable: a movable
+	-- top-level window captures every mouse-down over its area, starving child
+	-- controls of clicks. Dragging is driven from the title bar instead.
 	f:SetMouseEnabled(true)
-	f:SetMovable(true)
 	f:SetResizeHandleSize(SPLITTER_W)
 	f:SetDimensionConstraints(600, 360, 0, 0)
 	f:SetHidden(true)
