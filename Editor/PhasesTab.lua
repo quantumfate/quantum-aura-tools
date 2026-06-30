@@ -505,19 +505,39 @@ local function render(container, def)
 		y = y + ROW_H + GAP
 	end
 
-	-- Transitions editor: each row is "IF <trigger> -> <target phase>".
+	-- Transitions editor: an ordered list of exits. The engine takes the FIRST one
+	-- whose trigger matches (mutually exclusive), so a phase can branch to different
+	-- phases on different triggers while only ever firing one.
 	fieldLabel(
 		"lTrans",
 		"Transitions",
 		y,
-		"When does this phase hand off, and to which phase. Effect = a buff gained/faded; Stacks/Time left = a live threshold; Timer ends = the duration ran out."
+		"Where this phase can go next. Checked top to bottom; the first matching trigger wins (only one ever fires). Add several to branch on different triggers."
 	)
 	y = y + ROW_H
+	if #phase.transitions > 1 then
+		local hint = get("trHint", function()
+			return QAT.widgets.Label(container, "QAT_Ph_TrHint", "")
+		end)
+		hint:SetText("checked top to bottom — first match wins")
+		hint:SetColor(0.6, 0.65, 0.72, 1)
+		hint:ClearAnchors()
+		hint:SetAnchor(TOPLEFT, container, TOPLEFT, PAD + 26, y)
+		y = y + 20
+	end
 
 	for i, tr in ipairs(phase.transitions) do
 		local idx = i
 		local when = tr.when
-		local x = PAD + 12
+
+		local numLbl = get("trNum" .. i, function()
+			return QAT.widgets.Label(container, "QAT_Ph_TrNum" .. i, "")
+		end)
+		numLbl:SetText(i .. ".")
+		numLbl:ClearAnchors()
+		numLbl:SetAnchor(TOPLEFT, container, TOPLEFT, PAD, y + 3)
+
+		local x = PAD + 26
 
 		local trigDD = get("trTrig" .. i, function()
 			return QAT.widgets.Dropdown(container, "QAT_Ph_TrTrig" .. i, 120, TRIGGER_OPTS, "gained")
