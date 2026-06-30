@@ -11,11 +11,12 @@ local PAD = 12
 local ROW_H = 26
 local GAP = 8
 
-local DISPLAY_OPTS = {
+local KIND_OPTS = {
 	{ label = "Bar", value = "bar" },
 	{ label = "Icon", value = "icon" },
 	{ label = "Text", value = "text" },
 	{ label = "None (hidden)", value = "none" },
+	{ label = "Audio Cue", value = "audio" },
 }
 local DURATION_OPTS = {
 	{ label = "Follows effect", value = "effect" },
@@ -237,45 +238,42 @@ local function render(container, def)
 	sectionHeader("hAppear", "Appearance", y)
 	y = y + ROW_H
 
+	-- Kind: what this phase is. Only the fields relevant to the kind are shown.
 	fieldLabel(
-		"lDisp",
-		"Display",
+		"lKind",
+		"Kind",
 		y,
-		"How this phase draws: Bar, Icon, Text, or None (hidden - used for an idle phase)."
+		"What this phase is: Bar / Icon / Text draw on screen, None is hidden (e.g. an idle phase), Audio Cue plays a sound on enter and draws nothing."
 	)
-	local dispDD = get("dispDD", function()
-		return QAT.widgets.Dropdown(container, "QAT_Ph_Disp", 180, DISPLAY_OPTS, "bar")
+	local kindDD = get("dispDD", function()
+		return QAT.widgets.Dropdown(container, "QAT_Ph_Disp", 180, KIND_OPTS, "bar")
 	end)
-	dispDD.onSelect = function(v)
+	kindDD.onSelect = function(v)
 		phase.look.display = v
 		commit(def)
 		render(container, def)
 	end
-	dispDD:SetValue(phase.look.display or "bar")
-	dispDD:ClearAnchors()
-	dispDD:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
+	kindDD:SetValue(phase.look.display or "bar")
+	kindDD:ClearAnchors()
+	kindDD:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
 	y = y + ROW_H + GAP
 
-	-- Icon override (icon display only).
-	local iconBox = get("iconBox", function()
-		return QAT.widgets.EditBox(container, "QAT_Ph_IconBox", 260, ROW_H)
-	end)
-	local iconLabel = get("lIcon", function()
-		return QAT.widgets.Label(container, "QAT_Ph_lIcon", "Icon")
-	end)
-	local iconPreview = get("iconPreview", function()
-		return WM:CreateControl("QAT_Ph_IconPreview", container, CT_TEXTURE)
-	end)
-	if phase.look.display == "icon" then
-		iconLabel:SetHidden(false)
-		iconLabel:SetText("Icon")
-		iconLabel:ClearAnchors()
-		iconLabel:SetAnchor(TOPLEFT, container, TOPLEFT, PAD, y + 3)
-		QAT.widgets.Tooltip(
-			iconLabel,
+	local kind = phase.look.display or "bar"
+	local isVisual = kind == "bar" or kind == "icon" or kind == "text"
+	local canLabel = kind == "bar" or kind == "text"
+	local canColor = kind == "bar" or kind == "text"
+
+	-- Icon override (icon kind only).
+	if kind == "icon" then
+		fieldLabel(
+			"lIcon",
+			"Icon",
+			y,
 			"Texture path for the icon. Leave empty to use the tracked ability's own icon automatically."
 		)
-		iconBox:SetHidden(false)
+		local iconBox = get("iconBox", function()
+			return QAT.widgets.EditBox(container, "QAT_Ph_IconBox", 260, ROW_H)
+		end)
 		iconBox.onChange = function(text)
 			text = zo_strtrim(text or "")
 			phase.look.icon = (text ~= "" and text) or nil
@@ -285,129 +283,176 @@ local function render(container, def)
 		iconBox:SetText(phase.look.icon or "")
 		iconBox:ClearAnchors()
 		iconBox:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
-		iconPreview:SetHidden(false)
+		local iconPreview = get("iconPreview", function()
+			return WM:CreateControl("QAT_Ph_IconPreview", container, CT_TEXTURE)
+		end)
 		iconPreview:SetDimensions(ROW_H, ROW_H)
 		iconPreview:SetTexture(QAT.util.PhaseIcon(phase) or "/esoui/art/icons/icon_missing.dds")
 		iconPreview:ClearAnchors()
 		iconPreview:SetAnchor(LEFT, iconBox, RIGHT, 8, 0)
 		y = y + ROW_H + GAP
-	else
-		iconLabel:SetHidden(true)
-		iconBox:SetHidden(true)
-		iconPreview:SetHidden(true)
 	end
 
-	-- Label text.
-	fieldLabel(
-		"lName",
-		"Label text",
-		y,
-		"Text drawn next to the bar / on icons. Leave empty to use the tracker's name."
-	)
-	local nameBox = get("nameBox", function()
-		return QAT.widgets.EditBox(container, "QAT_Ph_NameBox", 220, ROW_H)
-	end)
-	nameBox.onChange = function(text)
-		phase.look.name = text
-		commit(def)
-	end
-	nameBox:SetText(phase.look.name or "")
-	nameBox:ClearAnchors()
-	nameBox:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
-	y = y + ROW_H + GAP
-
-	-- Primary (bar / fill) color + Decimals. (Full per-element colors come in Stage B.)
-	fieldLabel("lColor", "Color", y, "Primary fill / bar colour. Per-element colours arrive with the Appearance tab.")
-	local colorSw = get("colorSw", function()
-		return QAT.widgets.ColorSwatch(container, "QAT_Ph_Color", ROW_H, { 1, 1, 1, 1 })
-	end)
-	colorSw.onChange = function(c)
-		phase.look.colors = phase.look.colors or {}
-		phase.look.colors.bar = c
-		commit(def)
-	end
-	colorSw:SetColor((phase.look.colors and phase.look.colors.bar) or { 0.2, 0.8, 0.35, 1 })
-	colorSw:ClearAnchors()
-	colorSw:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
-
-	local decLabel = get("lDec", function()
-		return QAT.widgets.Label(container, "QAT_Ph_lDec", "Decimals")
-	end)
-	decLabel:SetText("Decimals")
-	decLabel:ClearAnchors()
-	decLabel:SetAnchor(TOPLEFT, container, TOPLEFT, LX + 44, y + 3)
-	QAT.widgets.Tooltip(decLabel, "Decimal places on the time readout.")
-	local decBox = get("decBox", function()
-		return QAT.widgets.EditBox(container, "QAT_Ph_Dec", 50, ROW_H)
-	end)
-	decBox.onChange = function(text)
-		phase.look.decimals = tonumber(text) or 0
-		commit(def)
-	end
-	decBox:SetText(tostring(phase.look.decimals or 1))
-	decBox:ClearAnchors()
-	decBox:SetAnchor(TOPLEFT, container, TOPLEFT, LX + 120, y)
-	y = y + ROW_H + GAP
-
-	-- Show time / Show stacks (both explicit toggles).
-	fieldLabel("lShowTime", "Show time", y, "Show the remaining-time number while this phase has a running timer.")
-	local timeChk = get("timeChk", function()
-		return QAT.widgets.Checkbox(container, "QAT_Ph_ShowTime", true)
-	end)
-	timeChk:SetChecked(phase.look.showTime ~= false)
-	timeChk.onToggle = function(v)
-		phase.look.showTime = v
-		commit(def)
-	end
-	timeChk:ClearAnchors()
-	timeChk:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y + 2)
-	y = y + ROW_H + GAP
-
-	fieldLabel(
-		"lShowStacks",
-		"Show stacks",
-		y,
-		"This effect has stacks - show the stack number when the game reports stacks (>= 1)."
-	)
-	local stacksChk = get("stacksChk", function()
-		return QAT.widgets.Checkbox(container, "QAT_Ph_ShowStacks", false)
-	end)
-	stacksChk:SetChecked(phase.look.showStacks or false)
-	stacksChk.onToggle = function(v)
-		phase.look.showStacks = v or nil
-		commit(def)
-	end
-	stacksChk:ClearAnchors()
-	stacksChk:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y + 2)
-	y = y + ROW_H + GAP
-
-	-- Font sizes for the three readouts (label / time / stacks).
-	fieldLabel("lFont", "Font size", y, "Font size of the Label / Time / Stacks text. Blank uses the default.")
-	phase.look.fontSizes = phase.look.fontSizes or {}
-	local FONT_DEFAULTS = { label = 20, time = 20, stacks = 16 }
-	local fx = LX
-	for _, fkey in ipairs({ "label", "time", "stacks" }) do
-		local key = fkey
-		local cap = get("fcap_" .. key, function()
-			return QAT.widgets.Label(container, "QAT_Ph_FCap_" .. key, "")
+	-- Label text (bar / text only).
+	if canLabel then
+		fieldLabel(
+			"lName",
+			"Label text",
+			y,
+			"Text drawn next to the bar / as the text. Leave empty to use the tracker's name."
+		)
+		local nameBox = get("nameBox", function()
+			return QAT.widgets.EditBox(container, "QAT_Ph_NameBox", 220, ROW_H)
 		end)
-		cap:SetText(key:sub(1, 1):upper())
-		cap:ClearAnchors()
-		cap:SetAnchor(TOPLEFT, container, TOPLEFT, fx, y + 3)
-		QAT.widgets.Tooltip(cap, key:gsub("^%l", string.upper) .. " font size")
-		local box = get("fbox_" .. key, function()
-			return QAT.widgets.EditBox(container, "QAT_Ph_FBox_" .. key, 42, ROW_H)
-		end)
-		box.onChange = function(text)
-			phase.look.fontSizes[key] = tonumber(text) or nil
+		nameBox.onChange = function(text)
+			phase.look.name = text
 			commit(def)
 		end
-		box:SetText(phase.look.fontSizes[key] and tostring(phase.look.fontSizes[key]) or tostring(FONT_DEFAULTS[key]))
-		box:ClearAnchors()
-		box:SetAnchor(TOPLEFT, container, TOPLEFT, fx + 14, y)
-		fx = fx + 14 + 42 + 12
+		nameBox:SetText(phase.look.name or "")
+		nameBox:ClearAnchors()
+		nameBox:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
+		y = y + ROW_H + GAP
 	end
-	y = y + ROW_H + GAP
+
+	-- Color (bar fill for bars, text colour for text).
+	if canColor then
+		local colorKey = (kind == "text") and "text" or "bar"
+		local default = (kind == "text") and { 1, 1, 1, 1 } or { 0.2, 0.8, 0.35, 1 }
+		fieldLabel(
+			"lColor",
+			"Color",
+			y,
+			"The "
+				.. (kind == "text" and "text" or "bar fill")
+				.. " colour. (Other elements get their own colours in the Appearance tab.)"
+		)
+		local colorSw = get("colorSw", function()
+			return QAT.widgets.ColorSwatch(container, "QAT_Ph_Color", ROW_H, { 1, 1, 1, 1 })
+		end)
+		colorSw.onChange = function(c)
+			phase.look.colors = phase.look.colors or {}
+			phase.look.colors[colorKey] = c
+			commit(def)
+		end
+		colorSw:SetColor((phase.look.colors and phase.look.colors[colorKey]) or default)
+		colorSw:ClearAnchors()
+		colorSw:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
+		y = y + ROW_H + GAP
+	end
+
+	-- Readout options (any visual kind): show time, show stacks, decimals, fonts.
+	if isVisual then
+		fieldLabel("lShowTime", "Show time", y, "Show the remaining-time number while this phase has a running timer.")
+		local timeChk = get("timeChk", function()
+			return QAT.widgets.Checkbox(container, "QAT_Ph_ShowTime", true)
+		end)
+		timeChk:SetChecked(phase.look.showTime ~= false)
+		timeChk.onToggle = function(v)
+			phase.look.showTime = v
+			commit(def)
+		end
+		timeChk:ClearAnchors()
+		timeChk:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y + 2)
+
+		local decLabel = get("lDec", function()
+			return QAT.widgets.Label(container, "QAT_Ph_lDec", "Decimals")
+		end)
+		decLabel:SetText("Decimals")
+		decLabel:ClearAnchors()
+		decLabel:SetAnchor(TOPLEFT, container, TOPLEFT, LX + 44, y + 3)
+		QAT.widgets.Tooltip(decLabel, "Decimal places on the time readout.")
+		local decBox = get("decBox", function()
+			return QAT.widgets.EditBox(container, "QAT_Ph_Dec", 50, ROW_H)
+		end)
+		decBox.onChange = function(text)
+			phase.look.decimals = tonumber(text) or 0
+			commit(def)
+		end
+		decBox:SetText(tostring(phase.look.decimals or 1))
+		decBox:ClearAnchors()
+		decBox:SetAnchor(TOPLEFT, container, TOPLEFT, LX + 120, y)
+		y = y + ROW_H + GAP
+
+		fieldLabel(
+			"lShowStacks",
+			"Show stacks",
+			y,
+			"This effect has stacks - show the stack number when the game reports stacks (>= 1)."
+		)
+		local stacksChk = get("stacksChk", function()
+			return QAT.widgets.Checkbox(container, "QAT_Ph_ShowStacks", false)
+		end)
+		stacksChk:SetChecked(phase.look.showStacks or false)
+		stacksChk.onToggle = function(v)
+			phase.look.showStacks = v or nil
+			commit(def)
+		end
+		stacksChk:ClearAnchors()
+		stacksChk:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y + 2)
+		y = y + ROW_H + GAP
+
+		-- Font sizes per readout. Icons have no label, so just time/stacks there.
+		fieldLabel("lFont", "Font size", y, "Font size of each readout. Blank uses the default.")
+		phase.look.fontSizes = phase.look.fontSizes or {}
+		local FONT_DEFAULTS = { label = 20, time = 20, stacks = 16 }
+		local fkeys = canLabel and { "label", "time", "stacks" } or { "time", "stacks" }
+		local fx = LX
+		for _, key in ipairs(fkeys) do
+			local cap = get("fcap_" .. key, function()
+				return QAT.widgets.Label(container, "QAT_Ph_FCap_" .. key, "")
+			end)
+			cap:SetText(key:sub(1, 1):upper())
+			cap:ClearAnchors()
+			cap:SetAnchor(TOPLEFT, container, TOPLEFT, fx, y + 3)
+			QAT.widgets.Tooltip(cap, key:gsub("^%l", string.upper) .. " font size")
+			local box = get("fbox_" .. key, function()
+				return QAT.widgets.EditBox(container, "QAT_Ph_FBox_" .. key, 42, ROW_H)
+			end)
+			box.onChange = function(text)
+				phase.look.fontSizes[key] = tonumber(text) or nil
+				commit(def)
+			end
+			box:SetText(
+				phase.look.fontSizes[key] and tostring(phase.look.fontSizes[key]) or tostring(FONT_DEFAULTS[key])
+			)
+			box:ClearAnchors()
+			box:SetAnchor(TOPLEFT, container, TOPLEFT, fx + 14, y)
+			fx = fx + 14 + 42 + 12
+		end
+		y = y + ROW_H + GAP
+	end
+
+	-- Audio Cue: a sound name (played on enter) plus a Test button.
+	if kind == "audio" then
+		phase.cues = phase.cues or {}
+		fieldLabel(
+			"lSound",
+			"Sound",
+			y,
+			"ESO sound name played when this phase is entered (e.g. NEW_NOTIFICATION). A sound picker comes later."
+		)
+		local soundBox = get("soundBox", function()
+			return QAT.widgets.EditBox(container, "QAT_Ph_Sound", 220, ROW_H)
+		end)
+		soundBox.onChange = function(text)
+			text = zo_strtrim(text or "")
+			phase.cues.sound = (text ~= "" and text) or nil
+			commit(def)
+		end
+		soundBox:SetText(phase.cues.sound or "")
+		soundBox:ClearAnchors()
+		soundBox:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
+		local testBtn = get("soundTest", function()
+			return QAT.widgets.TextButton(container, "QAT_Ph_SoundTest", "Test", nil)
+		end)
+		testBtn:SetDimensions(60, ROW_H)
+		testBtn:ClearAnchors()
+		testBtn:SetAnchor(LEFT, soundBox, RIGHT, 8, 0)
+		testBtn.onClick = function()
+			QAT.FireCues({ sound = phase.cues.sound })
+		end
+		y = y + ROW_H + GAP
+	end
 
 	-- ===== Behavior =====
 	sectionHeader("hBehavior", "Behavior", y)

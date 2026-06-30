@@ -227,8 +227,8 @@ function QAT.display.Create(def)
 	end
 
 	function control:SetState(active, remaining, duration, stacks)
-		if not active or self.kind == "none" then
-			self.tlw:SetHidden(true)
+		if not active or self.kind == "none" or self.kind == "audio" then
+			self.tlw:SetHidden(true) -- non-visual kinds; an audio cue fires on enter
 			return
 		end
 		self.tlw:SetHidden(false)

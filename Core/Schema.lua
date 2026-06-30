@@ -38,7 +38,9 @@
 -- hidden phase. A flat single-phase shorthand and the older enter/onExpire shape
 -- are both accepted and expanded/migrated here.
 
-local DISPLAY_KINDS = { bar = true, icon = true, text = true, none = true }
+-- "audio" is a non-visual kind: it draws nothing and plays the phase's cue on
+-- enter (the sound is stored in phase.cues.sound).
+local DISPLAY_KINDS = { bar = true, icon = true, text = true, none = true, audio = true }
 local COLOR_KEYS = { "background", "bar", "border", "stacks", "text", "timer", "cooldown" }
 
 local function canonicalLook(src)

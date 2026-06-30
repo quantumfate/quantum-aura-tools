@@ -30,8 +30,10 @@ function QAT.FireCues(cues)
 	end
 
 	if cues.sound then
+		-- Accept either a SOUNDS key ("NEW_NOTIFICATION") or a raw sound id.
 		-- pcall: an invalid/removed sound name should never break a transition.
-		pcall(PlaySound, cues.sound)
+		local sound = (SOUNDS and SOUNDS[cues.sound]) or cues.sound
+		pcall(PlaySound, sound)
 	end
 
 	if cues.flash then
