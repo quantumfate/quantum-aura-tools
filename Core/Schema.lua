@@ -11,6 +11,8 @@
 --       {
 --         id,
 --         look    = { display = "bar"|"icon"|"text"|"none",
+--                     value = "time"|"stacks"|"none",  -- what the bar/number shows
+--                     showStacks, maxStacks,           -- "(N)" badge; stacks denominator
 --                     name, color, icon, font, decimals, bgColor },
 --         duration = { type = "none"|"fixed"|"effect", seconds?, abilityIds?, unit? },
 --         enter   = { <trigger>, ... },    -- effect triggers that enter this phase
@@ -27,11 +29,18 @@
 -- except for recursion into children.
 
 local DISPLAY_KINDS = { bar = true, icon = true, text = true, none = true }
+-- What the bar fills from and the numeric readout shows. Decoupled from duration:
+-- a phase can read out stacks while still expiring on its effect's duration.
+local VALUE_KINDS = { time = true, stacks = true, none = true }
 
 local function canonicalLook(src)
 	local display = src.display
 	if not DISPLAY_KINDS[display] then
 		display = "bar"
+	end
+	local value = src.value
+	if not VALUE_KINDS[value] then
+		value = "time"
 	end
 	return {
 		display = display,
@@ -41,6 +50,9 @@ local function canonicalLook(src)
 		font = src.font,
 		decimals = src.decimals,
 		bgColor = src.bgColor,
+		value = value,
+		showStacks = src.showStacks or false,
+		maxStacks = src.maxStacks,
 	}
 end
 

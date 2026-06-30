@@ -75,11 +75,13 @@ function QAT.widgets.TextButton(parent, name, text, onClick)
 	return b
 end
 
--- A labeled checkbox (CT_CONTROL base + backdrop visual); onToggle(checked) on click.
+-- A checkbox (CT_CONTROL base + backdrop visual). The toggle callback is read from
+-- box.onToggle at fire time (rebindable per render, so a pooled box can be reused).
 function QAT.widgets.Checkbox(parent, name, checked, onToggle)
 	local box = QAT.widgets.Clickable(parent, name, { 0.10, 0.11, 0.13, 1 })
 	box.bg:SetEdgeColor(0, 0, 0, 1)
 	box:SetDimensions(18, 18)
+	box.onToggle = onToggle
 	local tick = QAT.widgets.Label(box, name .. "_Tick", checked and "x" or "")
 	tick:SetAnchor(CENTER)
 	tick:SetHorizontalAlignment(TEXT_ALIGN_CENTER)
@@ -91,8 +93,8 @@ function QAT.widgets.Checkbox(parent, name, checked, onToggle)
 	box:SetHandler("OnMouseUp", function(self, button, upInside)
 		if upInside and button == MOUSE_BUTTON_INDEX_LEFT then
 			self:SetChecked(not self.checked)
-			if onToggle then
-				onToggle(self.checked)
+			if self.onToggle then
+				self.onToggle(self.checked)
 			end
 		end
 	end)
@@ -125,6 +127,30 @@ function QAT.widgets.IconButton(parent, name, texture, size, onClick)
 		end
 	end)
 	return b
+end
+
+-- Attach a hover tooltip to a control. Enables mouse on the control and installs
+-- enter/exit handlers, so use it on passive controls (labels) rather than on
+-- interactive widgets that already own OnMouseEnter/Exit (buttons, dropdowns).
+-- The text is read from control.tooltipText at hover time, so it can be re-set on
+-- a pooled control each render.
+function QAT.widgets.Tooltip(control, text)
+	control.tooltipText = text
+	if control.qatTooltipBound then
+		return control
+	end
+	control.qatTooltipBound = true
+	control:SetMouseEnabled(true)
+	control:SetHandler("OnMouseEnter", function(self)
+		if self.tooltipText and self.tooltipText ~= "" then
+			InitializeTooltip(InformationTooltip, self, TOPLEFT, 0, 4, BOTTOMLEFT)
+			SetTooltipText(InformationTooltip, self.tooltipText)
+		end
+	end)
+	control:SetHandler("OnMouseExit", function()
+		ClearTooltip(InformationTooltip)
+	end)
+	return control
 end
 
 -- A bold section header label.

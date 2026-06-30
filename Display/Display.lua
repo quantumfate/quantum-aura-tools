@@ -103,6 +103,9 @@ function QAT.display.Create(def)
 		label = label,
 		name = def.name or tostring(def.id),
 		decimals = def.decimals or 1,
+		valueSource = def.value or "time",
+		showStacks = def.showStacks or false,
+		maxStacks = def.maxStacks,
 		baseColor = value(def, "color"),
 	}
 
@@ -118,32 +121,47 @@ function QAT.display.Create(def)
 		end
 	end
 
-	-- remaining/duration may be nil for a timer-less phase (e.g. "Ready"):
-	-- then the bar shows full and the label shows just the name.
+	-- The bar fill and the numeric readout come from the phase's value source:
+	--   "time"   - remaining / duration (a countdown bar)
+	--   "stacks" - stacks / maxStacks   (a stack meter; full if no maxStacks set)
+	--   "none"   - static full bar, name only
+	-- remaining/duration may be nil for a timer-less phase (e.g. "Ready"): a time
+	-- source then shows full and the label is just the name.
 	function control:SetState(active, remaining, duration, stacks)
 		if not active then
 			self.tlw:SetHidden(true)
 			return
 		end
 		self.tlw:SetHidden(false)
+		stacks = stacks or 0
 
 		local hasTimer = duration ~= nil and duration > 0
+		local src = self.valueSource
+		local fill = 1
+		if src == "time" and hasTimer then
+			fill = zo_clamp(remaining / duration, 0, 1)
+		elseif src == "stacks" then
+			fill = (self.maxStacks and self.maxStacks > 0) and zo_clamp(stacks / self.maxStacks, 0, 1) or 1
+		end
 		if self.bar then
-			self.bar:SetValue(hasTimer and zo_clamp(remaining / duration, 0, 1) or 1)
+			self.bar:SetValue(fill)
 			self.bar:SetColor(unpack(self.baseColor)) -- reset; runtime conds re-apply after
 		end
 
 		local text = self.name
-		if hasTimer then
+		if src == "time" and hasTimer then
 			text = text .. "  " .. string.format("%." .. self.decimals .. "f", remaining or 0)
+		elseif src == "stacks" then
+			text = text .. "  " .. stacks
 		end
-		if stacks and stacks > 1 then
+		-- Optional stacks badge, when the readout isn't already the stack count.
+		if self.showStacks and src ~= "stacks" and stacks > 1 then
 			text = text .. " (" .. stacks .. ")"
 		end
 		self.label:SetText(text)
 
 		if self.icon then
-			self.icon:SetDesaturation((hasTimer and remaining <= 0) and 1 or 0)
+			self.icon:SetDesaturation((hasTimer and remaining and remaining <= 0) and 1 or 0)
 		end
 	end
 
