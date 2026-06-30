@@ -1,10 +1,9 @@
 -- Appearance tab: how the selected phase draws. The phase is chosen by the shared
--- phase strip in the header (QAT.editor.selectedPhaseId); only the fields relevant
--- to the chosen Kind are shown.
+-- phase strip in the header. Laid out as grouped cards (Source / Colors / Text &
+-- Timer); only the fields and cards relevant to the chosen Kind are shown.
 
-local PAD = 12
-local ROW_H = 26
-local GAP = 8
+local ROW_H = 28
+local RH = 32 -- row pitch inside a card
 
 local KIND_OPTS = {
 	{ label = "Bar", value = "bar" },
@@ -14,7 +13,6 @@ local KIND_OPTS = {
 	{ label = "Audio Cue", value = "audio" },
 }
 local FONT_DEFAULTS = { label = 20, time = 20, stacks = 16 }
--- Constrained numeric choices (dropdowns) so invalid values can't be entered.
 local function numOpts(vals)
 	local t = {}
 	for _, v in ipairs(vals) do
@@ -25,7 +23,6 @@ end
 local FONT_OPTS = numOpts({ 10, 12, 14, 16, 18, 20, 22, 24, 28, 32, 36, 40, 48 })
 local BORDER_OPTS = numOpts({ 1, 2, 4, 8, 16 }) -- backdrop edge must be a power of two
 local DECIMAL_OPTS = numOpts({ 0, 1, 2 })
--- Swatch fallbacks (match Display's DEFAULT_COLORS).
 local DEFAULT_COLORS = {
 	background = { 0, 0, 0, 0.55 },
 	bar = { 0.20, 0.80, 0.35, 1 },
@@ -34,8 +31,8 @@ local DEFAULT_COLORS = {
 	text = { 1, 1, 1, 1 },
 	timer = { 1, 1, 1, 1 },
 }
--- Which colour elements each Kind exposes, in display order. (Icon has no bar /
--- background / text label; Text has no bar fill or stacks.)
+-- Which colour elements each Kind exposes. Icon has no bar/background/text label;
+-- Text has no bar fill or stacks.
 local COLOR_SET = {
 	icon = { { "stacks", "Stacks" }, { "timer", "Timer" }, { "border", "Border" } },
 	bar = {
@@ -78,39 +75,49 @@ local function render(container, def)
 		QAT.widgets.PoolEnd(pool)
 		return
 	end
+	local look = phase.look
+	look.colors = look.colors or {}
+	look.fontSizes = look.fontSizes or {}
+	local kind = look.display or "bar"
+	local isVisual = kind == "bar" or kind == "icon" or kind == "text"
+	local canLabel = kind == "bar" or kind == "text"
 
-	local LX = PAD + 110
-	local y = PAD
+	local cw = container:GetWidth()
+	if cw < 240 then
+		cw = 900
+	end
+	local OUT, CGAP, LW = 14, 16, 84
+	local topW = math.floor((cw - OUT * 2 - CGAP) / 2)
 
-	local function fieldLabel(key, text, yy, tip)
-		local l = get(key, function()
-			return QAT.widgets.Label(container, "QAT_App_" .. key, "")
+	-- Small builders that parent a control to a card and return it (pooled by key).
+	local function cardOf(key, title)
+		local c = get(key, function()
+			return QAT.widgets.Card(container, "QAT_App_" .. key, title)
+		end)
+		c:SetTitle(title)
+		return c
+	end
+	local function rowLabel(card, key, text, yy)
+		local l = get("L" .. key, function()
+			return QAT.widgets.Label(card, "QAT_App_L" .. key, "")
 		end)
 		l:SetText(text)
 		l:ClearAnchors()
-		l:SetAnchor(TOPLEFT, container, TOPLEFT, PAD, yy + 3)
-		QAT.widgets.Tooltip(l, tip)
+		l:SetAnchor(TOPLEFT, card, TOPLEFT, card.padX, yy + 5)
 		return l
 	end
 
-	-- Two columns: General (left) and Colors (right, see below).
-	local COLX = 430
-	local genHeader = get("hGen", function()
-		return QAT.widgets.SectionHeader(container, "QAT_App_hGen", "General")
-	end)
-	genHeader:ClearAnchors()
-	genHeader:SetAnchor(TOPLEFT, container, TOPLEFT, PAD, y)
-	y = y + ROW_H
+	-- ===== SOURCE card =====
+	local src = cardOf("cSrc", "Source")
+	src:ClearAnchors()
+	src:SetAnchor(TOPLEFT, container, TOPLEFT, OUT, OUT)
+	local sLX = src.padX + LW
+	local sFieldW = topW - sLX - src.padX
+	local sy = src.contentY
 
-	-- Phase id.
-	fieldLabel(
-		"lId",
-		"Phase id",
-		y,
-		"Internal name for this phase (e.g. Idle, Active, Cooldown). Transitions target phases by this name."
-	)
+	rowLabel(src, "Id", "Phase id", sy)
 	local idBox = get("idBox", function()
-		return QAT.widgets.EditBox(container, "QAT_App_IdBox", 180, ROW_H)
+		return QAT.widgets.EditBox(src, "QAT_App_IdBox", 100, ROW_H)
 	end)
 	idBox.onChange = function(text)
 		text = zo_strtrim(text)
@@ -120,7 +127,6 @@ local function render(container, def)
 			if def.initial == was then
 				def.initial = text
 			end
-			-- repoint transitions that targeted this phase
 			for _, p in ipairs(def.phases) do
 				for _, tr in ipairs(p.transitions) do
 					if tr.to == was then
@@ -133,253 +139,237 @@ local function render(container, def)
 			QAT.Editor_Inspector_Refresh()
 		end
 	end
+	idBox:SetDimensions(sFieldW, ROW_H)
 	idBox:SetText(phase.id)
 	idBox:ClearAnchors()
-	idBox:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
-	y = y + ROW_H + GAP
+	idBox:SetAnchor(TOPLEFT, src, TOPLEFT, sLX, sy)
+	sy = sy + RH
 
-	-- Kind.
-	fieldLabel(
-		"lKind",
-		"Kind",
-		y,
-		"What this phase is: Bar / Icon / Text draw on screen, None is hidden (e.g. an idle phase), Audio Cue plays a sound on enter and draws nothing."
-	)
+	rowLabel(src, "Kind", "Kind", sy)
 	local kindDD = get("kindDD", function()
-		return QAT.widgets.Dropdown(container, "QAT_App_Kind", 180, KIND_OPTS, "bar")
+		return QAT.widgets.Dropdown(src, "QAT_App_Kind", 180, KIND_OPTS, "bar")
 	end)
 	kindDD.onSelect = function(v)
-		phase.look.display = v
+		look.display = v
 		commit(def)
 		render(container, def)
 	end
-	kindDD:SetValue(phase.look.display or "bar")
+	kindDD:SetValue(kind)
+	kindDD:SetDimensions(sFieldW, 24)
 	kindDD:ClearAnchors()
-	kindDD:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
-	y = y + ROW_H + GAP
-
-	local kind = phase.look.display or "bar"
-	local isVisual = kind == "bar" or kind == "icon" or kind == "text"
-	local canLabel = kind == "bar" or kind == "text"
+	kindDD:SetAnchor(TOPLEFT, src, TOPLEFT, sLX, sy)
+	sy = sy + RH
 
 	if kind == "icon" then
-		fieldLabel(
-			"lIcon",
-			"Icon",
-			y,
-			"Texture path for the icon. Leave empty to use the tracked ability's own icon automatically."
-		)
+		rowLabel(src, "Icon", "Icon", sy)
 		local iconBox = get("iconBox", function()
-			return QAT.widgets.EditBox(container, "QAT_App_IconBox", 260, ROW_H)
+			return QAT.widgets.EditBox(src, "QAT_App_IconBox", 100, ROW_H)
 		end)
 		iconBox.onChange = function(text)
 			text = zo_strtrim(text or "")
-			phase.look.icon = (text ~= "" and text) or nil
+			look.icon = (text ~= "" and text) or nil
 			commit(def)
 			render(container, def)
 		end
-		iconBox:SetText(phase.look.icon or "")
+		iconBox:SetDimensions(sFieldW - ROW_H - 8, ROW_H)
+		iconBox:SetText(look.icon or "")
 		iconBox:ClearAnchors()
-		iconBox:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
-		local iconPreview = get("iconPreview", function()
-			return QAT.widgets.IconWell(container, "QAT_App_IconPreview", ROW_H)
+		iconBox:SetAnchor(TOPLEFT, src, TOPLEFT, sLX, sy)
+		local prev = get("iconPreview", function()
+			return QAT.widgets.IconWell(src, "QAT_App_IconPreview", ROW_H)
 		end)
-		iconPreview:SetTexture(QAT.util.PhaseIcon(phase) or "/esoui/art/icons/icon_missing.dds")
-		iconPreview:ClearAnchors()
-		iconPreview:SetAnchor(LEFT, iconBox, RIGHT, 8, 0)
-		y = y + ROW_H + GAP
-	end
-
-	if canLabel then
-		fieldLabel(
-			"lName",
-			"Label text",
-			y,
-			"Text drawn next to the bar / as the text. Leave empty to use the tracker's name."
-		)
+		prev:SetTexture(QAT.util.PhaseIcon(phase) or "/esoui/art/icons/icon_missing.dds")
+		prev:ClearAnchors()
+		prev:SetAnchor(LEFT, iconBox, RIGHT, 8, 0)
+		sy = sy + RH
+	elseif canLabel then
+		rowLabel(src, "Name", "Label text", sy)
 		local nameBox = get("nameBox", function()
-			return QAT.widgets.EditBox(container, "QAT_App_NameBox", 220, ROW_H)
+			return QAT.widgets.EditBox(src, "QAT_App_NameBox", 100, ROW_H)
 		end)
 		nameBox.onChange = function(text)
-			phase.look.name = text
+			look.name = text
 			commit(def)
 		end
-		nameBox:SetText(phase.look.name or "")
+		nameBox:SetDimensions(sFieldW, ROW_H)
+		nameBox:SetText(look.name or "")
 		nameBox:ClearAnchors()
-		nameBox:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
-		y = y + ROW_H + GAP
-	end
-
-	-- Border width (General column; the colours live in the right column).
-	if isVisual then
-		fieldLabel("lBorderT", "Border width", y, "Border thickness in pixels (must be a power of two).")
-		local btDD = get("btDD", function()
-			return QAT.widgets.Dropdown(container, "QAT_App_BorderT", 70, BORDER_OPTS, 1)
-		end)
-		btDD.onSelect = function(v)
-			phase.look.borderThickness = v
-			commit(def)
-		end
-		btDD:SetValue(phase.look.borderThickness or 1)
-		btDD:ClearAnchors()
-		btDD:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
-		y = y + ROW_H + GAP
-	end
-
-	if isVisual then
-		fieldLabel("lShowTime", "Show time", y, "Show the remaining-time number while this phase has a running timer.")
-		local timeChk = get("timeChk", function()
-			return QAT.widgets.Checkbox(container, "QAT_App_ShowTime", true)
-		end)
-		timeChk:SetChecked(phase.look.showTime ~= false)
-		timeChk.onToggle = function(v)
-			phase.look.showTime = v
-			commit(def)
-		end
-		timeChk:ClearAnchors()
-		timeChk:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y + 2)
-
-		local decLabel = get("lDec", function()
-			return QAT.widgets.Label(container, "QAT_App_lDec", "Decimals")
-		end)
-		decLabel:SetText("Decimals")
-		decLabel:ClearAnchors()
-		decLabel:SetAnchor(TOPLEFT, container, TOPLEFT, LX + 44, y + 3)
-		QAT.widgets.Tooltip(decLabel, "Decimal places on the time readout.")
-		local decDD = get("decDD", function()
-			return QAT.widgets.Dropdown(container, "QAT_App_Dec", 60, DECIMAL_OPTS, 1)
-		end)
-		decDD.onSelect = function(v)
-			phase.look.decimals = v
-			commit(def)
-		end
-		decDD:SetValue(phase.look.decimals or 1)
-		decDD:ClearAnchors()
-		decDD:SetAnchor(TOPLEFT, container, TOPLEFT, LX + 120, y)
-		y = y + ROW_H + GAP
-
-		-- Stacks only apply to bar/icon (text never shows them).
-		if kind ~= "text" then
-			fieldLabel(
-				"lShowStacks",
-				"Show stacks",
-				y,
-				"This effect has stacks - show the stack number when the game reports stacks (>= 1)."
-			)
-			local stacksChk = get("stacksChk", function()
-				return QAT.widgets.Checkbox(container, "QAT_App_ShowStacks", false)
-			end)
-			stacksChk:SetChecked(phase.look.showStacks or false)
-			stacksChk.onToggle = function(v)
-				phase.look.showStacks = v or nil
-				commit(def)
-			end
-			stacksChk:ClearAnchors()
-			stacksChk:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y + 2)
-			y = y + ROW_H + GAP
-		end
-
-		fieldLabel("lFont", "Font size", y, "Font size of each readout. Blank uses the default.")
-		phase.look.fontSizes = phase.look.fontSizes or {}
-		local fkeys = { "label", "time", "stacks" }
-		if kind == "icon" then
-			fkeys = { "time", "stacks" } -- icons have no label
-		elseif kind == "text" then
-			fkeys = { "label", "time" } -- text has no stacks
-		end
-		local fx = LX
-		for _, key in ipairs(fkeys) do
-			local fkey = key
-			local cap = get("fcap_" .. fkey, function()
-				return QAT.widgets.Label(container, "QAT_App_FCap_" .. fkey, "")
-			end)
-			cap:SetText(fkey:sub(1, 1):upper())
-			cap:ClearAnchors()
-			cap:SetAnchor(TOPLEFT, container, TOPLEFT, fx, y + 3)
-			QAT.widgets.Tooltip(cap, fkey:gsub("^%l", string.upper) .. " font size")
-			local dd = get("fdd_" .. fkey, function()
-				return QAT.widgets.Dropdown(container, "QAT_App_FDD_" .. fkey, 60, FONT_OPTS, 20)
-			end)
-			dd.onSelect = function(v)
-				phase.look.fontSizes[fkey] = v
-				commit(def)
-			end
-			dd:SetValue(phase.look.fontSizes[fkey] or FONT_DEFAULTS[fkey])
-			dd:ClearAnchors()
-			dd:SetAnchor(TOPLEFT, container, TOPLEFT, fx + 16, y)
-			fx = fx + 16 + 60 + 14
-		end
-		y = y + ROW_H + GAP
-
-		-- ===== Right column: Colors =====
-		local colHeader = get("hColors", function()
-			return QAT.widgets.SectionHeader(container, "QAT_App_hColors", "Colors")
-		end)
-		colHeader:ClearAnchors()
-		colHeader:SetAnchor(TOPLEFT, container, TOPLEFT, COLX, PAD)
-		local cy = PAD + ROW_H
-		for _, f in ipairs(COLOR_SET[kind] or {}) do
-			local key = f[1]
-			local cap = get("cc_" .. key, function()
-				return QAT.widgets.Label(container, "QAT_App_CC_" .. key, "")
-			end)
-			cap:SetText(f[2])
-			cap:ClearAnchors()
-			cap:SetAnchor(TOPLEFT, container, TOPLEFT, COLX, cy + 3)
-			QAT.widgets.Tooltip(cap, f[2] .. " colour.")
-			local sw = get("cs_" .. key, function()
-				return QAT.widgets.ColorSwatch(container, "QAT_App_CS_" .. key, ROW_H, { 1, 1, 1, 1 })
-			end)
-			sw.onChange = function(c)
-				phase.look.colors = phase.look.colors or {}
-				phase.look.colors[key] = c
-				commit(def)
-			end
-			sw:SetColor((phase.look.colors and phase.look.colors[key]) or DEFAULT_COLORS[key])
-			sw:ClearAnchors()
-			sw:SetAnchor(TOPLEFT, container, TOPLEFT, COLX + 110, cy)
-			cy = cy + ROW_H + GAP
-		end
-
-		-- Vertical rule separating the two columns.
-		local vdiv = get("vdiv", function()
-			return QAT.widgets.Panel(container, "QAT_App_VDiv", { 0.30, 0.34, 0.42, 0.6 }, { 0, 0, 0, 0 })
-		end)
-		vdiv:ClearAnchors()
-		vdiv:SetDimensions(1, math.max(y, cy) - PAD)
-		vdiv:SetAnchor(TOPLEFT, container, TOPLEFT, COLX - 24, PAD)
-	end
-
-	if kind == "audio" then
+		nameBox:SetAnchor(TOPLEFT, src, TOPLEFT, sLX, sy)
+		sy = sy + RH
+	elseif kind == "audio" then
 		phase.cues = phase.cues or {}
-		fieldLabel(
-			"lSound",
-			"Sound",
-			y,
-			"ESO sound name played when this phase is entered (e.g. NEW_NOTIFICATION). A sound picker comes later."
-		)
+		rowLabel(src, "Snd", "Sound", sy)
 		local soundBox = get("soundBox", function()
-			return QAT.widgets.EditBox(container, "QAT_App_Sound", 220, ROW_H)
+			return QAT.widgets.EditBox(src, "QAT_App_Sound", 100, ROW_H)
 		end)
 		soundBox.onChange = function(text)
 			text = zo_strtrim(text or "")
 			phase.cues.sound = (text ~= "" and text) or nil
 			commit(def)
 		end
+		soundBox:SetDimensions(sFieldW - 60, ROW_H)
 		soundBox:SetText(phase.cues.sound or "")
 		soundBox:ClearAnchors()
-		soundBox:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
+		soundBox:SetAnchor(TOPLEFT, src, TOPLEFT, sLX, sy)
 		local testBtn = get("soundTest", function()
-			return QAT.widgets.TextButton(container, "QAT_App_SoundTest", "Test", nil)
+			return QAT.widgets.TextButton(src, "QAT_App_SoundTest", "Test", nil)
 		end)
 		testBtn:SetHeight(ROW_H)
 		testBtn:ClearAnchors()
-		QAT.widgets.Tooltip(testBtn, "Play this sound now.")
 		testBtn:SetAnchor(LEFT, soundBox, RIGHT, 8, 0)
 		testBtn.onClick = function()
 			QAT.FireCues({ sound = phase.cues.sound })
 		end
-		y = y + ROW_H + GAP
+		sy = sy + RH
+	end
+	local srcH = sy + 6
+
+	-- ===== COLORS card (visual kinds) =====
+	local topH = srcH
+	if isVisual then
+		local col = cardOf("cCol", "Colors")
+		col:ClearAnchors()
+		col:SetAnchor(TOPLEFT, container, TOPLEFT, OUT + topW + CGAP, OUT)
+		local fields = COLOR_SET[kind] or {}
+		local colX = { col.padX, math.floor(topW / 2) + 6 }
+		local cy = col.contentY
+		for i, f in ipairs(fields) do
+			local key = f[1]
+			local cidx = (i - 1) % 2
+			local fx = colX[cidx + 1]
+			local cap = get("cc_" .. key, function()
+				return QAT.widgets.Label(col, "QAT_App_CC_" .. key, "")
+			end)
+			cap:SetText(f[2])
+			cap:ClearAnchors()
+			cap:SetAnchor(TOPLEFT, col, TOPLEFT, fx, cy + 5)
+			QAT.widgets.Tooltip(cap, f[2] .. " colour.")
+			local sw = get("cs_" .. key, function()
+				return QAT.widgets.ColorSwatch(col, "QAT_App_CS_" .. key, ROW_H, { 1, 1, 1, 1 })
+			end)
+			sw.onChange = function(c)
+				look.colors[key] = c
+				commit(def)
+			end
+			sw:SetColor(look.colors[key] or DEFAULT_COLORS[key])
+			sw:ClearAnchors()
+			sw:SetAnchor(TOPLEFT, col, TOPLEFT, fx + 78, cy)
+			if cidx == 1 then
+				cy = cy + RH
+			end
+		end
+		if #fields % 2 == 1 then
+			cy = cy + RH
+		end
+
+		rowLabel(col, "BW", "Border width", cy)
+		local btDD = get("btDD", function()
+			return QAT.widgets.Dropdown(col, "QAT_App_BorderT", 70, BORDER_OPTS, 1)
+		end)
+		btDD.onSelect = function(v)
+			look.borderThickness = v
+			commit(def)
+		end
+		btDD:SetValue(look.borderThickness or 1)
+		btDD:ClearAnchors()
+		btDD:SetAnchor(TOPLEFT, col, TOPLEFT, col.padX + 96, cy)
+		cy = cy + RH
+
+		topH = math.max(srcH, cy + 6)
+		col:SetDimensions(topW, topH)
+	end
+	src:SetDimensions(topW, topH)
+
+	-- ===== TEXT & TIMER card (visual kinds), full width below =====
+	if isVisual then
+		local tt = cardOf("cTT", "Text & Timer")
+		tt:ClearAnchors()
+		tt:SetAnchor(TOPLEFT, container, TOPLEFT, OUT, OUT + topH + CGAP)
+		local ty = tt.contentY
+
+		-- Row 1: Show time | Decimals | Font size (T / S / L per kind).
+		rowLabel(tt, "ShowTime", "Show time", ty)
+		local timeChk = get("timeChk", function()
+			return QAT.widgets.Checkbox(tt, "QAT_App_ShowTime", true)
+		end)
+		timeChk:SetChecked(look.showTime ~= false)
+		timeChk.onToggle = function(v)
+			look.showTime = v
+			commit(def)
+		end
+		timeChk:ClearAnchors()
+		timeChk:SetAnchor(TOPLEFT, tt, TOPLEFT, tt.padX + LW, ty + 4)
+
+		local decCap = get("LDec", function()
+			return QAT.widgets.Label(tt, "QAT_App_LDec", "Decimals")
+		end)
+		decCap:SetText("Decimals")
+		decCap:ClearAnchors()
+		decCap:SetAnchor(TOPLEFT, tt, TOPLEFT, tt.padX + 200, ty + 5)
+		local decDD = get("decDD", function()
+			return QAT.widgets.Dropdown(tt, "QAT_App_Dec", 60, DECIMAL_OPTS, 1)
+		end)
+		decDD.onSelect = function(v)
+			look.decimals = v
+			commit(def)
+		end
+		decDD:SetValue(look.decimals or 1)
+		decDD:ClearAnchors()
+		decDD:SetAnchor(TOPLEFT, tt, TOPLEFT, tt.padX + 270, ty)
+
+		local fontCap = get("LFont", function()
+			return QAT.widgets.Label(tt, "QAT_App_LFont", "Font size")
+		end)
+		fontCap:SetText("Font size")
+		fontCap:ClearAnchors()
+		fontCap:SetAnchor(TOPLEFT, tt, TOPLEFT, tt.padX + 360, ty + 5)
+		local fkeys = { "label", "time", "stacks" }
+		if kind == "icon" then
+			fkeys = { "time", "stacks" }
+		elseif kind == "text" then
+			fkeys = { "label", "time" }
+		end
+		local fx = tt.padX + 440
+		for _, key in ipairs(fkeys) do
+			local fk = key
+			local letter = get("fcap_" .. fk, function()
+				return QAT.widgets.Label(tt, "QAT_App_FCap_" .. fk, "")
+			end)
+			letter:SetText(fk:sub(1, 1):upper())
+			letter:ClearAnchors()
+			letter:SetAnchor(TOPLEFT, tt, TOPLEFT, fx, ty + 5)
+			QAT.widgets.Tooltip(letter, fk:gsub("^%l", string.upper) .. " font size")
+			local dd = get("fdd_" .. fk, function()
+				return QAT.widgets.Dropdown(tt, "QAT_App_FDD_" .. fk, 56, FONT_OPTS, 20)
+			end)
+			dd.onSelect = function(v)
+				look.fontSizes[fk] = v
+				commit(def)
+			end
+			dd:SetValue(look.fontSizes[fk] or FONT_DEFAULTS[fk])
+			dd:ClearAnchors()
+			dd:SetAnchor(TOPLEFT, tt, TOPLEFT, fx + 16, ty)
+			fx = fx + 16 + 56 + 12
+		end
+		ty = ty + RH
+
+		-- Row 2: Show stacks (bar/icon only).
+		if kind ~= "text" then
+			rowLabel(tt, "ShowStacks", "Show stacks", ty)
+			local stacksChk = get("stacksChk", function()
+				return QAT.widgets.Checkbox(tt, "QAT_App_ShowStacks", false)
+			end)
+			stacksChk:SetChecked(look.showStacks or false)
+			stacksChk.onToggle = function(v)
+				look.showStacks = v or nil
+				commit(def)
+			end
+			stacksChk:ClearAnchors()
+			stacksChk:SetAnchor(TOPLEFT, tt, TOPLEFT, tt.padX + LW, ty + 4)
+			ty = ty + RH
+		end
+
+		tt:SetDimensions(cw - OUT * 2, ty + 6)
 	end
 
 	QAT.widgets.PoolEnd(pool)

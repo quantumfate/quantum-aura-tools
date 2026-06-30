@@ -225,7 +225,7 @@ local function makeRow(parent, def, depth, y)
 
 	row.defId = def.id
 	local selected = QAT.editor.selectedId == def.id
-	row.bg:SetCenterColor(unpack(selected and { 0.20, 0.28, 0.40, 1 } or { 0, 0, 0, 0 }))
+	row.bg:SetCenterColor(unpack(selected and { 0.21, 0.40, 0.72, 0.55 } or { 0, 0, 0, 0 }))
 	-- Click selects; a vertical drag onto another row reparents (drag-drop nesting).
 	row:SetHandler("OnMouseDown", function()
 		QAT.editor.treeDragId = def.id

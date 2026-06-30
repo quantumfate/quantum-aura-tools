@@ -150,7 +150,7 @@ function QAT.Editor_Inspector_Build(pane)
 	-- ===== Header (tracker scope), two rows =====
 	-- Row 1:  Name | Size | Position (left)            Center  Pop out   Phases  Load (right)
 	-- Row 2:  the phase strip (Phase: chips +Phase ............ Set initial  Delete phase)
-	local header = QAT.widgets.Panel(pane, "QAT_Insp_Header", { 0.12, 0.13, 0.17, 1 })
+	local header = QAT.widgets.Panel(pane, "QAT_Insp_Header", { 0.06, 0.075, 0.105, 1 })
 	header:SetAnchor(TOPLEFT, pane, TOPLEFT, 0, 0)
 	header:SetAnchor(TOPRIGHT, pane, TOPRIGHT, 0, 0)
 	header:SetHeight(QAT.editor.HEADER_H)
@@ -289,7 +289,7 @@ function QAT.Editor_Inspector_Build(pane)
 
 	-- Row 2: the phase "config-nav" bar — a distinct, thinner coloured band so it
 	-- reads as navigation rather than part of the identity header.
-	insp.phaseBar = QAT.widgets.Panel(header, "QAT_Insp_PhaseBar", { 0.10, 0.12, 0.18, 1 }, { 0.18, 0.22, 0.30, 1 })
+	insp.phaseBar = QAT.widgets.Panel(header, "QAT_Insp_PhaseBar", { 0.05, 0.062, 0.088, 1 }, { 0.14, 0.17, 0.24, 1 })
 	insp.phaseBar:SetAnchor(TOPLEFT, header, TOPLEFT, 0, BAR_Y)
 	insp.phaseBar:SetAnchor(TOPRIGHT, header, TOPRIGHT, 0, BAR_Y)
 	insp.phaseBar:SetHeight(BAR_H)
@@ -302,7 +302,7 @@ function QAT.Editor_Inspector_Build(pane)
 
 	-- Body host (below the tab bar; the phase strip is in the header now).
 	local bodyTop = QAT.editor.HEADER_H + QAT.editor.HEADER_GAP + QAT.editor.TAB_H
-	local body = QAT.widgets.Panel(pane, "QAT_Insp_Body", { 0.06, 0.07, 0.09, 1 })
+	local body = QAT.widgets.Panel(pane, "QAT_Insp_Body", { 0.045, 0.055, 0.078, 1 })
 	body:SetAnchor(TOPLEFT, pane, TOPLEFT, 0, bodyTop)
 	body:SetAnchor(BOTTOMRIGHT, pane, BOTTOMRIGHT, 0, 0)
 	insp.body = body

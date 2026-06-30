@@ -7,14 +7,21 @@ local FONT = "$(MEDIUM_FONT)|18|soft-shadow-thin"
 
 -- Shared palette so inputs, dropdowns and buttons read as one toolkit and stand
 -- apart from the panel background.
+-- A dark-navy, minimal palette with a blue accent. Shared so the whole editor
+-- reads as one modern toolkit.
 local C = {
-	fieldBg = { 0.03, 0.04, 0.06, 1 }, -- text inputs: near-black inset so they pop
-	fieldEdge = { 0.36, 0.42, 0.52, 1 }, -- brighter border for clear separation
-	ddBg = { 0.11, 0.13, 0.17, 1 }, -- dropdowns: a touch raised vs inputs
-	btnBg = { 0.18, 0.20, 0.26, 1 },
-	btnEdge = { 0.38, 0.43, 0.53, 1 },
-	selBg = { 0.20, 0.34, 0.52, 1 }, -- active tab / chip / selected
+	bodyBg = { 0.045, 0.055, 0.078, 1 }, -- panes / window background
+	cardBg = { 0.075, 0.09, 0.125, 1 }, -- grouped "card" sections
+	cardEdge = { 0.15, 0.18, 0.25, 1 },
+	headerText = { 0.42, 0.50, 0.63, 1 }, -- muted uppercase section labels
+	fieldBg = { 0.03, 0.04, 0.06, 1 }, -- text inputs (inset)
+	fieldEdge = { 0.21, 0.26, 0.35, 1 }, -- subtle input border
+	ddBg = { 0.07, 0.085, 0.12, 1 }, -- dropdowns
+	btnBg = { 0.11, 0.13, 0.18, 1 },
+	btnEdge = { 0.20, 0.25, 0.34, 1 },
+	selBg = { 0.21, 0.40, 0.72, 1 }, -- active tab / chip / selected (blue accent)
 }
+QAT.widgets.palette = C
 local DROPDOWN_ARROW = "EsoUI/Art/Buttons/scrollbox_downArrow_up.dds"
 
 -- Shared hover-tooltip show/hide (used by both the Tooltip helper and widgets that
@@ -239,6 +246,26 @@ function QAT.widgets.SectionHeader(parent, name, text)
 	local l = QAT.widgets.Label(parent, name, text, "$(BOLD_FONT)|18|soft-shadow-thin")
 	l:SetColor(0.55, 0.72, 0.95, 1)
 	return l
+end
+
+-- A grouped "card" panel: a subtly-bordered box with a muted uppercase title.
+-- Content should be anchored inside with padding (card.padX / card.contentY give
+-- sensible insets). Reuse-friendly: SetTitle re-labels a pooled card.
+function QAT.widgets.Card(parent, name, title)
+	local card = WM:CreateControl(name, parent, CT_BACKDROP)
+	card:SetCenterColor(unpack(C.cardBg))
+	card:SetEdgeColor(unpack(C.cardEdge))
+	card:SetEdgeTexture("", 1, 1, 1)
+	card.padX, card.contentY = 16, 34
+	local t = QAT.widgets.Label(card, name .. "_Title", "", "$(BOLD_FONT)|15|soft-shadow-thin")
+	t:SetColor(unpack(C.headerText))
+	t:SetAnchor(TOPLEFT, card, TOPLEFT, 16, 11)
+	card.titleLabel = t
+	function card:SetTitle(s)
+		t:SetText(string.upper(s or ""))
+	end
+	card:SetTitle(title)
+	return card
 end
 
 -- A horizontal slider (custom: a track + a draggable thumb). onChange(value) fires

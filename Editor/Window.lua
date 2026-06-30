@@ -59,7 +59,7 @@ function QAT.Editor_Relayout()
 end
 
 local function buildTitleBar(f)
-	local bar = QAT.widgets.Panel(f, "QAT_Editor_Title", { 0.12, 0.13, 0.16, 1 })
+	local bar = QAT.widgets.Panel(f, "QAT_Editor_Title", { 0.065, 0.08, 0.11, 1 })
 	bar:SetAnchor(TOPLEFT, f, TOPLEFT, 0, 0)
 	bar:SetAnchor(TOPRIGHT, f, TOPRIGHT, 0, 0)
 	bar:SetHeight(TITLE_H)
@@ -153,15 +153,15 @@ function QAT.Editor_Init()
 		saveGeometry()
 		QAT.Editor_Relayout()
 	end)
-	QAT.widgets.Panel(f, "QAT_Editor_Bg", { 0.05, 0.06, 0.08, 0.96 }):SetAnchorFill()
+	QAT.widgets.Panel(f, "QAT_Editor_Bg", { 0.045, 0.055, 0.078, 0.98 }):SetAnchorFill()
 	QAT.editor.frame = f
 
 	buildTitleBar(f)
 
-	QAT.editor.treePane = QAT.widgets.Panel(f, "QAT_Editor_TreePane", { 0.08, 0.09, 0.11, 1 })
+	QAT.editor.treePane = QAT.widgets.Panel(f, "QAT_Editor_TreePane", { 0.05, 0.062, 0.088, 1 })
 
 	-- Draggable splitter: dragging changes the tree-pane width.
-	local splitter = QAT.widgets.Panel(f, "QAT_Editor_Splitter", { 0.20, 0.22, 0.26, 1 })
+	local splitter = QAT.widgets.Panel(f, "QAT_Editor_Splitter", { 0.10, 0.12, 0.16, 1 })
 	splitter:SetMouseEnabled(true)
 	splitter:SetHandler("OnMouseDown", function()
 		QAT.editor.dragSplit = true
@@ -179,7 +179,7 @@ function QAT.Editor_Init()
 	end)
 	QAT.editor.splitter = splitter
 
-	QAT.editor.inspectorPane = QAT.widgets.Panel(f, "QAT_Editor_InspectorPane", { 0.06, 0.07, 0.09, 1 })
+	QAT.editor.inspectorPane = QAT.widgets.Panel(f, "QAT_Editor_InspectorPane", { 0.045, 0.055, 0.078, 1 })
 
 	-- The tab bar sits a gap below the header (the phase strip now lives in the header).
 	local tabY = HEADER_H + HEADER_GAP
