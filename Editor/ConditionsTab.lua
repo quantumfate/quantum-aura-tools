@@ -134,7 +134,7 @@ local function render(container, def)
 		cx = cx + 22
 
 		local actDD = get("act" .. i, function()
-			return QAT.widgets.Dropdown(container, "QAT_Cond_Act" .. i, 168, ACTION_OPTS, "setBarColor")
+			return QAT.widgets.Dropdown(container, "QAT_Cond_Act" .. i, 188, ACTION_OPTS, "setBarColor")
 		end)
 		actDD.onSelect = function(v)
 			cond.action = v
@@ -144,7 +144,7 @@ local function render(container, def)
 		actDD:SetValue(cond.action or "setBarColor")
 		actDD:ClearAnchors()
 		actDD:SetAnchor(TOPLEFT, container, TOPLEFT, cx, y)
-		cx = cx + 174
+		cx = cx + 194
 
 		-- Colour swatch for the Set-X-Color actions (not Show Proc).
 		local sw = get("col" .. i, function()

@@ -181,16 +181,18 @@ function QAT.Editor_Inspector_Build(pane)
 			end
 		end
 	end
-	insp.sizeCaption = QAT.widgets.Label(header, "QAT_Insp_SizeCaption", "Size")
-	insp.sizeCaption:SetAnchor(LEFT, insp.popout, RIGHT, 16, 0)
-	insp.widthBox = QAT.widgets.EditBox(header, "QAT_Insp_WidthBox", 46, 22)
-	insp.widthBox:SetAnchor(LEFT, insp.sizeCaption, RIGHT, 6, 0)
-	insp.widthBox.onChange = dimChange("width")
-	insp.sizeX = QAT.widgets.Label(header, "QAT_Insp_SizeX", "x")
-	insp.sizeX:SetAnchor(LEFT, insp.widthBox, RIGHT, 4, 0)
+	-- Geometry sits on the top row, right edge (grouped with identity), kept clear of
+	-- the actions and the mode switch below. Anchored right-to-left.
 	insp.heightBox = QAT.widgets.EditBox(header, "QAT_Insp_HeightBox", 46, 22)
-	insp.heightBox:SetAnchor(LEFT, insp.sizeX, RIGHT, 4, 0)
+	insp.heightBox:SetAnchor(TOPRIGHT, header, TOPRIGHT, -10, 6)
 	insp.heightBox.onChange = dimChange("height")
+	insp.sizeX = QAT.widgets.Label(header, "QAT_Insp_SizeX", "x")
+	insp.sizeX:SetAnchor(RIGHT, insp.heightBox, LEFT, -5, 0)
+	insp.widthBox = QAT.widgets.EditBox(header, "QAT_Insp_WidthBox", 46, 22)
+	insp.widthBox:SetAnchor(RIGHT, insp.sizeX, LEFT, -5, 0)
+	insp.widthBox.onChange = dimChange("width")
+	insp.sizeCaption = QAT.widgets.Label(header, "QAT_Insp_SizeCaption", "Size")
+	insp.sizeCaption:SetAnchor(RIGHT, insp.widthBox, LEFT, -6, 0)
 
 	-- Top-level mode switch (tracker scope), header right edge: Phases (the phase
 	-- editor — the default) and Load (the load-condition panel). Exactly one is

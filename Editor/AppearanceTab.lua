@@ -2,7 +2,6 @@
 -- phase strip in the header (QAT.editor.selectedPhaseId); only the fields relevant
 -- to the chosen Kind are shown.
 
-local WM = GetWindowManager()
 local PAD = 12
 local ROW_H = 26
 local GAP = 8
@@ -141,9 +140,8 @@ local function render(container, def)
 		iconBox:ClearAnchors()
 		iconBox:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
 		local iconPreview = get("iconPreview", function()
-			return WM:CreateControl("QAT_App_IconPreview", container, CT_TEXTURE)
+			return QAT.widgets.IconWell(container, "QAT_App_IconPreview", ROW_H)
 		end)
-		iconPreview:SetDimensions(ROW_H, ROW_H)
 		iconPreview:SetTexture(QAT.util.PhaseIcon(phase) or "/esoui/art/icons/icon_missing.dds")
 		iconPreview:ClearAnchors()
 		iconPreview:SetAnchor(LEFT, iconBox, RIGHT, 8, 0)

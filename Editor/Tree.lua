@@ -226,18 +226,18 @@ function QAT.Editor_Tree_Build(pane)
 		tb:SetHeight(TOOLBAR_H)
 		QAT.editor.treeToolbar = tb
 
-		local x = 2
-		local defsBtns = {
-			{ "+ Tracker", addTracker, 78 },
-			{ "+ Group", addGroup, 70 },
-			{ "Delete", deleteSelected, 60 },
-		}
-		for _, b in ipairs(defsBtns) do
+		-- Create actions on the left; the destructive Delete is pushed to the right
+		-- edge so it reads as a separate concern from the add buttons.
+		local x = 4
+		for _, b in ipairs({ { "+ Tracker", addTracker, 86 }, { "+ Group", addGroup, 78 } }) do
 			local btn = QAT.widgets.TextButton(tb, "QAT_Tree_Btn_" .. b[1], b[1], b[2])
 			btn:SetDimensions(b[3], TOOLBAR_H - 6)
 			btn:SetAnchor(LEFT, tb, LEFT, x, 0)
-			x = x + b[3] + 8
+			x = x + b[3] + 6
 		end
+		local delBtn = QAT.widgets.TextButton(tb, "QAT_Tree_Btn_Delete", "Delete", deleteSelected)
+		delBtn:SetDimensions(64, TOOLBAR_H - 6)
+		delBtn:SetAnchor(RIGHT, tb, RIGHT, -4, 0)
 
 		-- Fixed viewport filling the pane below the toolbar. It needs a real rect
 		-- (top + bottom anchored) so its child rows are hit-testable; scrolling is

@@ -5,6 +5,18 @@ QAT.widgets = {}
 local WM = GetWindowManager()
 local FONT = "$(MEDIUM_FONT)|18|soft-shadow-thin"
 
+-- Shared palette so inputs, dropdowns and buttons read as one toolkit and stand
+-- apart from the panel background.
+local C = {
+	fieldBg = { 0.09, 0.10, 0.13, 1 }, -- text inputs (inset, darker)
+	fieldEdge = { 0.30, 0.34, 0.42, 1 },
+	ddBg = { 0.15, 0.16, 0.20, 1 }, -- dropdowns (slightly raised)
+	btnBg = { 0.17, 0.19, 0.24, 1 },
+	btnEdge = { 0.34, 0.38, 0.47, 1 },
+	selBg = { 0.20, 0.34, 0.52, 1 }, -- active tab / chip / selected
+}
+local DROPDOWN_ARROW = "EsoUI/Art/Buttons/scrollbox_downArrow_up.dds"
+
 -- Filled backdrop panel. Backdrops are for VISUALS only — they do not reliably
 -- receive mouse input, so anything clickable must be built on a CT_CONTROL base
 -- (see Clickable) with a backdrop as a child.
@@ -42,17 +54,19 @@ end
 -- A text button (CT_CONTROL base + backdrop visual), fires onClick on left
 -- mouse-up inside. Supports a persistent selected state (button:SetSelected(bool))
 -- that survives hover, for tab/chip-style toggles.
-local IDLE_COLOR = { 0.16, 0.18, 0.22, 1 }
-local SELECTED_COLOR = { 0.20, 0.30, 0.45, 1 }
+local IDLE_COLOR = C.btnBg
+local SELECTED_COLOR = C.selBg
 
 function QAT.widgets.TextButton(parent, name, text, onClick)
 	local b = QAT.widgets.Clickable(parent, name, IDLE_COLOR)
-	b.bg:SetEdgeColor(0, 0, 0, 1)
+	b.bg:SetEdgeColor(unpack(C.btnEdge))
 	b.baseColor = IDLE_COLOR
 	b.onClick = onClick -- read at fire time, so a pooled button can be rebound
 	local label = QAT.widgets.Label(b, name .. "_Label", text)
-	label:SetAnchor(CENTER)
+	label:SetAnchor(LEFT, b, LEFT, 5, 0)
+	label:SetAnchor(RIGHT, b, RIGHT, -5, 0)
 	label:SetHorizontalAlignment(TEXT_ALIGN_CENTER)
+	label:SetMaxLineCount(1) -- never wrap; keep button text on one line
 	b.label = label
 
 	function b:SetSelected(sel)
@@ -129,6 +143,25 @@ function QAT.widgets.IconButton(parent, name, texture, size, onClick)
 	return b
 end
 
+-- A framed icon "well": a bordered backdrop with the texture inset inside it, so a
+-- display icon reads as a deliberate slot rather than a floating texture. Exposes
+-- :SetTexture(t) and :SetTextureColor(...).
+function QAT.widgets.IconWell(parent, name, size)
+	local frame = QAT.widgets.Panel(parent, name, { 0.05, 0.06, 0.08, 1 }, C.fieldEdge)
+	frame:SetDimensions(size, size)
+	local tex = WM:CreateControl(name .. "_Tex", frame, CT_TEXTURE)
+	tex:SetAnchor(TOPLEFT, frame, TOPLEFT, 1, 1)
+	tex:SetAnchor(BOTTOMRIGHT, frame, BOTTOMRIGHT, -1, -1)
+	frame.tex = tex
+	function frame:SetTexture(t)
+		tex:SetTexture(t)
+	end
+	function frame:SetTextureColor(...)
+		tex:SetColor(...)
+	end
+	return frame
+end
+
 -- Attach a hover tooltip to a control. Enables mouse on the control and installs
 -- enter/exit handlers, so use it on passive controls (labels) rather than on
 -- interactive widgets that already own OnMouseEnter/Exit (buttons, dropdowns).
@@ -167,13 +200,13 @@ end
 -- set/committed — otherwise hiding a focused box (which fires OnFocusLost) would
 -- spuriously re-commit and, if onChange re-renders, recurse.
 function QAT.widgets.EditBox(parent, name, width, height, initial, onChange)
-	local frame = QAT.widgets.Panel(parent, name, { 0.03, 0.04, 0.05, 1 })
+	local frame = QAT.widgets.Panel(parent, name, C.fieldBg, C.fieldEdge)
 	frame:SetDimensions(width, height or 24)
 	frame.onChange = onChange
 	frame._committed = initial or ""
 	local edit = CreateControlFromVirtual(name .. "_Edit", frame, "ZO_DefaultEditForBackdrop")
-	edit:SetAnchor(TOPLEFT, frame, TOPLEFT, 4, 0)
-	edit:SetAnchor(BOTTOMRIGHT, frame, BOTTOMRIGHT, -4, 0)
+	edit:SetAnchor(TOPLEFT, frame, TOPLEFT, 6, 0)
+	edit:SetAnchor(BOTTOMRIGHT, frame, BOTTOMRIGHT, -6, 0)
 	edit:SetText(initial or "")
 	edit:SetHandler("OnEnter", function(self)
 		self:LoseFocus()
@@ -205,15 +238,23 @@ end
 -- render). Options can be replaced with dd:SetOptions(options). The option list
 -- draws above siblings (DT_HIGH).
 function QAT.widgets.Dropdown(parent, name, width, options, current, onSelect)
-	local dd = QAT.widgets.Clickable(parent, name, { 0.12, 0.13, 0.16, 1 })
-	dd.bg:SetEdgeColor(0, 0, 0, 1)
+	local dd = QAT.widgets.Clickable(parent, name, C.ddBg)
+	dd.bg:SetEdgeColor(unpack(C.fieldEdge))
 	dd:SetDimensions(width, 24)
 	dd.onSelect = onSelect
 	dd.options = options or {}
 
+	-- Down-arrow on the right marks this as a dropdown (vs a plain box).
+	local arrow = WM:CreateControl(name .. "_Arrow", dd, CT_TEXTURE)
+	arrow:SetTexture(DROPDOWN_ARROW)
+	arrow:SetColor(0.75, 0.80, 0.88, 1)
+	arrow:SetDimensions(14, 14)
+	arrow:SetAnchor(RIGHT, dd, RIGHT, -6, 0)
+
 	local label = QAT.widgets.Label(dd, name .. "_Label", "")
-	label:SetAnchor(LEFT, dd, LEFT, 6, 0)
-	label:SetAnchor(RIGHT, dd, RIGHT, -6, 0)
+	label:SetAnchor(LEFT, dd, LEFT, 8, 0)
+	label:SetAnchor(RIGHT, arrow, LEFT, -4, 0)
+	label:SetMaxLineCount(1) -- truncate rather than wrap (e.g. "Set Background Color")
 
 	local function labelFor(val)
 		for _, o in ipairs(dd.options) do
@@ -228,7 +269,7 @@ function QAT.widgets.Dropdown(parent, name, width, options, current, onSelect)
 	list:SetAnchor(TOPLEFT, dd, BOTTOMLEFT, 0, 2)
 	list:SetDrawTier(DT_HIGH)
 	list:SetHidden(true)
-	local listBg = QAT.widgets.Panel(list, name .. "_ListBg", { 0.10, 0.11, 0.13, 1 })
+	local listBg = QAT.widgets.Panel(list, name .. "_ListBg", { 0.11, 0.12, 0.15, 1 }, C.fieldEdge)
 	listBg:SetAnchorFill()
 	local optControls = {}
 
@@ -244,7 +285,9 @@ function QAT.widgets.Dropdown(parent, name, width, options, current, onSelect)
 				opt:SetDimensions(width, 24)
 				opt:SetAnchor(TOPLEFT, list, TOPLEFT, 0, (i - 1) * 24)
 				opt.label = QAT.widgets.Label(opt, name .. "_Opt" .. i .. "_L", "")
-				opt.label:SetAnchor(LEFT, opt, LEFT, 6, 0)
+				opt.label:SetAnchor(LEFT, opt, LEFT, 8, 0)
+				opt.label:SetAnchor(RIGHT, opt, RIGHT, -6, 0)
+				opt.label:SetMaxLineCount(1)
 				opt:SetHandler("OnMouseEnter", function(self2)
 					self2.bg:SetCenterColor(0.22, 0.25, 0.30, 1)
 				end)
