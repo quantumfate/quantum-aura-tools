@@ -133,7 +133,12 @@ function QAT.display.Create(def)
 	local bg = reuse(name .. "_Bg", function()
 		return WM:CreateControl(name .. "_Bg", tlw, CT_BACKDROP)
 	end)
-	local borderT = def.borderThickness or 1
+	-- Backdrop edge dimensions must be powers of two; snap anything else to 1.
+	local VALID_BORDER = { [1] = true, [2] = true, [4] = true, [8] = true, [16] = true }
+	local borderT = def.borderThickness
+	if not VALID_BORDER[borderT] then
+		borderT = 1
+	end
 	bg:SetAnchorFill()
 	bg:SetCenterColor(unpack(colorOf(colors, "background")))
 	bg:SetEdgeColor(unpack(colorOf(colors, "border")))
@@ -211,10 +216,13 @@ function QAT.display.Create(def)
 	proc:SetTexture("EsoUI/Art/ActionBar/abilityHighlightAnimation.dds")
 	proc:SetBlendMode(TEX_BLEND_MODE_ADD)
 	proc:SetDrawLevel(1) -- above icon/bar (0), below the readout labels (5)
+	-- Size the glow to the icon (a touch larger), centred on it; for a bar it covers
+	-- the left icon, otherwise the whole control.
 	local procTarget = showIcon and icon or tlw
+	local procSize = (showIcon and h or math.min(w, h)) * 1.35
 	proc:ClearAnchors()
-	proc:SetAnchor(TOPLEFT, procTarget, TOPLEFT, -8, -8)
-	proc:SetAnchor(BOTTOMRIGHT, procTarget, BOTTOMRIGHT, 8, 8)
+	proc:SetDimensions(procSize, procSize)
+	proc:SetAnchor(CENTER, procTarget, CENTER, 0, 0)
 	proc:SetHidden(true)
 
 	local control = {

@@ -14,6 +14,17 @@ local KIND_OPTS = {
 	{ label = "Audio Cue", value = "audio" },
 }
 local FONT_DEFAULTS = { label = 20, time = 20, stacks = 16 }
+-- Constrained numeric choices (dropdowns) so invalid values can't be entered.
+local function numOpts(vals)
+	local t = {}
+	for _, v in ipairs(vals) do
+		t[#t + 1] = { label = tostring(v), value = v }
+	end
+	return t
+end
+local FONT_OPTS = numOpts({ 10, 12, 14, 16, 18, 20, 22, 24, 28, 32, 36, 40, 48 })
+local BORDER_OPTS = numOpts({ 1, 2, 4, 8, 16 }) -- backdrop edge must be a power of two
+local DECIMAL_OPTS = numOpts({ 0, 1, 2 })
 -- Swatch fallbacks (match Display's DEFAULT_COLORS).
 local DEFAULT_COLORS = {
 	background = { 0, 0, 0, 0.55 },
@@ -224,18 +235,17 @@ local function render(container, def)
 			y = y + ROW_H + GAP
 		end
 
-		fieldLabel("lBorderT", "Border width", y, "Border thickness in pixels (0 = no border).")
-		local btBox = get("btBox", function()
-			return QAT.widgets.EditBox(container, "QAT_App_BorderT", 50, ROW_H)
+		fieldLabel("lBorderT", "Border width", y, "Border thickness in pixels (must be a power of two).")
+		local btDD = get("btDD", function()
+			return QAT.widgets.Dropdown(container, "QAT_App_BorderT", 70, BORDER_OPTS, 1)
 		end)
-		btBox.onChange = function(text)
-			local n = tonumber(text)
-			phase.look.borderThickness = (n and n >= 0) and n or nil
+		btDD.onSelect = function(v)
+			phase.look.borderThickness = v
 			commit(def)
 		end
-		btBox:SetText(tostring(phase.look.borderThickness or 1))
-		btBox:ClearAnchors()
-		btBox:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
+		btDD:SetValue(phase.look.borderThickness or 1)
+		btDD:ClearAnchors()
+		btDD:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
 		y = y + ROW_H + GAP
 	end
 
@@ -259,16 +269,16 @@ local function render(container, def)
 		decLabel:ClearAnchors()
 		decLabel:SetAnchor(TOPLEFT, container, TOPLEFT, LX + 44, y + 3)
 		QAT.widgets.Tooltip(decLabel, "Decimal places on the time readout.")
-		local decBox = get("decBox", function()
-			return QAT.widgets.EditBox(container, "QAT_App_Dec", 50, ROW_H)
+		local decDD = get("decDD", function()
+			return QAT.widgets.Dropdown(container, "QAT_App_Dec", 60, DECIMAL_OPTS, 1)
 		end)
-		decBox.onChange = function(text)
-			phase.look.decimals = tonumber(text) or 0
+		decDD.onSelect = function(v)
+			phase.look.decimals = v
 			commit(def)
 		end
-		decBox:SetText(tostring(phase.look.decimals or 1))
-		decBox:ClearAnchors()
-		decBox:SetAnchor(TOPLEFT, container, TOPLEFT, LX + 120, y)
+		decDD:SetValue(phase.look.decimals or 1)
+		decDD:ClearAnchors()
+		decDD:SetAnchor(TOPLEFT, container, TOPLEFT, LX + 120, y)
 		y = y + ROW_H + GAP
 
 		-- Stacks only apply to bar/icon (text never shows them).
@@ -302,26 +312,25 @@ local function render(container, def)
 		end
 		local fx = LX
 		for _, key in ipairs(fkeys) do
-			local cap = get("fcap_" .. key, function()
-				return QAT.widgets.Label(container, "QAT_App_FCap_" .. key, "")
+			local fkey = key
+			local cap = get("fcap_" .. fkey, function()
+				return QAT.widgets.Label(container, "QAT_App_FCap_" .. fkey, "")
 			end)
-			cap:SetText(key:sub(1, 1):upper())
+			cap:SetText(fkey:sub(1, 1):upper())
 			cap:ClearAnchors()
 			cap:SetAnchor(TOPLEFT, container, TOPLEFT, fx, y + 3)
-			QAT.widgets.Tooltip(cap, key:gsub("^%l", string.upper) .. " font size")
-			local box = get("fbox_" .. key, function()
-				return QAT.widgets.EditBox(container, "QAT_App_FBox_" .. key, 42, ROW_H)
+			QAT.widgets.Tooltip(cap, fkey:gsub("^%l", string.upper) .. " font size")
+			local dd = get("fdd_" .. fkey, function()
+				return QAT.widgets.Dropdown(container, "QAT_App_FDD_" .. fkey, 60, FONT_OPTS, 20)
 			end)
-			box.onChange = function(text)
-				phase.look.fontSizes[key] = tonumber(text) or nil
+			dd.onSelect = function(v)
+				phase.look.fontSizes[fkey] = v
 				commit(def)
 			end
-			box:SetText(
-				phase.look.fontSizes[key] and tostring(phase.look.fontSizes[key]) or tostring(FONT_DEFAULTS[key])
-			)
-			box:ClearAnchors()
-			box:SetAnchor(TOPLEFT, container, TOPLEFT, fx + 14, y)
-			fx = fx + 14 + 42 + 12
+			dd:SetValue(phase.look.fontSizes[fkey] or FONT_DEFAULTS[fkey])
+			dd:ClearAnchors()
+			dd:SetAnchor(TOPLEFT, container, TOPLEFT, fx + 16, y)
+			fx = fx + 16 + 60 + 14
 		end
 		y = y + ROW_H + GAP
 	end
