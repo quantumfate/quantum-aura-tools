@@ -1,9 +1,9 @@
 -- Appearance tab: how the selected phase draws. The phase is chosen by the shared
 -- phase strip in the header. Laid out as grouped cards (Source / Colors / Text &
--- Timer); only the fields and cards relevant to the chosen Kind are shown.
+-- Timer / Font size); only the cards and fields relevant to the chosen Kind show.
 
-local ROW_H = 28
-local RH = 32 -- row pitch inside a card
+local ROW_H, DD_H, SW = 26, 24, 24
+local RH = 30 -- row pitch inside a card
 
 local KIND_OPTS = {
 	{ label = "Bar", value = "bar" },
@@ -13,6 +13,7 @@ local KIND_OPTS = {
 	{ label = "Audio Cue", value = "audio" },
 }
 local FONT_DEFAULTS = { label = 20, time = 20, stacks = 16 }
+local FONT_LABEL = { label = "Text", time = "Timer", stacks = "Stacks" } -- match Colors naming
 local function numOpts(vals)
 	local t = {}
 	for _, v in ipairs(vals) do
@@ -31,8 +32,6 @@ local DEFAULT_COLORS = {
 	text = { 1, 1, 1, 1 },
 	timer = { 1, 1, 1, 1 },
 }
--- Which colour elements each Kind exposes. Icon has no bar/background/text label;
--- Text has no bar fill or stacks.
 local COLOR_SET = {
 	icon = { { "stacks", "Stacks" }, { "timer", "Timer" }, { "border", "Border" } },
 	bar = {
@@ -61,6 +60,11 @@ local function commit(def)
 	QAT.widgets.NotifyTrackerChanged(def.id)
 end
 
+-- Vertical offset to centre a control of height h within a row of pitch RH.
+local function vy(yy, h)
+	return yy + math.floor((RH - h) / 2)
+end
+
 local function render(container, def)
 	local pool = container.pool or QAT.widgets.NewPool()
 	container.pool = pool
@@ -86,10 +90,9 @@ local function render(container, def)
 	if cw < 240 then
 		cw = 900
 	end
-	local OUT, CGAP, LW = 14, 16, 84
+	local OUT, CGAP, LW = 14, 16, 86
 	local topW = math.floor((cw - OUT * 2 - CGAP) / 2)
 
-	-- Small builders that parent a control to a card and return it (pooled by key).
 	local function cardOf(key, title)
 		local c = get(key, function()
 			return QAT.widgets.Card(container, "QAT_App_" .. key, title)
@@ -97,17 +100,18 @@ local function render(container, def)
 		c:SetTitle(title)
 		return c
 	end
-	local function rowLabel(card, key, text, yy)
+	-- A field label inside a card, vertically centred on its row.
+	local function rowLabel(card, key, text, yy, x)
 		local l = get("L" .. key, function()
 			return QAT.widgets.Label(card, "QAT_App_L" .. key, "")
 		end)
 		l:SetText(text)
 		l:ClearAnchors()
-		l:SetAnchor(TOPLEFT, card, TOPLEFT, card.padX, yy + 5)
+		l:SetAnchor(TOPLEFT, card, TOPLEFT, x or card.padX, vy(yy, 18))
 		return l
 	end
 
-	-- ===== SOURCE card =====
+	-- ===== SOURCE =====
 	local src = cardOf("cSrc", "Source")
 	src:ClearAnchors()
 	src:SetAnchor(TOPLEFT, container, TOPLEFT, OUT, OUT)
@@ -142,7 +146,7 @@ local function render(container, def)
 	idBox:SetDimensions(sFieldW, ROW_H)
 	idBox:SetText(phase.id)
 	idBox:ClearAnchors()
-	idBox:SetAnchor(TOPLEFT, src, TOPLEFT, sLX, sy)
+	idBox:SetAnchor(TOPLEFT, src, TOPLEFT, sLX, vy(sy, ROW_H))
 	sy = sy + RH
 
 	rowLabel(src, "Kind", "Kind", sy)
@@ -155,9 +159,9 @@ local function render(container, def)
 		render(container, def)
 	end
 	kindDD:SetValue(kind)
-	kindDD:SetDimensions(sFieldW, 24)
+	kindDD:SetDimensions(sFieldW, DD_H)
 	kindDD:ClearAnchors()
-	kindDD:SetAnchor(TOPLEFT, src, TOPLEFT, sLX, sy)
+	kindDD:SetAnchor(TOPLEFT, src, TOPLEFT, sLX, vy(sy, DD_H))
 	sy = sy + RH
 
 	if kind == "icon" then
@@ -174,7 +178,7 @@ local function render(container, def)
 		iconBox:SetDimensions(sFieldW - ROW_H - 8, ROW_H)
 		iconBox:SetText(look.icon or "")
 		iconBox:ClearAnchors()
-		iconBox:SetAnchor(TOPLEFT, src, TOPLEFT, sLX, sy)
+		iconBox:SetAnchor(TOPLEFT, src, TOPLEFT, sLX, vy(sy, ROW_H))
 		local prev = get("iconPreview", function()
 			return QAT.widgets.IconWell(src, "QAT_App_IconPreview", ROW_H)
 		end)
@@ -194,7 +198,7 @@ local function render(container, def)
 		nameBox:SetDimensions(sFieldW, ROW_H)
 		nameBox:SetText(look.name or "")
 		nameBox:ClearAnchors()
-		nameBox:SetAnchor(TOPLEFT, src, TOPLEFT, sLX, sy)
+		nameBox:SetAnchor(TOPLEFT, src, TOPLEFT, sLX, vy(sy, ROW_H))
 		sy = sy + RH
 	elseif kind == "audio" then
 		phase.cues = phase.cues or {}
@@ -210,7 +214,7 @@ local function render(container, def)
 		soundBox:SetDimensions(sFieldW - 60, ROW_H)
 		soundBox:SetText(phase.cues.sound or "")
 		soundBox:ClearAnchors()
-		soundBox:SetAnchor(TOPLEFT, src, TOPLEFT, sLX, sy)
+		soundBox:SetAnchor(TOPLEFT, src, TOPLEFT, sLX, vy(sy, ROW_H))
 		local testBtn = get("soundTest", function()
 			return QAT.widgets.TextButton(src, "QAT_App_SoundTest", "Test", nil)
 		end)
@@ -222,16 +226,19 @@ local function render(container, def)
 		end
 		sy = sy + RH
 	end
-	local srcH = sy + 6
+	local srcH = sy + 8
 
-	-- ===== COLORS card (visual kinds) =====
+	-- ===== COLORS =====
 	local topH = srcH
 	if isVisual then
 		local col = cardOf("cCol", "Colors")
 		col:ClearAnchors()
 		col:SetAnchor(TOPLEFT, container, TOPLEFT, OUT + topW + CGAP, OUT)
 		local fields = COLOR_SET[kind] or {}
-		local colX = { col.padX, math.floor(topW / 2) + 6 }
+		-- Two columns; the swatch sits at a fixed x in each so long labels (e.g.
+		-- "Background") never overlap it.
+		local colX = { col.padX, math.floor(topW / 2) + 4 }
+		local swDX = math.floor(topW / 2) - col.padX - SW - 10
 		local cy = col.contentY
 		for i, f in ipairs(fields) do
 			local key = f[1]
@@ -242,10 +249,10 @@ local function render(container, def)
 			end)
 			cap:SetText(f[2])
 			cap:ClearAnchors()
-			cap:SetAnchor(TOPLEFT, col, TOPLEFT, fx, cy + 5)
+			cap:SetAnchor(TOPLEFT, col, TOPLEFT, fx, vy(cy, 18))
 			QAT.widgets.Tooltip(cap, f[2] .. " colour.")
 			local sw = get("cs_" .. key, function()
-				return QAT.widgets.ColorSwatch(col, "QAT_App_CS_" .. key, ROW_H, { 1, 1, 1, 1 })
+				return QAT.widgets.ColorSwatch(col, "QAT_App_CS_" .. key, SW, { 1, 1, 1, 1 })
 			end)
 			sw.onChange = function(c)
 				look.colors[key] = c
@@ -253,7 +260,7 @@ local function render(container, def)
 			end
 			sw:SetColor(look.colors[key] or DEFAULT_COLORS[key])
 			sw:ClearAnchors()
-			sw:SetAnchor(TOPLEFT, col, TOPLEFT, fx + 78, cy)
+			sw:SetAnchor(TOPLEFT, col, TOPLEFT, fx + swDX, vy(cy, SW))
 			if cidx == 1 then
 				cy = cy + RH
 			end
@@ -272,105 +279,97 @@ local function render(container, def)
 		end
 		btDD:SetValue(look.borderThickness or 1)
 		btDD:ClearAnchors()
-		btDD:SetAnchor(TOPLEFT, col, TOPLEFT, col.padX + 96, cy)
+		btDD:SetAnchor(TOPLEFT, col, TOPLEFT, col.padX + 100, vy(cy, DD_H))
 		cy = cy + RH
 
-		topH = math.max(srcH, cy + 6)
+		topH = math.max(srcH, cy + 8)
 		col:SetDimensions(topW, topH)
 	end
 	src:SetDimensions(topW, topH)
 
-	-- ===== TEXT & TIMER card (visual kinds), full width below =====
-	if isVisual then
-		local tt = cardOf("cTT", "Text & Timer")
-		tt:ClearAnchors()
-		tt:SetAnchor(TOPLEFT, container, TOPLEFT, OUT, OUT + topH + CGAP)
-		local ty = tt.contentY
-
-		-- Row 1: Show time | Decimals | Font size (T / S / L per kind).
-		rowLabel(tt, "ShowTime", "Show time", ty)
-		local timeChk = get("timeChk", function()
-			return QAT.widgets.Checkbox(tt, "QAT_App_ShowTime", true)
-		end)
-		timeChk:SetChecked(look.showTime ~= false)
-		timeChk.onToggle = function(v)
-			look.showTime = v
-			commit(def)
-		end
-		timeChk:ClearAnchors()
-		timeChk:SetAnchor(TOPLEFT, tt, TOPLEFT, tt.padX + LW, ty + 4)
-
-		local decCap = get("LDec", function()
-			return QAT.widgets.Label(tt, "QAT_App_LDec", "Decimals")
-		end)
-		decCap:SetText("Decimals")
-		decCap:ClearAnchors()
-		decCap:SetAnchor(TOPLEFT, tt, TOPLEFT, tt.padX + 200, ty + 5)
-		local decDD = get("decDD", function()
-			return QAT.widgets.Dropdown(tt, "QAT_App_Dec", 60, DECIMAL_OPTS, 1)
-		end)
-		decDD.onSelect = function(v)
-			look.decimals = v
-			commit(def)
-		end
-		decDD:SetValue(look.decimals or 1)
-		decDD:ClearAnchors()
-		decDD:SetAnchor(TOPLEFT, tt, TOPLEFT, tt.padX + 270, ty)
-
-		local fontCap = get("LFont", function()
-			return QAT.widgets.Label(tt, "QAT_App_LFont", "Font size")
-		end)
-		fontCap:SetText("Font size")
-		fontCap:ClearAnchors()
-		fontCap:SetAnchor(TOPLEFT, tt, TOPLEFT, tt.padX + 360, ty + 5)
-		local fkeys = { "label", "time", "stacks" }
-		if kind == "icon" then
-			fkeys = { "time", "stacks" }
-		elseif kind == "text" then
-			fkeys = { "label", "time" }
-		end
-		local fx = tt.padX + 440
-		for _, key in ipairs(fkeys) do
-			local fk = key
-			local letter = get("fcap_" .. fk, function()
-				return QAT.widgets.Label(tt, "QAT_App_FCap_" .. fk, "")
-			end)
-			letter:SetText(fk:sub(1, 1):upper())
-			letter:ClearAnchors()
-			letter:SetAnchor(TOPLEFT, tt, TOPLEFT, fx, ty + 5)
-			QAT.widgets.Tooltip(letter, fk:gsub("^%l", string.upper) .. " font size")
-			local dd = get("fdd_" .. fk, function()
-				return QAT.widgets.Dropdown(tt, "QAT_App_FDD_" .. fk, 56, FONT_OPTS, 20)
-			end)
-			dd.onSelect = function(v)
-				look.fontSizes[fk] = v
-				commit(def)
-			end
-			dd:SetValue(look.fontSizes[fk] or FONT_DEFAULTS[fk])
-			dd:ClearAnchors()
-			dd:SetAnchor(TOPLEFT, tt, TOPLEFT, fx + 16, ty)
-			fx = fx + 16 + 56 + 12
-		end
-		ty = ty + RH
-
-		-- Row 2: Show stacks (bar/icon only).
-		if kind ~= "text" then
-			rowLabel(tt, "ShowStacks", "Show stacks", ty)
-			local stacksChk = get("stacksChk", function()
-				return QAT.widgets.Checkbox(tt, "QAT_App_ShowStacks", false)
-			end)
-			stacksChk:SetChecked(look.showStacks or false)
-			stacksChk.onToggle = function(v)
-				look.showStacks = v or nil
-				commit(def)
-			end
-			stacksChk:ClearAnchors()
-			stacksChk:SetAnchor(TOPLEFT, tt, TOPLEFT, tt.padX + LW, ty + 4)
-			ty = ty + RH
-		end
-
-		tt:SetDimensions(cw - OUT * 2, ty + 6)
+	if not isVisual then
+		QAT.widgets.PoolEnd(pool)
+		return
 	end
+
+	-- ===== TEXT & TIMER (bottom-left) =====
+	local y2 = OUT + topH + CGAP
+	local tt = cardOf("cTT", "Text & Timer")
+	tt:ClearAnchors()
+	tt:SetAnchor(TOPLEFT, container, TOPLEFT, OUT, y2)
+	local ttLX = tt.padX + LW
+	local ty = tt.contentY
+
+	rowLabel(tt, "ShowTime", "Show time", ty)
+	local timeChk = get("timeChk", function()
+		return QAT.widgets.Checkbox(tt, "QAT_App_ShowTime", true)
+	end)
+	timeChk:SetChecked(look.showTime ~= false)
+	timeChk.onToggle = function(v)
+		look.showTime = v
+		commit(def)
+	end
+	timeChk:ClearAnchors()
+	timeChk:SetAnchor(TOPLEFT, tt, TOPLEFT, ttLX, vy(ty, 18))
+	ty = ty + RH
+
+	if kind ~= "text" then
+		rowLabel(tt, "ShowStacks", "Show stacks", ty)
+		local stacksChk = get("stacksChk", function()
+			return QAT.widgets.Checkbox(tt, "QAT_App_ShowStacks", false)
+		end)
+		stacksChk:SetChecked(look.showStacks or false)
+		stacksChk.onToggle = function(v)
+			look.showStacks = v or nil
+			commit(def)
+		end
+		stacksChk:ClearAnchors()
+		stacksChk:SetAnchor(TOPLEFT, tt, TOPLEFT, ttLX, vy(ty, 18))
+		ty = ty + RH
+	end
+
+	rowLabel(tt, "Dec", "Decimals", ty)
+	local decDD = get("decDD", function()
+		return QAT.widgets.Dropdown(tt, "QAT_App_Dec", 60, DECIMAL_OPTS, 1)
+	end)
+	decDD.onSelect = function(v)
+		look.decimals = v
+		commit(def)
+	end
+	decDD:SetValue(look.decimals or 1)
+	decDD:ClearAnchors()
+	decDD:SetAnchor(TOPLEFT, tt, TOPLEFT, ttLX, vy(ty, DD_H))
+	ty = ty + RH
+	tt:SetDimensions(topW, ty + 8)
+
+	-- ===== FONT SIZE (bottom-right) =====
+	local font = cardOf("cFont", "Font size")
+	font:ClearAnchors()
+	font:SetAnchor(TOPLEFT, container, TOPLEFT, OUT + topW + CGAP, y2)
+	local fLX = font.padX + LW
+	local fkeys = { "label", "time", "stacks" }
+	if kind == "icon" then
+		fkeys = { "time", "stacks" }
+	elseif kind == "text" then
+		fkeys = { "label", "time" }
+	end
+	local fy = font.contentY
+	for _, key in ipairs(fkeys) do
+		local fk = key
+		rowLabel(font, "F" .. fk, FONT_LABEL[fk], fy)
+		local dd = get("fdd_" .. fk, function()
+			return QAT.widgets.Dropdown(font, "QAT_App_FDD_" .. fk, 64, FONT_OPTS, 20)
+		end)
+		dd.onSelect = function(v)
+			look.fontSizes[fk] = v
+			commit(def)
+		end
+		dd:SetValue(look.fontSizes[fk] or FONT_DEFAULTS[fk])
+		dd:ClearAnchors()
+		dd:SetAnchor(TOPLEFT, font, TOPLEFT, fLX, vy(fy, DD_H))
+		fy = fy + RH
+	end
+	font:SetDimensions(topW, fy + 8)
 
 	QAT.widgets.PoolEnd(pool)
 end

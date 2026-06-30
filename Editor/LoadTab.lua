@@ -2,10 +2,8 @@
 -- All matching is by stable id. Searchable set/skill pickers arrive later; for now
 -- ids and "use current zone/boss" buttons keep entry practical.
 
-local PAD = 12
 local ROW_H = 26
 local GAP = 6
-local LX = PAD + 90
 
 local CLASS_OPTS = {
 	{ label = "Any", value = nil },
@@ -60,7 +58,22 @@ local function render(container, def)
 
 	local load = def.load or {}
 	def.load = load
-	local y = PAD
+
+	-- Wrap the content in a titled card (created first so it draws behind).
+	local cw = container:GetWidth()
+	if cw < 240 then
+		cw = 900
+	end
+	local OUT = 14
+	local card = get("card", function()
+		return QAT.widgets.Card(container, "QAT_Load_Card", "Load conditions")
+	end)
+	card:SetTitle("Load conditions")
+	card:ClearAnchors()
+	card:SetAnchor(TOPLEFT, container, TOPLEFT, OUT, OUT)
+	local PAD = OUT + card.padX
+	local LX = PAD + 78
+	local y = OUT + card.contentY
 
 	local function label(key, text, yy)
 		local l = get(key, function()
@@ -286,6 +299,8 @@ local function render(container, def)
 		commit(def)
 		render(container, def)
 	end
+
+	card:SetDimensions(cw - OUT * 2, y + ROW_H + 8 - OUT)
 
 	QAT.widgets.PoolEnd(pool)
 end

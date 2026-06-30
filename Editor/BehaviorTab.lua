@@ -102,8 +102,21 @@ local function render(container, def)
 		return
 	end
 
-	local LX = PAD + 110
-	local y = PAD
+	-- Wrap the content in a titled card (created first, so it draws behind).
+	local cw = container:GetWidth()
+	if cw < 240 then
+		cw = 900
+	end
+	local OUT = 14
+	local card = get("card", function()
+		return QAT.widgets.Card(container, "QAT_Beh_Card", "Behavior")
+	end)
+	card:SetTitle("Behavior")
+	card:ClearAnchors()
+	card:SetAnchor(TOPLEFT, container, TOPLEFT, OUT, OUT)
+	local PAD = OUT + card.padX
+	local LX = PAD + 100
+	local y = OUT + card.contentY
 
 	local function fieldLabel(key, text, yy, tip)
 		local l = get(key, function()
@@ -212,7 +225,7 @@ local function render(container, def)
 
 		local x = PAD + 26
 		local trigDD = get("trTrig" .. i, function()
-			return QAT.widgets.Dropdown(container, "QAT_Beh_TrTrig" .. i, 120, TRIGGER_OPTS, "gained")
+			return QAT.widgets.Dropdown(container, "QAT_Beh_TrTrig" .. i, 134, TRIGGER_OPTS, "gained")
 		end)
 		trigDD.onSelect = function(v)
 			setTriggerKind(when, v)
@@ -222,7 +235,7 @@ local function render(container, def)
 		trigDD:SetValue(triggerValue(when))
 		trigDD:ClearAnchors()
 		trigDD:SetAnchor(TOPLEFT, container, TOPLEFT, x, y)
-		x = x + 126
+		x = x + 140
 
 		local unitDD = get("trUnit" .. i, function()
 			return QAT.widgets.Dropdown(container, "QAT_Beh_TrUnit" .. i, 86, UNIT_OPTS, "player")
@@ -335,6 +348,8 @@ local function render(container, def)
 		render(container, def)
 	end
 	y = y + ROW_H + GAP
+
+	card:SetDimensions(cw - OUT * 2, y - OUT + 8)
 
 	QAT.widgets.PoolEnd(pool)
 end

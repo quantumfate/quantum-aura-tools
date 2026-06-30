@@ -68,8 +68,6 @@ local function render(container, def)
 		QAT.editor.selectedPhaseId = def.phases[1] and def.phases[1].id
 	end
 
-	local y = PAD
-
 	local phase = selectedPhase(def)
 	if not phase then
 		QAT.widgets.PoolEnd(pool)
@@ -77,13 +75,20 @@ local function render(container, def)
 	end
 	phase.runtime = phase.runtime or {}
 
-	local header = get("hdr", function()
-		return QAT.widgets.SectionHeader(container, "QAT_Cond_Hdr", "")
+	-- Wrap the rows in a titled card (created first so it draws behind).
+	local cw = container:GetWidth()
+	if cw < 240 then
+		cw = 900
+	end
+	local OUT = 14
+	local card = get("card", function()
+		return QAT.widgets.Card(container, "QAT_Cond_Card", "Runtime conditions")
 	end)
-	header:SetText("Runtime conditions — phase: " .. phase.id)
-	header:ClearAnchors()
-	header:SetAnchor(TOPLEFT, container, TOPLEFT, PAD, y)
-	y = y + ROW_H + GAP
+	card:SetTitle("Runtime conditions — " .. phase.id)
+	card:ClearAnchors()
+	card:SetAnchor(TOPLEFT, container, TOPLEFT, OUT, OUT)
+	local PAD = OUT + card.padX
+	local y = OUT + card.contentY
 
 	for i, cond in ipairs(phase.runtime) do
 		local idx = i
@@ -195,6 +200,8 @@ local function render(container, def)
 		commit(def)
 		render(container, def)
 	end
+
+	card:SetDimensions(cw - OUT * 2, y + GAP + ROW_H + 8 - OUT)
 
 	QAT.widgets.PoolEnd(pool)
 end
