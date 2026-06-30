@@ -12,8 +12,9 @@
 --       {
 --         id,
 --         look = { display = "bar"|"icon"|"text"|"none",
---                  name, icon, font, decimals,
---                  showStacks,             -- author-declared: this effect has stacks
+--                  name, icon, decimals,
+--                  showStacks, showTime,   -- which readouts to draw (stacks is author-declared)
+--                  fontSizes = { label, time, stacks },
 --                  colors = { background, bar, border, stacks, text, timer, cooldown } },
 --         duration    = { type = "none"|"fixed"|"effect", seconds?, abilityIds?, unit? },
 --         transitions = {                  -- outgoing, source-attached, first match wins
@@ -60,13 +61,15 @@ local function canonicalLook(src)
 		colors.background = src.bgColor
 	end
 
+	local f = src.fontSizes or {}
 	return {
 		display = display,
 		name = src.name,
 		icon = src.icon,
-		font = src.font,
 		decimals = src.decimals,
 		showStacks = src.showStacks or false,
+		showTime = src.showTime ~= false, -- default on; the time number is the common readout
+		fontSizes = { label = f.label, time = f.time, stacks = f.stacks },
 		colors = colors,
 	}
 end

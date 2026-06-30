@@ -349,12 +349,25 @@ local function render(container, def)
 	decBox:SetAnchor(TOPLEFT, container, TOPLEFT, LX + 120, y)
 	y = y + ROW_H + GAP
 
-	-- Show stacks.
+	-- Show time / Show stacks (both explicit toggles).
+	fieldLabel("lShowTime", "Show time", y, "Show the remaining-time number while this phase has a running timer.")
+	local timeChk = get("timeChk", function()
+		return QAT.widgets.Checkbox(container, "QAT_Ph_ShowTime", true)
+	end)
+	timeChk:SetChecked(phase.look.showTime ~= false)
+	timeChk.onToggle = function(v)
+		phase.look.showTime = v
+		commit(def)
+	end
+	timeChk:ClearAnchors()
+	timeChk:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y + 2)
+	y = y + ROW_H + GAP
+
 	fieldLabel(
 		"lShowStacks",
 		"Show stacks",
 		y,
-		"This effect has stacks - show the stack number when the game reports stacks."
+		"This effect has stacks - show the stack number when the game reports stacks (>= 1)."
 	)
 	local stacksChk = get("stacksChk", function()
 		return QAT.widgets.Checkbox(container, "QAT_Ph_ShowStacks", false)
@@ -366,6 +379,34 @@ local function render(container, def)
 	end
 	stacksChk:ClearAnchors()
 	stacksChk:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y + 2)
+	y = y + ROW_H + GAP
+
+	-- Font sizes for the three readouts (label / time / stacks).
+	fieldLabel("lFont", "Font size", y, "Font size of the Label / Time / Stacks text. Blank uses the default.")
+	phase.look.fontSizes = phase.look.fontSizes or {}
+	local FONT_DEFAULTS = { label = 20, time = 20, stacks = 16 }
+	local fx = LX
+	for _, fkey in ipairs({ "label", "time", "stacks" }) do
+		local key = fkey
+		local cap = get("fcap_" .. key, function()
+			return QAT.widgets.Label(container, "QAT_Ph_FCap_" .. key, "")
+		end)
+		cap:SetText(key:sub(1, 1):upper())
+		cap:ClearAnchors()
+		cap:SetAnchor(TOPLEFT, container, TOPLEFT, fx, y + 3)
+		QAT.widgets.Tooltip(cap, key:gsub("^%l", string.upper) .. " font size")
+		local box = get("fbox_" .. key, function()
+			return QAT.widgets.EditBox(container, "QAT_Ph_FBox_" .. key, 42, ROW_H)
+		end)
+		box.onChange = function(text)
+			phase.look.fontSizes[key] = tonumber(text) or nil
+			commit(def)
+		end
+		box:SetText(phase.look.fontSizes[key] and tostring(phase.look.fontSizes[key]) or tostring(FONT_DEFAULTS[key]))
+		box:ClearAnchors()
+		box:SetAnchor(TOPLEFT, container, TOPLEFT, fx + 14, y)
+		fx = fx + 14 + 42 + 12
+	end
 	y = y + ROW_H + GAP
 
 	-- ===== Behavior =====

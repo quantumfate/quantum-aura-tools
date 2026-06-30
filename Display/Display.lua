@@ -20,11 +20,18 @@ local WM = GetWindowManager()
 local DEFAULTS = {
 	width = 220,
 	height = 30,
-	font = "$(BOLD_FONT)|22|soft-shadow-thick",
 	point = CENTER,
 	x = 0,
 	y = -200,
 }
+
+-- Per-readout label fonts: a shared face/style with an author-settable size.
+local FONT_FACE, FONT_STYLE = "$(BOLD_FONT)", "soft-shadow-thick"
+local DEFAULT_FONT_SIZE = { label = 20, time = 20, stacks = 16 }
+local function fontFor(sizes, key)
+	local size = (sizes and sizes[key]) or DEFAULT_FONT_SIZE[key]
+	return FONT_FACE .. "|" .. size .. "|" .. FONT_STYLE
+end
 
 -- Per-element fallback colors, used when the phase's look leaves one unset.
 local DEFAULT_COLORS = {
@@ -71,7 +78,7 @@ function QAT.display.Create(def)
 		w = h
 	end
 	local colors = def.colors
-	local font = value(def, "font")
+	local fontSizes = def.fontSizes
 	local showLeftIcon = (kind == "bar") and def.icon ~= nil and def.icon ~= ""
 
 	local tlw = reuse(name, function()
@@ -129,8 +136,10 @@ function QAT.display.Create(def)
 	local stacksLabel = reuse(name .. "_Stacks", function()
 		return WM:CreateControl(name .. "_Stacks", tlw, CT_LABEL)
 	end)
+	nameLabel:SetFont(fontFor(fontSizes, "label"))
+	timeLabel:SetFont(fontFor(fontSizes, "time"))
+	stacksLabel:SetFont(fontFor(fontSizes, "stacks"))
 	for _, l in ipairs({ nameLabel, timeLabel, stacksLabel }) do
-		l:SetFont(font)
 		l:SetVerticalAlignment(TEXT_ALIGN_CENTER)
 		l:SetHorizontalAlignment(TEXT_ALIGN_CENTER)
 	end
@@ -163,6 +172,7 @@ function QAT.display.Create(def)
 		name = def.name or tostring(def.id),
 		decimals = def.decimals or 1,
 		showStacks = def.showStacks or false,
+		showTime = def.showTime ~= false,
 	}
 
 	function control:SetHidden(hidden)
@@ -225,7 +235,7 @@ function QAT.display.Create(def)
 		stacks = stacks or 0
 
 		local hasTimer = duration ~= nil and duration > 0
-		local showTime = hasTimer
+		local showTime = hasTimer and self.showTime
 		local showStacks = self.showStacks and stacks > 0
 
 		self:resetColors()
