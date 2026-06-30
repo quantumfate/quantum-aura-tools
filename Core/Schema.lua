@@ -73,6 +73,7 @@ local function canonicalLook(src)
 		showTime = src.showTime ~= false, -- default on; the time number is the common readout
 		fontSizes = { label = f.label, time = f.time, stacks = f.stacks },
 		colors = colors,
+		borderThickness = src.borderThickness, -- nil = default 1px
 	}
 end
 

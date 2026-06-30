@@ -14,6 +14,29 @@ local KIND_OPTS = {
 	{ label = "Audio Cue", value = "audio" },
 }
 local FONT_DEFAULTS = { label = 20, time = 20, stacks = 16 }
+-- Swatch fallbacks (match Display's DEFAULT_COLORS).
+local DEFAULT_COLORS = {
+	background = { 0, 0, 0, 0.55 },
+	bar = { 0.20, 0.80, 0.35, 1 },
+	border = { 0, 0, 0, 1 },
+	stacks = { 1, 0.82, 0.20, 1 },
+	text = { 1, 1, 1, 1 },
+	timer = { 1, 1, 1, 1 },
+}
+-- Which colour elements each Kind exposes, in display order. (Icon has no bar /
+-- background / text label; Text has no bar fill or stacks.)
+local COLOR_SET = {
+	icon = { { "stacks", "Stacks" }, { "timer", "Timer" }, { "border", "Border" } },
+	bar = {
+		{ "bar", "Bar" },
+		{ "background", "Background" },
+		{ "text", "Text" },
+		{ "timer", "Timer" },
+		{ "stacks", "Stacks" },
+		{ "border", "Border" },
+	},
+	text = { { "text", "Text" }, { "timer", "Timer" }, { "background", "Background" }, { "border", "Border" } },
+}
 
 local function selectedPhase(def)
 	local id = QAT.editor.selectedPhaseId
@@ -118,7 +141,6 @@ local function render(container, def)
 	local kind = phase.look.display or "bar"
 	local isVisual = kind == "bar" or kind == "icon" or kind == "text"
 	local canLabel = kind == "bar" or kind == "text"
-	local canColor = kind == "bar" or kind == "text"
 
 	if kind == "icon" then
 		fieldLabel(
@@ -168,28 +190,52 @@ local function render(container, def)
 		y = y + ROW_H + GAP
 	end
 
-	if canColor then
-		local colorKey = (kind == "text") and "text" or "bar"
-		local default = (kind == "text") and { 1, 1, 1, 1 } or { 0.2, 0.8, 0.35, 1 }
-		fieldLabel(
-			"lColor",
-			"Color",
-			y,
-			"The "
-				.. (kind == "text" and "text" or "bar fill")
-				.. " colour. Other elements get their own colours below."
-		)
-		local colorSw = get("colorSw", function()
-			return QAT.widgets.ColorSwatch(container, "QAT_App_Color", ROW_H, { 1, 1, 1, 1 })
+	-- Per-element colours (two per row) + border thickness, gated by Kind.
+	if isVisual then
+		local fields = COLOR_SET[kind] or {}
+		local colX = { PAD, PAD + 190 }
+		for i, f in ipairs(fields) do
+			local key = f[1]
+			local col = (i - 1) % 2
+			local fx = colX[col + 1]
+			local cap = get("cc_" .. key, function()
+				return QAT.widgets.Label(container, "QAT_App_CC_" .. key, "")
+			end)
+			cap:SetText(f[2])
+			cap:ClearAnchors()
+			cap:SetAnchor(TOPLEFT, container, TOPLEFT, fx, y + 3)
+			QAT.widgets.Tooltip(cap, f[2] .. " colour.")
+			local sw = get("cs_" .. key, function()
+				return QAT.widgets.ColorSwatch(container, "QAT_App_CS_" .. key, ROW_H, { 1, 1, 1, 1 })
+			end)
+			sw.onChange = function(c)
+				phase.look.colors = phase.look.colors or {}
+				phase.look.colors[key] = c
+				commit(def)
+			end
+			sw:SetColor((phase.look.colors and phase.look.colors[key]) or DEFAULT_COLORS[key])
+			sw:ClearAnchors()
+			sw:SetAnchor(TOPLEFT, container, TOPLEFT, fx + 96, y)
+			if col == 1 then
+				y = y + ROW_H + GAP
+			end
+		end
+		if #fields % 2 == 1 then
+			y = y + ROW_H + GAP
+		end
+
+		fieldLabel("lBorderT", "Border width", y, "Border thickness in pixels (0 = no border).")
+		local btBox = get("btBox", function()
+			return QAT.widgets.EditBox(container, "QAT_App_BorderT", 50, ROW_H)
 		end)
-		colorSw.onChange = function(c)
-			phase.look.colors = phase.look.colors or {}
-			phase.look.colors[colorKey] = c
+		btBox.onChange = function(text)
+			local n = tonumber(text)
+			phase.look.borderThickness = (n and n >= 0) and n or nil
 			commit(def)
 		end
-		colorSw:SetColor((phase.look.colors and phase.look.colors[colorKey]) or default)
-		colorSw:ClearAnchors()
-		colorSw:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
+		btBox:SetText(tostring(phase.look.borderThickness or 1))
+		btBox:ClearAnchors()
+		btBox:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
 		y = y + ROW_H + GAP
 	end
 
@@ -225,27 +271,35 @@ local function render(container, def)
 		decBox:SetAnchor(TOPLEFT, container, TOPLEFT, LX + 120, y)
 		y = y + ROW_H + GAP
 
-		fieldLabel(
-			"lShowStacks",
-			"Show stacks",
-			y,
-			"This effect has stacks - show the stack number when the game reports stacks (>= 1)."
-		)
-		local stacksChk = get("stacksChk", function()
-			return QAT.widgets.Checkbox(container, "QAT_App_ShowStacks", false)
-		end)
-		stacksChk:SetChecked(phase.look.showStacks or false)
-		stacksChk.onToggle = function(v)
-			phase.look.showStacks = v or nil
-			commit(def)
+		-- Stacks only apply to bar/icon (text never shows them).
+		if kind ~= "text" then
+			fieldLabel(
+				"lShowStacks",
+				"Show stacks",
+				y,
+				"This effect has stacks - show the stack number when the game reports stacks (>= 1)."
+			)
+			local stacksChk = get("stacksChk", function()
+				return QAT.widgets.Checkbox(container, "QAT_App_ShowStacks", false)
+			end)
+			stacksChk:SetChecked(phase.look.showStacks or false)
+			stacksChk.onToggle = function(v)
+				phase.look.showStacks = v or nil
+				commit(def)
+			end
+			stacksChk:ClearAnchors()
+			stacksChk:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y + 2)
+			y = y + ROW_H + GAP
 		end
-		stacksChk:ClearAnchors()
-		stacksChk:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y + 2)
-		y = y + ROW_H + GAP
 
 		fieldLabel("lFont", "Font size", y, "Font size of each readout. Blank uses the default.")
 		phase.look.fontSizes = phase.look.fontSizes or {}
-		local fkeys = canLabel and { "label", "time", "stacks" } or { "time", "stacks" }
+		local fkeys = { "label", "time", "stacks" }
+		if kind == "icon" then
+			fkeys = { "time", "stacks" } -- icons have no label
+		elseif kind == "text" then
+			fkeys = { "label", "time" } -- text has no stacks
+		end
 		local fx = LX
 		for _, key in ipairs(fkeys) do
 			local cap = get("fcap_" .. key, function()

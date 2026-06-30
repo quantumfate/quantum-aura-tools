@@ -133,10 +133,11 @@ function QAT.display.Create(def)
 	local bg = reuse(name .. "_Bg", function()
 		return WM:CreateControl(name .. "_Bg", tlw, CT_BACKDROP)
 	end)
+	local borderT = def.borderThickness or 1
 	bg:SetAnchorFill()
 	bg:SetCenterColor(unpack(colorOf(colors, "background")))
 	bg:SetEdgeColor(unpack(colorOf(colors, "border")))
-	bg:SetEdgeTexture("", 1, 1, 1)
+	bg:SetEdgeTexture("", borderT, borderT, borderT) -- empty texture => solid colour edge of this thickness
 
 	local showIcon = (kind == "icon") or showLeftIcon
 	local icon = reuse(name .. "_Icon", function()
@@ -194,7 +195,11 @@ function QAT.display.Create(def)
 		nameLabel:SetHorizontalAlignment(TEXT_ALIGN_LEFT)
 		nameLabel:SetAnchor(LEFT, tlw, LEFT, showIcon and (h + 6) or 6, 0)
 		timeLabel:SetAnchor(RIGHT, tlw, RIGHT, -6, 0)
-		stacksLabel:SetAnchor(RIGHT, timeLabel, LEFT, -8, 0)
+		if kind == "bar" and showLeftIcon then
+			stacksLabel:SetAnchor(CENTER, icon, CENTER, 0, 0) -- stacks sit on the bar's left icon
+		else
+			stacksLabel:SetAnchor(RIGHT, timeLabel, LEFT, -8, 0)
+		end
 	end
 
 	local control = {
@@ -280,7 +285,7 @@ function QAT.display.Create(def)
 
 		local hasTimer = duration ~= nil and duration > 0
 		local showTime = hasTimer and self.showTime
-		local showStacks = self.showStacks and stacks > 0
+		local showStacks = self.showStacks and stacks > 0 and self.kind ~= "text" -- text has no stacks
 
 		self:resetColors()
 

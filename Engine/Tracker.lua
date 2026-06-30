@@ -63,6 +63,7 @@ local function Normalize(def)
 			showTime = look.showTime,
 			fontSizes = look.fontSizes,
 			colors = look.colors,
+			borderThickness = look.borderThickness,
 			point = pos.point,
 			x = pos.x,
 			y = pos.y,
