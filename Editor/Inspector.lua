@@ -7,9 +7,28 @@
 
 local WM = GetWindowManager()
 local PHASE_TABS = { "Appearance", "Behavior", "Conditions" }
+-- The unit an effect is watched on. (Group/boss units come with the raid work.)
+local UNIT_OPTS = {
+	{ label = "Self", value = "player" },
+	{ label = "Target", value = "reticleover" },
+}
 
 -- Forward declaration so header/phase-strip callbacks can call it.
 local refreshBody
+
+-- Set the tracker's unit and cascade it to every effect trigger / effect duration
+-- (the unit is uniform per tracker for now; per-trigger units can come later).
+local function applyUnit(def, unit)
+	def.unit = unit
+	for _, p in ipairs(def.phases) do
+		for _, tr in ipairs(p.transitions) do
+			if tr.when.kind == "effect" then
+				tr.when.unit = unit
+			end
+		end
+		p.duration.unit = unit
+	end
+end
 
 local function findDef(defs, id)
 	for _, def in ipairs(defs or {}) do
@@ -87,6 +106,45 @@ local function renderPhaseSel(def)
 		QAT.widgets.NotifyTrackerChanged(def.id)
 	end
 
+	-- Phase actions for the SELECTED phase, right-aligned so they read against the
+	-- highlighted chip ("delete the active phase").
+	local h = QAT.editor.PHASESEL_H - 8
+	local selId = QAT.editor.selectedPhaseId
+
+	local delBtn = get("delPhase", function()
+		return QAT.widgets.TextButton(sel, "QAT_PhaseSel_Del", "Delete phase", nil)
+	end)
+	delBtn:SetDimensions(100, h)
+	delBtn:ClearAnchors()
+	delBtn:SetAnchor(RIGHT, sel, RIGHT, -10, 0)
+	delBtn.onClick = function()
+		if #def.phases <= 1 then
+			return
+		end
+		for i, p in ipairs(def.phases) do
+			if p.id == selId then
+				table.remove(def.phases, i)
+				break
+			end
+		end
+		QAT.editor.selectedPhaseId = def.phases[1].id
+		QAT.CanonicalizeDef(def)
+		QAT.widgets.NotifyTrackerChanged(def.id)
+	end
+
+	local initBtn = get("initPhase", function()
+		return QAT.widgets.TextButton(sel, "QAT_PhaseSel_Init", "Set initial", nil)
+	end)
+	initBtn:SetDimensions(90, h)
+	initBtn:ClearAnchors()
+	initBtn:SetAnchor(RIGHT, delBtn, LEFT, -6, 0)
+	initBtn:SetSelected(selId == def.initial) -- lit when the selected phase is the initial one
+	initBtn.onClick = function()
+		def.initial = selId
+		QAT.CanonicalizeDef(def)
+		QAT.widgets.NotifyTrackerChanged(def.id)
+	end
+
 	QAT.widgets.PoolEnd(pool)
 end
 
@@ -115,6 +173,19 @@ function QAT.Editor_Inspector_Build(pane)
 			QAT.widgets.NotifyTrackerChanged(def.id)
 		end
 	end
+
+	-- Unit the effects are watched on (Self / Target).
+	insp.unitCaption = QAT.widgets.Label(header, "QAT_Insp_UnitCaption", "On")
+	insp.unitCaption:SetAnchor(LEFT, insp.nameBox, RIGHT, 16, 0)
+	insp.unitDD = QAT.widgets.Dropdown(header, "QAT_Insp_Unit", 96, UNIT_OPTS, "player", function(v)
+		local def = insp.currentId and findDef(QAT.sv.trackers, insp.currentId)
+		if def then
+			applyUnit(def, v)
+			QAT.CanonicalizeDef(def)
+			QAT.widgets.NotifyTrackerChanged(def.id)
+		end
+	end)
+	insp.unitDD:SetAnchor(LEFT, insp.unitCaption, RIGHT, 6, 0)
 
 	insp.move = QAT.widgets.TextButton(header, "QAT_Insp_Move", "Move on screen", function()
 		if QAT.Editor_MoveTracker and insp.currentId then
@@ -155,7 +226,7 @@ function QAT.Editor_Inspector_Build(pane)
 
 	-- Load toggle (tracker scope), set off on the header's right edge.
 	insp.loadBtn = QAT.widgets.TextButton(header, "QAT_Insp_LoadBtn", "Load", function()
-		QAT.editor.loadMode = true
+		QAT.editor.loadMode = not QAT.editor.loadMode -- toggle, so clicking it again returns
 		refreshBody()
 	end)
 	insp.loadBtn:SetDimensions(76, 22)
@@ -238,9 +309,11 @@ refreshBody = function()
 			QAT.editor.tabButtons[n]:SetSelected(not showLoad and QAT.editor.activeTab == n)
 		end
 	end
+	-- The phase strip is irrelevant in Load mode, but keep the tab bar visible (for a
+	-- non-folder) so clicking a tab is an obvious way back out of Load.
 	insp.phaseSel:SetHidden(showLoad)
 	if QAT.editor.tabBar then
-		QAT.editor.tabBar:SetHidden(showLoad)
+		QAT.editor.tabBar:SetHidden(isFolder)
 	end
 
 	if showLoad then
@@ -283,11 +356,13 @@ function QAT.Editor_Inspector_Show(id)
 	insp.move:SetHidden(not def)
 	insp.popout:SetHidden(not def)
 	insp.loadBtn:SetHidden(not def)
-	local showSize = def ~= nil and def.kind ~= "folder"
-	insp.sizeCaption:SetHidden(not showSize)
-	insp.widthBox:SetHidden(not showSize)
-	insp.sizeX:SetHidden(not showSize)
-	insp.heightBox:SetHidden(not showSize)
+	local showTracker = def ~= nil and def.kind ~= "folder"
+	insp.sizeCaption:SetHidden(not showTracker)
+	insp.widthBox:SetHidden(not showTracker)
+	insp.sizeX:SetHidden(not showTracker)
+	insp.heightBox:SetHidden(not showTracker)
+	insp.unitCaption:SetHidden(not showTracker)
+	insp.unitDD:SetHidden(not showTracker)
 
 	if def then
 		insp.nameBox:SetText(def.name or def.id)
@@ -295,6 +370,7 @@ function QAT.Editor_Inspector_Show(id)
 			local pos = def.pos or {}
 			insp.widthBox:SetText(tostring(pos.width or 220))
 			insp.heightBox:SetText(tostring(pos.height or 30))
+			insp.unitDD:SetValue(def.unit or "player")
 		end
 	end
 	refreshBody()

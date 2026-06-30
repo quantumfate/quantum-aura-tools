@@ -296,41 +296,7 @@ local function render(container, def)
 		commit(def)
 		render(container, def)
 	end
-	y = y + ROW_H + GAP + GAP
-
-	-- Phase management for the selected phase.
-	local initBtn = get("initBtn", function()
-		return QAT.widgets.TextButton(container, "QAT_Beh_Init", "Set as initial", nil)
-	end)
-	initBtn:SetDimensions(120, ROW_H)
-	initBtn:ClearAnchors()
-	initBtn:SetAnchor(TOPLEFT, container, TOPLEFT, PAD, y)
-	initBtn.onClick = function()
-		def.initial = phase.id
-		commit(def)
-		QAT.Editor_Inspector_Refresh()
-	end
-
-	local delBtn = get("delBtn", function()
-		return QAT.widgets.TextButton(container, "QAT_Beh_Del", "Delete phase", nil)
-	end)
-	delBtn:SetDimensions(120, ROW_H)
-	delBtn:ClearAnchors()
-	delBtn:SetAnchor(TOPLEFT, container, TOPLEFT, PAD + 140, y)
-	delBtn.onClick = function()
-		if #def.phases <= 1 then
-			return
-		end
-		for i, p in ipairs(def.phases) do
-			if p.id == phase.id then
-				table.remove(def.phases, i)
-				break
-			end
-		end
-		QAT.editor.selectedPhaseId = def.phases[1].id
-		commit(def)
-		QAT.Editor_Inspector_Refresh()
-	end
+	y = y + ROW_H + GAP
 
 	QAT.widgets.PoolEnd(pool)
 end
