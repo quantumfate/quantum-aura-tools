@@ -5,9 +5,10 @@
 QAT.editor = QAT.editor or {}
 
 local WM = GetWindowManager()
-local TABS = { "Phases", "Conditions", "Load" }
-local TITLE_H, TAB_H, SPLITTER_W, HEADER_H = 28, 26, 6, 56
-QAT.editor.HEADER_H, QAT.editor.TAB_H = HEADER_H, TAB_H
+-- Per-phase tabs (Load is a tracker-wide panel reached from the header, not a tab).
+local TABS = { "Appearance", "Behavior", "Conditions" }
+local TITLE_H, TAB_H, SPLITTER_W, HEADER_H, PHASESEL_H = 28, 26, 6, 56, 30
+QAT.editor.HEADER_H, QAT.editor.TAB_H, QAT.editor.PHASESEL_H = HEADER_H, TAB_H, PHASESEL_H
 local MIN_TREE, MIN_INSPECTOR = 160, 320
 
 local function saveGeometry()
@@ -86,6 +87,7 @@ local TAB_W, TAB_GAP = 110, 8
 
 local function selectTab(name)
 	QAT.editor.activeTab = name
+	QAT.editor.loadMode = false -- a per-phase tab is not the tracker-wide Load panel
 	for _, tabName in ipairs(TABS) do
 		QAT.editor.tabButtons[tabName]:SetSelected(tabName == name)
 	end
@@ -94,30 +96,6 @@ local function selectTab(name)
 	end
 end
 QAT.Editor_SelectTab = selectTab
-
--- Show only the tabs that apply to the selection. Folders have no phases or
--- runtime conditions, so only the Load tab is shown for them.
-function QAT.Editor_SetAvailableTabs(isFolder)
-	local visible = isFolder and { "Load" } or TABS
-	for _, name in ipairs(TABS) do
-		QAT.editor.tabButtons[name]:SetHidden(true)
-	end
-	local x = 0
-	local activeOk = false
-	for _, name in ipairs(visible) do
-		local btn = QAT.editor.tabButtons[name]
-		btn:SetHidden(false)
-		btn:ClearAnchors()
-		btn:SetAnchor(TOPLEFT, QAT.editor.tabBar, TOPLEFT, x, 0)
-		x = x + TAB_W + TAB_GAP
-		if QAT.editor.activeTab == name then
-			activeOk = true
-		end
-	end
-	if not activeOk then
-		selectTab(visible[1])
-	end
-end
 
 local function buildTabBar(pane)
 	QAT.editor.tabButtons = {}
@@ -187,9 +165,10 @@ function QAT.Editor_Init()
 
 	QAT.editor.inspectorPane = QAT.widgets.Panel(f, "QAT_Editor_InspectorPane", { 0.06, 0.07, 0.09, 1 })
 
+	-- The tab bar sits below the header and the shared phase-selector strip.
 	local tabBar = WM:CreateControl("QAT_Editor_TabBar", QAT.editor.inspectorPane, CT_CONTROL)
-	tabBar:SetAnchor(TOPLEFT, QAT.editor.inspectorPane, TOPLEFT, 0, HEADER_H)
-	tabBar:SetAnchor(TOPRIGHT, QAT.editor.inspectorPane, TOPRIGHT, 0, HEADER_H)
+	tabBar:SetAnchor(TOPLEFT, QAT.editor.inspectorPane, TOPLEFT, 0, HEADER_H + PHASESEL_H)
+	tabBar:SetAnchor(TOPRIGHT, QAT.editor.inspectorPane, TOPRIGHT, 0, HEADER_H + PHASESEL_H)
 	tabBar:SetHeight(TAB_H)
 	QAT.editor.tabBar = tabBar
 	buildTabBar(tabBar)
@@ -202,7 +181,7 @@ function QAT.Editor_Init()
 	end
 
 	QAT.Editor_Relayout()
-	selectTab("Phases")
+	selectTab("Appearance")
 	QAT.log.editor:Info("Editor_Init complete")
 end
 

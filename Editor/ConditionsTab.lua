@@ -1,8 +1,7 @@
--- Conditions tab: per-phase runtime conditions. Each row is
+-- Conditions tab: per-phase runtime conditions for the phase chosen in the shared
+-- header strip (QAT.editor.selectedPhaseId). Each row is
 --   IF [stat] [op] [value]  ->  [action] (+ colour)
 -- and applies ephemerally on the HUD (never written back to the saved look).
--- The phase strip mirrors the Phases tab and shares QAT.editor.selectedPhaseId, so
--- conditions are edited for the same phase you set up there.
 
 local PAD = 12
 local ROW_H = 26
@@ -70,32 +69,6 @@ local function render(container, def)
 	end
 
 	local y = PAD
-
-	-- Phase strip (shared selection with the Phases tab).
-	local strip = get("strip", function()
-		return QAT.widgets.Label(container, "QAT_Cond_Strip", "Phase:")
-	end)
-	strip:SetText("Phase:")
-	strip:ClearAnchors()
-	strip:SetAnchor(TOPLEFT, container, TOPLEFT, PAD, y + 3)
-	local x = PAD + 56
-	for i, p in ipairs(def.phases) do
-		local pid = p.id
-		local chip = get("chip" .. i, function()
-			return QAT.widgets.TextButton(container, "QAT_Cond_Chip" .. i, "", nil)
-		end)
-		chip:SetSelected(pid == QAT.editor.selectedPhaseId)
-		chip.label:SetText(pid)
-		chip:SetDimensions(90, ROW_H)
-		chip:ClearAnchors()
-		chip:SetAnchor(TOPLEFT, container, TOPLEFT, x, y)
-		chip.onClick = function()
-			QAT.editor.selectedPhaseId = pid
-			render(container, def)
-		end
-		x = x + 96
-	end
-	y = y + ROW_H + GAP
 
 	local phase = selectedPhase(def)
 	if not phase then

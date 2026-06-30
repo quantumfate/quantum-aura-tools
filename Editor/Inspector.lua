@@ -1,9 +1,15 @@
--- Inspector: a persistent header (name, enable, move, pop-out) plus the tab body
--- host (Phases / Conditions / Load). It is bound to a tracker id and renders
--- entirely from that def, refreshing on the "QAT_TrackerChanged" callback, so any
--- number of inspector instances on the same tracker stay in sync.
+-- Inspector: a tracker-scoped header (name, move, pop-out, size, Load) plus a
+-- phase-scoped area below it — a shared phase-selector strip and the per-phase
+-- tabs (Appearance / Behavior / Conditions). "Load" in the header swaps the body
+-- to the tracker-wide Load panel and hides the phase strip + tabs, so it is never
+-- mistaken for a per-phase setting. Everything renders from the bound def and
+-- refreshes on "QAT_TrackerChanged".
 
 local WM = GetWindowManager()
+local PHASE_TABS = { "Appearance", "Behavior", "Conditions" }
+
+-- Forward declaration so header/phase-strip callbacks can call it.
+local refreshBody
 
 local function findDef(defs, id)
 	for _, def in ipairs(defs or {}) do
@@ -21,18 +27,80 @@ local function findDef(defs, id)
 end
 QAT.Editor_FindDef = findDef
 
+local function ensureSelectedPhase(def)
+	for _, p in ipairs(def.phases or {}) do
+		if p.id == QAT.editor.selectedPhaseId then
+			return
+		end
+	end
+	QAT.editor.selectedPhaseId = def.phases and def.phases[1] and def.phases[1].id
+end
+
+-- Render the shared phase strip: "Phase: [chips] (+ Phase)".
+local function renderPhaseSel(def)
+	local insp = QAT.editor.inspector
+	local sel = insp.phaseSel
+	local pool = insp.phaseSelPool
+	QAT.widgets.PoolBegin(pool)
+	local function get(key, factory)
+		return QAT.widgets.PoolGet(pool, key, factory)
+	end
+
+	local cap = get("cap", function()
+		return QAT.widgets.Label(sel, "QAT_PhaseSel_Cap", "Phase:")
+	end)
+	cap:ClearAnchors()
+	cap:SetAnchor(LEFT, sel, LEFT, 10, 0)
+
+	local x = 58
+	for i, p in ipairs(def.phases) do
+		local pid = p.id
+		local chip = get("chip" .. i, function()
+			return QAT.widgets.TextButton(sel, "QAT_PhaseSel_Chip" .. i, "", nil)
+		end)
+		chip:SetSelected(pid == QAT.editor.selectedPhaseId)
+		chip.label:SetText(pid)
+		chip:SetDimensions(84, QAT.editor.PHASESEL_H - 8)
+		chip:ClearAnchors()
+		chip:SetAnchor(LEFT, sel, LEFT, x, 0)
+		chip.onClick = function()
+			QAT.editor.selectedPhaseId = pid
+			refreshBody()
+		end
+		x = x + 88
+	end
+
+	local addBtn = get("add", function()
+		return QAT.widgets.TextButton(sel, "QAT_PhaseSel_Add", "+ Phase", nil)
+	end)
+	addBtn:SetDimensions(76, QAT.editor.PHASESEL_H - 8)
+	addBtn:ClearAnchors()
+	addBtn:SetAnchor(LEFT, sel, LEFT, x, 0)
+	addBtn.onClick = function()
+		local n = #def.phases + 1
+		table.insert(
+			def.phases,
+			{ id = "phase" .. n, look = { display = "bar" }, duration = { type = "none" }, transitions = {} }
+		)
+		QAT.editor.selectedPhaseId = "phase" .. n
+		QAT.CanonicalizeDef(def)
+		QAT.widgets.NotifyTrackerChanged(def.id)
+	end
+
+	QAT.widgets.PoolEnd(pool)
+end
+
 function QAT.Editor_Inspector_Build(pane)
 	local insp = QAT.editor.inspector or {}
 	QAT.editor.inspector = insp
 
-	-- Persistent header (top strip, above the tab bar).
+	-- Header (tracker scope): name, move, pop out, size, and the Load toggle.
 	local header = QAT.widgets.Panel(pane, "QAT_Insp_Header", { 0.10, 0.11, 0.14, 1 })
 	header:SetAnchor(TOPLEFT, pane, TOPLEFT, 0, 0)
 	header:SetAnchor(TOPRIGHT, pane, TOPRIGHT, 0, 0)
 	header:SetHeight(QAT.editor.HEADER_H)
 	insp.header = header
 
-	-- Editable tracker name (organizational; distinct from a phase's drawn label).
 	local nameLabelCaption = QAT.widgets.Label(header, "QAT_Insp_NameCaption", "Name")
 	nameLabelCaption:SetAnchor(TOPLEFT, header, TOPLEFT, 10, 6)
 	insp.nameCaption = nameLabelCaption
@@ -85,9 +153,26 @@ function QAT.Editor_Inspector_Build(pane)
 	insp.heightBox:SetAnchor(LEFT, insp.sizeX, RIGHT, 4, 0)
 	insp.heightBox.onChange = dimChange("height")
 
-	-- Tab body host (below the tab bar).
+	-- Load toggle (tracker scope), set off on the header's right edge.
+	insp.loadBtn = QAT.widgets.TextButton(header, "QAT_Insp_LoadBtn", "Load", function()
+		QAT.editor.loadMode = true
+		refreshBody()
+	end)
+	insp.loadBtn:SetDimensions(76, 22)
+	insp.loadBtn:SetAnchor(BOTTOMRIGHT, header, BOTTOMRIGHT, -10, -6)
+
+	-- Shared phase-selector strip (between the header and the tab bar).
+	local sel = WM:CreateControl("QAT_Insp_PhaseSel", pane, CT_CONTROL)
+	sel:SetAnchor(TOPLEFT, pane, TOPLEFT, 0, QAT.editor.HEADER_H)
+	sel:SetAnchor(TOPRIGHT, pane, TOPRIGHT, 0, QAT.editor.HEADER_H)
+	sel:SetHeight(QAT.editor.PHASESEL_H)
+	insp.phaseSel = sel
+	insp.phaseSelPool = QAT.widgets.NewPool()
+
+	-- Body host (below the tab bar).
+	local bodyTop = QAT.editor.HEADER_H + QAT.editor.PHASESEL_H + QAT.editor.TAB_H
 	local body = QAT.widgets.Panel(pane, "QAT_Insp_Body", { 0.06, 0.07, 0.09, 1 })
-	body:SetAnchor(TOPLEFT, pane, TOPLEFT, 0, QAT.editor.HEADER_H + QAT.editor.TAB_H)
+	body:SetAnchor(TOPLEFT, pane, TOPLEFT, 0, bodyTop)
 	body:SetAnchor(BOTTOMRIGHT, pane, BOTTOMRIGHT, 0, 0)
 	insp.body = body
 
@@ -97,43 +182,83 @@ function QAT.Editor_Inspector_Build(pane)
 	placeholder:SetVerticalAlignment(TEXT_ALIGN_TOP)
 	insp.placeholder = placeholder
 
-	-- One container per tab, each filling the body; only the active one is shown.
+	-- One container per per-phase tab, plus a tracker-wide Load container; the body
+	-- shows exactly one at a time.
 	insp.tabContainers = {}
-	for _, tabName in ipairs({ "Phases", "Conditions", "Load" }) do
+	for _, tabName in ipairs(PHASE_TABS) do
 		local c = WM:CreateControl("QAT_Insp_Tab_" .. tabName, body, CT_CONTROL)
 		c:SetAnchor(TOPLEFT, body, TOPLEFT, 0, 0)
 		c:SetAnchor(BOTTOMRIGHT, body, BOTTOMRIGHT, 0, 0)
 		c:SetHidden(true)
 		insp.tabContainers[tabName] = c
 	end
+	local loadC = WM:CreateControl("QAT_Insp_LoadContainer", body, CT_CONTROL)
+	loadC:SetAnchor(TOPLEFT, body, TOPLEFT, 0, 0)
+	loadC:SetAnchor(BOTTOMRIGHT, body, BOTTOMRIGHT, 0, 0)
+	loadC:SetHidden(true)
+	insp.loadContainer = loadC
 
-	-- Start with nothing selected: hide the per-tracker actions and tabs.
 	QAT.Editor_Inspector_Show(nil)
 end
 
--- Tab modules register their renderer here: QAT.editor.tabRenderers[name](container, def).
 QAT.editor.tabRenderers = QAT.editor.tabRenderers or {}
 
-local function refreshBody()
+refreshBody = function()
 	local insp = QAT.editor.inspector
 	if not insp then
 		return
 	end
-	local tab = QAT.editor.activeTab or "Phases"
 	local def = insp.currentId and findDef(QAT.sv.trackers, insp.currentId)
 
-	for _, container in pairs(insp.tabContainers or {}) do
-		container:SetHidden(true)
+	for _, c in pairs(insp.tabContainers or {}) do
+		c:SetHidden(true)
 	end
+	insp.loadContainer:SetHidden(true)
 
 	if not def then
 		insp.placeholder:SetHidden(false)
 		insp.placeholder:SetText("Select a tracker in the tree, or add one with + Tracker.")
+		insp.phaseSel:SetHidden(true)
+		if QAT.editor.tabBar then
+			QAT.editor.tabBar:SetHidden(true)
+		end
+		insp.loadBtn:SetHidden(true)
 		return
 	end
 	insp.placeholder:SetHidden(true)
+	insp.loadBtn:SetHidden(false)
 
-	local container = insp.tabContainers and insp.tabContainers[tab]
+	-- Folders have no phases, so they only ever show the Load panel.
+	local isFolder = def.kind == "folder"
+	local showLoad = QAT.editor.loadMode or isFolder
+
+	insp.loadBtn:SetSelected(showLoad)
+	if QAT.editor.tabButtons then
+		for _, n in ipairs(PHASE_TABS) do
+			QAT.editor.tabButtons[n]:SetSelected(not showLoad and QAT.editor.activeTab == n)
+		end
+	end
+	insp.phaseSel:SetHidden(showLoad)
+	if QAT.editor.tabBar then
+		QAT.editor.tabBar:SetHidden(showLoad)
+	end
+
+	if showLoad then
+		local renderer = QAT.editor.tabRenderers["Load"]
+		if renderer then
+			insp.loadContainer:SetHidden(false)
+			QAT.Safe("tab Load", function()
+				renderer(insp.loadContainer, def)
+			end)
+		end
+		return
+	end
+
+	ensureSelectedPhase(def)
+	renderPhaseSel(def)
+
+	local tab = QAT.editor.activeTab or "Appearance"
+	local container = insp.tabContainers[tab]
 	local renderer = QAT.editor.tabRenderers[tab]
 	if container and renderer then
 		container:SetHidden(false)
@@ -151,25 +276,18 @@ function QAT.Editor_Inspector_Show(id)
 	end
 	insp.currentId = id
 	local def = id and findDef(QAT.sv.trackers, id)
+	QAT.editor.loadMode = false -- (re)selecting a tracker lands on a per-phase tab
 
-	-- The per-tracker actions and tabs are meaningless with nothing selected.
 	insp.nameCaption:SetHidden(not def)
 	insp.nameBox:SetHidden(not def)
 	insp.move:SetHidden(not def)
 	insp.popout:SetHidden(not def)
-	-- Size fields apply to a tracker's drawn dimensions; folders have none.
+	insp.loadBtn:SetHidden(not def)
 	local showSize = def ~= nil and def.kind ~= "folder"
 	insp.sizeCaption:SetHidden(not showSize)
 	insp.widthBox:SetHidden(not showSize)
 	insp.sizeX:SetHidden(not showSize)
 	insp.heightBox:SetHidden(not showSize)
-	if QAT.editor.tabBar then
-		QAT.editor.tabBar:SetHidden(not def)
-	end
-	-- Folders only have a Load tab (no phases / runtime conditions).
-	if def and QAT.Editor_SetAvailableTabs then
-		QAT.Editor_SetAvailableTabs(def.kind == "folder")
-	end
 
 	if def then
 		insp.nameBox:SetText(def.name or def.id)
@@ -187,7 +305,7 @@ function QAT.Editor_Inspector_SetTab(_)
 end
 
 function QAT.Editor_Inspector_Relayout()
-	-- Header/body anchor to the pane; nothing extra yet.
+	-- Header / phase strip / body all anchor to the pane; nothing extra yet.
 end
 
 CALLBACK_MANAGER:RegisterCallback("QAT_TrackerChanged", function(id)
