@@ -97,6 +97,12 @@ local function selectTab(name)
 end
 QAT.Editor_SelectTab = selectTab
 
+local TAB_TIPS = {
+	Appearance = "How the selected phase looks (kind, colours, readouts).",
+	Behavior = "The selected phase's timer and its transitions to other phases.",
+	Conditions = "Reactive look changes for the selected phase (e.g. turn red under 3s).",
+}
+
 local function buildTabBar(pane)
 	QAT.editor.tabButtons = {}
 	local prev
@@ -106,6 +112,7 @@ local function buildTabBar(pane)
 		end)
 		btn:SetHeight(TAB_H)
 		btn:SetMinWidth(TAB_MIN_W) -- uniform-ish tabs that still grow for long labels
+		QAT.widgets.Tooltip(btn, TAB_TIPS[name])
 		if prev then
 			btn:SetAnchor(LEFT, prev, RIGHT, TAB_GAP, 0)
 		else

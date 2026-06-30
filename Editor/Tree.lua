@@ -232,12 +232,15 @@ function QAT.Editor_Tree_Build(pane)
 		local addT = QAT.widgets.TextButton(tb, "QAT_Tree_Btn_AddTracker", "+ Tracker", addTracker)
 		addT:SetHeight(TOOLBAR_H - 6)
 		addT:SetAnchor(LEFT, tb, LEFT, GAP, 0)
+		QAT.widgets.Tooltip(addT, "Add a new tracker.")
 		local addG = QAT.widgets.TextButton(tb, "QAT_Tree_Btn_AddGroup", "+ Group", addGroup)
 		addG:SetHeight(TOOLBAR_H - 6)
 		addG:SetAnchor(LEFT, addT, RIGHT, GAP, 0)
+		QAT.widgets.Tooltip(addG, "Add a group (folder). Its Load conditions cascade to the trackers inside it.")
 		local delBtn = QAT.widgets.TextButton(tb, "QAT_Tree_Btn_Delete", "Delete", deleteSelected)
 		delBtn:SetHeight(TOOLBAR_H - 6)
 		delBtn:SetAnchor(LEFT, addG, RIGHT, GAP + 10, 0)
+		QAT.widgets.Tooltip(delBtn, "Delete the selected tracker or group.")
 
 		-- Fixed viewport filling the pane below the toolbar. It needs a real rect
 		-- (top + bottom anchored) so its child rows are hit-testable; scrolling is

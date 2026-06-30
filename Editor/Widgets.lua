@@ -17,6 +17,18 @@ local C = {
 }
 local DROPDOWN_ARROW = "EsoUI/Art/Buttons/scrollbox_downArrow_up.dds"
 
+-- Shared hover-tooltip show/hide (used by both the Tooltip helper and widgets that
+-- already own mouse handlers, like buttons).
+local function ShowTip(owner, text)
+	if text and text ~= "" then
+		InitializeTooltip(InformationTooltip, owner, TOPLEFT, 0, 4, BOTTOMLEFT)
+		SetTooltipText(InformationTooltip, text)
+	end
+end
+local function HideTip()
+	ClearTooltip(InformationTooltip)
+end
+
 -- Filled backdrop panel. Backdrops are for VISUALS only — they do not reliably
 -- receive mouse input, so anything clickable must be built on a CT_CONTROL base
 -- (see Clickable) with a backdrop as a child.
@@ -95,12 +107,19 @@ function QAT.widgets.TextButton(parent, name, text, onClick)
 		self.bg:SetCenterColor(unpack(self.baseColor))
 	end
 
+	-- Tooltip text is read at hover time, so a pooled button can be re-described.
+	function b:SetTooltip(text)
+		self.tooltipText = text
+	end
+
 	b:SetHandler("OnMouseEnter", function(self)
 		local c = self.baseColor
 		self.bg:SetCenterColor(c[1] + 0.06, c[2] + 0.07, c[3] + 0.08, 1)
+		ShowTip(self, self.tooltipText)
 	end)
 	b:SetHandler("OnMouseExit", function(self)
 		self.bg:SetCenterColor(unpack(self.baseColor))
+		HideTip()
 	end)
 	b:SetHandler("OnMouseUp", function(self, button, upInside)
 		if upInside and button == MOUSE_BUTTON_INDEX_LEFT and self.onClick then
@@ -183,12 +202,15 @@ function QAT.widgets.IconWell(parent, name, size)
 	return frame
 end
 
--- Attach a hover tooltip to a control. Enables mouse on the control and installs
--- enter/exit handlers, so use it on passive controls (labels) rather than on
--- interactive widgets that already own OnMouseEnter/Exit (buttons, dropdowns).
--- The text is read from control.tooltipText at hover time, so it can be re-set on
--- a pooled control each render.
+-- Attach a hover tooltip to a control. A TextButton routes through its own
+-- handler-aware SetTooltip (so its hover colouring survives); other controls get
+-- enter/exit handlers installed here (use on passive controls like labels). Text
+-- is read at hover time, so a pooled control can be re-described each render.
 function QAT.widgets.Tooltip(control, text)
+	if control.SetTooltip then -- TextButton: keeps its existing hover handlers
+		control:SetTooltip(text)
+		return control
+	end
 	control.tooltipText = text
 	if control.qatTooltipBound then
 		return control
@@ -196,14 +218,9 @@ function QAT.widgets.Tooltip(control, text)
 	control.qatTooltipBound = true
 	control:SetMouseEnabled(true)
 	control:SetHandler("OnMouseEnter", function(self)
-		if self.tooltipText and self.tooltipText ~= "" then
-			InitializeTooltip(InformationTooltip, self, TOPLEFT, 0, 4, BOTTOMLEFT)
-			SetTooltipText(InformationTooltip, self.tooltipText)
-		end
+		ShowTip(self, self.tooltipText)
 	end)
-	control:SetHandler("OnMouseExit", function()
-		ClearTooltip(InformationTooltip)
-	end)
+	control:SetHandler("OnMouseExit", HideTip)
 	return control
 end
 

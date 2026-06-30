@@ -64,6 +64,7 @@ local function renderPhaseSel(def)
 		chip:SetHeight(h)
 		chip:ClearAnchors()
 		chip:SetAnchor(LEFT, prev, RIGHT, GAP, 0)
+		QAT.widgets.Tooltip(chip, "Edit phase '" .. pid .. "'.")
 		chip.onClick = function()
 			QAT.editor.selectedPhaseId = pid
 			refreshBody()
@@ -77,6 +78,7 @@ local function renderPhaseSel(def)
 	addBtn:SetHeight(h)
 	addBtn:ClearAnchors()
 	addBtn:SetAnchor(LEFT, prev, RIGHT, GAP, 0)
+	QAT.widgets.Tooltip(addBtn, "Add a new phase to this tracker.")
 	addBtn.onClick = function()
 		local n = #def.phases + 1
 		table.insert(
@@ -98,7 +100,8 @@ local function renderPhaseSel(def)
 	delBtn:SetHeight(h)
 	delBtn:ClearAnchors()
 	delBtn:SetAnchor(RIGHT, sel, RIGHT, -12, 0)
-	delBtn.onClick = function()
+	QAT.widgets.Tooltip(delBtn, "Delete the selected phase '" .. tostring(selId) .. "'.")
+	local function removeSelectedPhase()
 		if #def.phases <= 1 then
 			return
 		end
@@ -112,6 +115,16 @@ local function renderPhaseSel(def)
 		QAT.CanonicalizeDef(def)
 		QAT.widgets.NotifyTrackerChanged(def.id)
 	end
+	delBtn.onClick = function()
+		if #def.phases <= 1 then
+			return -- a tracker must keep at least one phase
+		end
+		if QAT.Editor_ConfirmDelete then
+			QAT.Editor_ConfirmDelete("phase " .. tostring(selId), removeSelectedPhase)
+		else
+			removeSelectedPhase()
+		end
+	end
 
 	local initBtn = get("initPhase", function()
 		return QAT.widgets.TextButton(sel, "QAT_PhaseSel_Init", "Set initial", nil)
@@ -120,6 +133,7 @@ local function renderPhaseSel(def)
 	initBtn:ClearAnchors()
 	initBtn:SetAnchor(RIGHT, delBtn, LEFT, GAP, 0)
 	initBtn:SetSelected(selId == def.initial) -- lit when the selected phase is the initial one
+	QAT.widgets.Tooltip(initBtn, "Make the selected phase the tracker's starting phase.")
 	initBtn.onClick = function()
 		def.initial = selId
 		QAT.CanonicalizeDef(def)
@@ -165,12 +179,14 @@ function QAT.Editor_Inspector_Build(pane)
 	end)
 	insp.move:SetHeight(22)
 	insp.move:SetAnchor(BOTTOMLEFT, header, BOTTOMLEFT, 12, -8)
+	QAT.widgets.Tooltip(insp.move, "Drag the tracker on screen to reposition it on the HUD.")
 
 	insp.popout = QAT.widgets.TextButton(header, "QAT_Insp_Popout", "Pop out", function()
 		d(QAT.displayName .. ": detachable inspector is not yet available.")
 	end)
 	insp.popout:SetHeight(22)
 	insp.popout:SetAnchor(LEFT, insp.move, RIGHT, 8, 0)
+	QAT.widgets.Tooltip(insp.popout, "Detach this inspector into its own window. (Not yet available.)")
 
 	-- Tracker dimensions (W x H). Bars use both; icons are square and use H only.
 	local function dimChange(field)
@@ -207,6 +223,10 @@ function QAT.Editor_Inspector_Build(pane)
 	insp.loadBtn:SetHeight(22)
 	insp.loadBtn:SetMinWidth(72)
 	insp.loadBtn:SetAnchor(BOTTOMRIGHT, header, BOTTOMRIGHT, -12, -8)
+	QAT.widgets.Tooltip(
+		insp.loadBtn,
+		"When this tracker is active: class, role, combat, zone, boss and set conditions."
+	)
 
 	insp.phasesBtn = QAT.widgets.TextButton(header, "QAT_Insp_PhasesBtn", "Phases", function()
 		QAT.editor.loadMode = false
@@ -215,6 +235,7 @@ function QAT.Editor_Inspector_Build(pane)
 	insp.phasesBtn:SetHeight(22)
 	insp.phasesBtn:SetMinWidth(72)
 	insp.phasesBtn:SetAnchor(RIGHT, insp.loadBtn, LEFT, 8, 0)
+	QAT.widgets.Tooltip(insp.phasesBtn, "Edit this tracker's phases — appearance, behavior and runtime conditions.")
 
 	-- Shared phase-selector strip (between the header and the tab bar).
 	local sel = WM:CreateControl("QAT_Insp_PhaseSel", pane, CT_CONTROL)
