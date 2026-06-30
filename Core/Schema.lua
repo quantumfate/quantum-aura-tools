@@ -5,60 +5,176 @@
 --   {
 --     id, kind = "tracker", name, unit,
 --     enabled = true,
---     pos   = { point, x, y, width, height },
---     initial = <phaseId> | nil,          -- starting phase, nil = start idle
+--     pos     = { point, x, y, width, height },
+--     initial = <phaseId>,                 -- starting phase (always a real phase;
+--                                          -- usually a hidden "idle" one)
 --     phases  = {                          -- the state machine
 --       {
 --         id,
---         look    = { display = "bar"|"icon"|"text"|"none",
---                     value = "time"|"stacks"|"none",  -- what the bar/number shows
---                     showStacks, maxStacks,           -- "(N)" badge; stacks denominator
---                     name, color, icon, font, decimals, bgColor },
---         duration = { type = "none"|"fixed"|"effect", seconds?, abilityIds?, unit? },
---         enter   = { <trigger>, ... },    -- effect triggers that enter this phase
---         onExpire = <phaseId> | nil,      -- where a timed phase goes when it ends
+--         look = { display = "bar"|"icon"|"text"|"none",
+--                  name, icon, font, decimals,
+--                  showStacks,             -- author-declared: this effect has stacks
+--                  colors = { background, bar, border, stacks, text, timer, cooldown } },
+--         duration    = { type = "none"|"fixed"|"effect", seconds?, abilityIds?, unit? },
+--         transitions = {                  -- outgoing, source-attached, first match wins
+--           { when = <trigger>, to = <phaseId> },
+--           ...
+--         },
+--         runtime = { <condition>, ... },  -- per-phase reactive look overrides (ephemeral)
 --         cues    = { sound, flash } | nil,-- additive on-enter cues (not a look)
 --       }, ...
 --     },
---     runtime = { <condition>, ... } | nil,
---     load    = { ... } | nil,
+--     load = { ... } | nil,
 --   }
 --
--- A flat single-phase shorthand is accepted as authoring/import convenience and
--- expanded here into the canonical form. Folders are passed through unchanged
--- except for recursion into children.
+-- A transition trigger (`when`) is one of:
+--   { kind = "effect",    result = "gained"|"faded", abilityIds = {..}, unit }
+--   { kind = "stacks",    op, value }      -- current stack count crosses a threshold
+--   { kind = "remaining", op, value }      -- seconds left crosses a threshold
+--   { kind = "expire" }                    -- the phase's timer reached zero
+--
+-- The model is uniform: every tracker is phases + transitions, idle is just a
+-- hidden phase. A flat single-phase shorthand and the older enter/onExpire shape
+-- are both accepted and expanded/migrated here.
 
 local DISPLAY_KINDS = { bar = true, icon = true, text = true, none = true }
--- What the bar fills from and the numeric readout shows. Decoupled from duration:
--- a phase can read out stacks while still expiring on its effect's duration.
-local VALUE_KINDS = { time = true, stacks = true, none = true }
+local COLOR_KEYS = { "background", "bar", "border", "stacks", "text", "timer", "cooldown" }
 
 local function canonicalLook(src)
+	src = src or {}
 	local display = src.display
 	if not DISPLAY_KINDS[display] then
 		display = "bar"
 	end
-	local value = src.value
-	if not VALUE_KINDS[value] then
-		value = "time"
+
+	-- Per-element colors. Migrate the older single `color` (bar fill) and `bgColor`.
+	local srcColors = src.colors or {}
+	local colors = {}
+	for _, k in ipairs(COLOR_KEYS) do
+		colors[k] = srcColors[k]
 	end
+	if colors.bar == nil and src.color ~= nil then
+		colors.bar = src.color
+	end
+	if colors.background == nil and src.bgColor ~= nil then
+		colors.background = src.bgColor
+	end
+
 	return {
 		display = display,
 		name = src.name,
-		color = src.color,
 		icon = src.icon,
 		font = src.font,
 		decimals = src.decimals,
-		bgColor = src.bgColor,
-		value = value,
 		showStacks = src.showStacks or false,
-		maxStacks = src.maxStacks,
+		colors = colors,
 	}
+end
+
+-- Normalize one transition trigger in place, defaulting against the tracker unit.
+local function canonicalWhen(when, defUnit)
+	when = when or {}
+	local kind = when.kind
+	if kind == "effect" then
+		when.result = when.result or "gained"
+		when.abilityIds = when.abilityIds or {}
+		when.unit = when.unit or defUnit
+	elseif kind == "stacks" or kind == "remaining" then
+		when.op = when.op or ">="
+		when.value = when.value or 0
+	else
+		when.kind = "expire"
+	end
+	return when
+end
+
+-- Old runtime-condition actions used a single "color" (bar) / "hide". Map them to
+-- the per-element vocabulary; drop "hide" (visibility is owned by phases now).
+local function migrateRuntime(list)
+	local out = {}
+	for _, c in ipairs(list or {}) do
+		if c.action == "hide" then
+			-- dropped
+		elseif c.action == "color" then
+			table.insert(out, { stat = c.stat, op = c.op, value = c.value, action = "setBarColor", color = c.color })
+		else
+			table.insert(out, c)
+		end
+	end
+	return out
+end
+
+-- Convert the older enter[]/onExpire phase shape into source-attached transitions.
+-- Runs once: it is a no-op once no phase carries `enter`/`onExpire`.
+local function migrateLegacyTransitions(def)
+	local hasLegacy = false
+	for _, p in ipairs(def.phases) do
+		if p.enter or p.onExpire ~= nil then
+			hasLegacy = true
+		end
+	end
+	if not hasLegacy then
+		return
+	end
+
+	local byId = {}
+	for _, p in ipairs(def.phases) do
+		p.transitions = p.transitions or {}
+		byId[p.id] = p
+	end
+
+	-- A tracker that started idle (no initial phase) needs a real hidden idle phase
+	-- to own its entry transitions.
+	if def.initial == nil or not byId[def.initial] then
+		if not byId["idle"] then
+			local idle = { id = "idle", look = { display = "none" }, duration = { type = "none" }, transitions = {} }
+			table.insert(def.phases, 1, idle)
+			byId["idle"] = idle
+		end
+		def.initial = "idle"
+	end
+
+	local allIds = {}
+	for _, p in ipairs(def.phases) do
+		table.insert(allIds, p.id)
+	end
+
+	for _, q in ipairs(def.phases) do
+		for _, t in ipairs(q.enter or {}) do
+			if t.kind == "effect" then
+				-- "enter q on T (from S)" becomes "from S: when T -> q". A trigger with
+				-- no `from` matched from any state, so attach it to every phase.
+				local sources = t.from or allIds
+				for _, sid in ipairs(sources) do
+					local s = byId[sid]
+					if s then
+						table.insert(s.transitions, {
+							when = {
+								kind = "effect",
+								result = t.result or "gained",
+								abilityIds = t.abilityIds or {},
+								unit = t.unit,
+							},
+							to = q.id,
+						})
+					end
+				end
+			end
+		end
+		if q.onExpire ~= nil then
+			table.insert(q.transitions, { when = { kind = "expire" }, to = q.onExpire })
+		end
+	end
+
+	for _, p in ipairs(def.phases) do
+		p.enter = nil
+		p.onExpire = nil
+	end
 end
 
 --- Convert one tracker def to canonical form in place. Idempotent: a def that is
 --- already canonical is only normalized for defaults.
----@param def table tracker def (flat shorthand or canonical)
+---@param def table tracker def (flat shorthand, legacy phased, or canonical)
 ---@return table def the same table, canonicalized
 function QAT.CanonicalizeDef(def)
 	def.unit = def.unit or "player"
@@ -71,37 +187,70 @@ function QAT.CanonicalizeDef(def)
 	def.point, def.x, def.y, def.width, def.height = nil, nil, nil, nil, nil
 
 	if not def.phases then
-		-- Flat shorthand -> a single "active" phase shown while the buff is up.
+		-- Flat shorthand -> a hidden idle phase plus a visible "active" phase shown
+		-- while the buff is up. Uniform two-phase shape (idle <-> active).
+		local ids = def.abilityIds or {}
 		def.phases = {
+			{
+				id = "idle",
+				look = { display = "none" },
+				duration = { type = "none" },
+				transitions = { { when = { kind = "effect", result = "gained", abilityIds = ids }, to = "active" } },
+			},
 			{
 				id = "active",
 				look = canonicalLook(def),
-				duration = { type = "effect", abilityIds = def.abilityIds or {} },
-				enter = {
-					{ kind = "effect", abilityIds = def.abilityIds or {}, result = "gained" },
-				},
+				duration = { type = "effect", abilityIds = ids },
+				transitions = {},
 			},
 		}
-		def.initial = nil
-		-- Drop the consumed flat look/source fields.
+		def.initial = "idle"
 		def.display = nil
-		def.color, def.icon, def.font, def.decimals, def.abilityIds, def.effectType = nil, nil, nil, nil, nil, nil
+		def.color, def.icon, def.font, def.decimals, def.abilityIds, def.effectType, def.bgColor =
+			nil, nil, nil, nil, nil, nil, nil
 	end
 
-	-- Normalize every phase: look defaults, and default the unit on the duration
-	-- and on each effect trigger to the tracker's unit (so authored phases can
-	-- omit it for the common "on the player" case).
-	for _, phase in ipairs(def.phases) do
-		phase.look = canonicalLook(phase.look or {})
-		phase.duration = phase.duration or { type = "none" }
-		phase.duration.unit = phase.duration.unit or def.unit
-		phase.enter = phase.enter or {}
-		for _, trig in ipairs(phase.enter) do
-			if trig.kind == "effect" then
-				trig.unit = trig.unit or def.unit
-				trig.result = trig.result or "gained"
+	-- Legacy enter[]/onExpire -> transitions (once).
+	migrateLegacyTransitions(def)
+
+	-- Legacy tracker-level runtime conditions move onto every phase (once).
+	if def.runtime ~= nil then
+		local migrated = migrateRuntime(def.runtime)
+		for _, phase in ipairs(def.phases) do
+			phase.runtime = phase.runtime or {}
+			for _, c in ipairs(migrated) do
+				table.insert(phase.runtime, c)
 			end
 		end
+		def.runtime = nil
+	end
+
+	-- Normalize every phase: look defaults, duration/trigger units default to the
+	-- tracker unit, transitions and runtime are present and normalized.
+	for _, phase in ipairs(def.phases) do
+		phase.look = canonicalLook(phase.look)
+		phase.duration = phase.duration or { type = "none" }
+		phase.duration.unit = phase.duration.unit or def.unit
+		phase.transitions = phase.transitions or {}
+		for _, tr in ipairs(phase.transitions) do
+			tr.when = canonicalWhen(tr.when, def.unit)
+		end
+		phase.runtime = migrateRuntime(phase.runtime)
+	end
+
+	-- Guarantee a valid initial phase.
+	if
+		def.initial == nil
+		or not (function()
+			for _, p in ipairs(def.phases) do
+				if p.id == def.initial then
+					return true
+				end
+			end
+			return false
+		end)()
+	then
+		def.initial = def.phases[1] and def.phases[1].id
 	end
 
 	return def

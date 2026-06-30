@@ -56,6 +56,45 @@ local function OnUpdate()
 	end
 end
 
+-- The distinct unit tags any loaded tracker watches (player, reticleover, ...).
+local function unitsOfInterest()
+	local set = {}
+	for _, tracker in ipairs(QAT.runtime.list) do
+		for _, phase in pairs(tracker.phases) do
+			for _, tr in ipairs(phase.transitions) do
+				if tr.when.kind == "effect" and tr.when.unit then
+					set[tr.when.unit] = true
+				end
+			end
+			if phase.duration.type == "effect" and phase.duration.unit then
+				set[phase.duration.unit] = true
+			end
+		end
+	end
+	return set
+end
+
+-- Seed already-active effects. EVENT_EFFECT_CHANGED only fires on change, so a buff
+-- that is already up when a tracker loads (after /reloadui, zone-in, slotting a
+-- skill, or acquiring a target) would otherwise never be seen — the gap that left
+-- permanent/passive buffs untrackable. We enumerate current buffs and feed matching
+-- ones in as synthetic "gained" events.
+function QAT.Runtime_ScanBuffs()
+	for unit in pairs(unitsOfInterest()) do
+		if DoesUnitExist(unit) then
+			for i = 1, GetNumBuffs(unit) do
+				local _, started, ending, _, stackCount, _, _, _, _, _, abilityId = GetUnitBuffInfo(unit, i)
+				local listeners = abilityId and QAT.runtime.byAbilityId[abilityId]
+				if listeners then
+					for _, tracker in ipairs(listeners) do
+						tracker:OnEffect(unit, abilityId, EFFECT_RESULT_GAINED, started, ending, stackCount)
+					end
+				end
+			end
+		end
+	end
+end
+
 -- One filtered EVENT_EFFECT_CHANGED per distinct tracked ability id.
 local function RegisterEffectFilters()
 	for abilityId in pairs(QAT.runtime.byAbilityId) do
@@ -115,7 +154,13 @@ local function RequestLoadRecompute()
 		loadCheckPending = false
 		QAT.log.runtime:Debug("load recompute (debounced)")
 		QAT.Runtime_RefreshLoad()
+		QAT.Runtime_ScanBuffs() -- catch passives that became relevant (e.g. skill slotted)
 	end, 100)
+end
+
+-- A target changed: re-seed target-unit effects (debuffs already on the new target).
+local function OnTargetChanged()
+	QAT.Safe("scan buffs (target)", QAT.Runtime_ScanBuffs)
 end
 
 local function RegisterLoadEvents()
@@ -131,6 +176,7 @@ local function RegisterLoadEvents()
 	for _, ev in ipairs(events) do
 		EVENT_MANAGER:RegisterForEvent(QAT.name .. "_load", ev, RequestLoadRecompute)
 	end
+	EVENT_MANAGER:RegisterForEvent(QAT.name .. "_target", EVENT_RETICLE_TARGET_CHANGED, OnTargetChanged)
 	EVENT_MANAGER:AddFilterForEvent(
 		QAT.name .. "_load",
 		EVENT_INVENTORY_SINGLE_SLOT_UPDATE,
@@ -148,6 +194,7 @@ function QAT.Runtime_Init()
 	for _, tracker in ipairs(QAT.runtime.list) do
 		tracker:Start() -- evaluates load conditions, enters initial phase if loaded
 	end
+	QAT.Runtime_ScanBuffs() -- seed already-active effects
 
 	EVENT_MANAGER:UnregisterForUpdate(QAT.name .. "_tick")
 	EVENT_MANAGER:RegisterForUpdate(QAT.name .. "_tick", TICK_MS, OnUpdate)
@@ -185,6 +232,7 @@ local function rebuildAll()
 	for _, tracker in ipairs(QAT.runtime.list) do
 		tracker:Start()
 	end
+	QAT.Runtime_ScanBuffs()
 	QAT.log.runtime:Debug("runtime rebuilt: %d tracker(s)", #QAT.runtime.list)
 end
 

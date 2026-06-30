@@ -5,8 +5,13 @@
 ---
 --- Controls are reused by name across rebuilds (ESO controls cannot be destroyed),
 --- so live editing can rebuild a tracker without leaking or name-colliding. Every
---- control owns all sub-elements (background, icon, bar, label); the display kind
---- only decides which are shown.
+--- control owns all sub-elements (background, icon, bar, and the name/time/stacks
+--- labels); the display kind and the live data decide which are shown.
+---
+--- Readouts are data-driven: the bar/icon animation is always the remaining time;
+--- the time number shows whenever a timer is running; the stacks number shows when
+--- the phase declares `showStacks` and the effect actually reports stacks. A buff
+--- with no real duration (a passive) shows a full static bar / lit icon.
 
 QAT.display = {}
 
@@ -16,20 +21,32 @@ local DEFAULTS = {
 	width = 220,
 	height = 30,
 	font = "$(BOLD_FONT)|22|soft-shadow-thick",
-	color = { 0.20, 0.80, 0.35, 1 },
-	bgColor = { 0, 0, 0, 0.55 },
 	point = CENTER,
 	x = 0,
 	y = -200,
 }
 
----@return any
+-- Per-element fallback colors, used when the phase's look leaves one unset.
+local DEFAULT_COLORS = {
+	background = { 0, 0, 0, 0.55 },
+	bar = { 0.20, 0.80, 0.35, 1 },
+	border = { 0, 0, 0, 1 },
+	stacks = { 1, 0.82, 0.20, 1 },
+	text = { 1, 1, 1, 1 },
+	timer = { 1, 1, 1, 1 },
+	cooldown = { 0.5, 0.5, 0.5, 1 },
+}
+
 local function value(def, key)
 	local v = def[key]
 	if v == nil then
 		return DEFAULTS[key]
 	end
 	return v
+end
+
+local function colorOf(colors, key)
+	return (colors and colors[key]) or DEFAULT_COLORS[key]
 end
 
 -- Return an existing control by name, or create it via factory. ESO errors when
@@ -39,14 +56,17 @@ local function reuse(name, factory)
 end
 
 --- Build or reuse a display control for a phase.
----@param def table display def: display kind, name, color, icon, font, decimals,
----  and position (point, x, y, width, height)
+---@param def table display def: display kind, name, icon, font, decimals,
+---  showStacks, colors (per-element), and position (point, x, y, width, height)
 ---@return table control exposing :SetState(active, remaining, duration, stacks),
----  :SetHidden(hidden) and :SetBarColor(rgba)
+---  :SetHidden(hidden) and :SetElementColor(element, rgba)
 function QAT.display.Create(def)
 	local kind = def.display or "bar"
 	local name = "QAT_Tracker_" .. tostring(def.id)
 	local w, h = value(def, "width"), value(def, "height")
+	local colors = def.colors
+	local font = value(def, "font")
+	local showLeftIcon = (kind == "bar") and def.icon ~= nil and def.icon ~= ""
 
 	local tlw = reuse(name, function()
 		return WM:CreateTopLevelWindow(name)
@@ -63,72 +83,135 @@ function QAT.display.Create(def)
 		return WM:CreateControl(name .. "_Bg", tlw, CT_BACKDROP)
 	end)
 	bg:SetAnchorFill()
-	bg:SetCenterColor(unpack(value(def, "bgColor")))
-	bg:SetEdgeColor(0, 0, 0, 1)
+	bg:SetCenterColor(unpack(colorOf(colors, "background")))
+	bg:SetEdgeColor(unpack(colorOf(colors, "border")))
 	bg:SetEdgeTexture("", 1, 1, 1)
 
-	local showIcon = (kind == "icon") or (def.icon ~= nil)
+	local showIcon = (kind == "icon") or showLeftIcon
 	local icon = reuse(name .. "_Icon", function()
 		return WM:CreateControl(name .. "_Icon", tlw, CT_TEXTURE)
 	end)
-	icon:SetDimensions(h, h)
 	icon:ClearAnchors()
-	icon:SetAnchor(LEFT, tlw, LEFT, 0, 0)
+	if kind == "icon" then
+		icon:SetAnchorFill() -- the icon IS the display
+	else
+		icon:SetDimensions(h, h)
+		icon:SetAnchor(LEFT, tlw, LEFT, 0, 0)
+	end
 	icon:SetTexture(def.icon or "/esoui/art/icons/icon_missing.dds")
+	icon:SetColor(1, 1, 1, 1)
 	icon:SetHidden(not showIcon)
 
 	local bar = reuse(name .. "_Bar", function()
 		return WM:CreateControl(name .. "_Bar", tlw, CT_STATUSBAR)
 	end)
-	bar:SetAnchorFill()
-	bar:SetColor(unpack(value(def, "color")))
+	bar:ClearAnchors()
+	bar:SetAnchor(TOPLEFT, tlw, TOPLEFT, showLeftIcon and h or 0, 0)
+	bar:SetAnchor(BOTTOMRIGHT, tlw, BOTTOMRIGHT, 0, 0)
+	bar:SetColor(unpack(colorOf(colors, "bar")))
 	bar:SetMinMax(0, 1)
 	bar:SetValue(1)
 	bar:SetHidden(kind ~= "bar")
 
-	local label = reuse(name .. "_Label", function()
-		return WM:CreateControl(name .. "_Label", tlw, CT_LABEL)
+	-- Three independent labels so each can carry its own color (text / timer / stacks).
+	local nameLabel = reuse(name .. "_Name", function()
+		return WM:CreateControl(name .. "_Name", tlw, CT_LABEL)
 	end)
-	label:SetFont(value(def, "font"))
-	label:ClearAnchors()
-	label:SetAnchor(LEFT, showIcon and icon or tlw, showIcon and RIGHT or LEFT, 6, 0)
-	label:SetVerticalAlignment(TEXT_ALIGN_CENTER)
-	label:SetColor(1, 1, 1, 1)
+	local timeLabel = reuse(name .. "_Time", function()
+		return WM:CreateControl(name .. "_Time", tlw, CT_LABEL)
+	end)
+	local stacksLabel = reuse(name .. "_Stacks", function()
+		return WM:CreateControl(name .. "_Stacks", tlw, CT_LABEL)
+	end)
+	for _, l in ipairs({ nameLabel, timeLabel, stacksLabel }) do
+		l:SetFont(font)
+		l:SetVerticalAlignment(TEXT_ALIGN_CENTER)
+		l:SetHorizontalAlignment(TEXT_ALIGN_CENTER)
+	end
+
+	-- Static label anchors per kind (icon-kind number anchors are set live in
+	-- SetState since they depend on how many numbers are showing).
+	nameLabel:ClearAnchors()
+	timeLabel:ClearAnchors()
+	stacksLabel:ClearAnchors()
+	if kind == "icon" then
+		nameLabel:SetHidden(true)
+	else
+		nameLabel:SetHidden(false)
+		nameLabel:SetHorizontalAlignment(TEXT_ALIGN_LEFT)
+		nameLabel:SetAnchor(LEFT, tlw, LEFT, showIcon and (h + 6) or 6, 0)
+		timeLabel:SetAnchor(RIGHT, tlw, RIGHT, -6, 0)
+		stacksLabel:SetAnchor(RIGHT, timeLabel, LEFT, -8, 0)
+	end
 
 	local control = {
 		tlw = tlw,
 		kind = kind,
+		bg = bg,
 		bar = (kind == "bar") and bar or nil,
 		icon = showIcon and icon or nil,
-		label = label,
+		nameLabel = nameLabel,
+		timeLabel = timeLabel,
+		stacksLabel = stacksLabel,
+		colors = colors,
 		name = def.name or tostring(def.id),
 		decimals = def.decimals or 1,
-		valueSource = def.value or "time",
 		showStacks = def.showStacks or false,
-		maxStacks = def.maxStacks,
-		baseColor = value(def, "color"),
 	}
 
 	function control:SetHidden(hidden)
 		self.tlw:SetHidden(hidden)
 	end
 
-	-- Override the bar color (used by runtime conditions). SetState resets to the
-	-- phase's base color first, so an override only lasts while its condition holds.
-	function control:SetBarColor(c)
-		if self.bar and c then
+	-- Reset every element to its authored base color. SetState calls this first so a
+	-- runtime-condition override (SetElementColor) only lasts while its condition holds.
+	function control:resetColors()
+		self.bg:SetCenterColor(unpack(colorOf(self.colors, "background")))
+		self.bg:SetEdgeColor(unpack(colorOf(self.colors, "border")))
+		if self.bar then
+			self.bar:SetColor(unpack(colorOf(self.colors, "bar")))
+		end
+		self.nameLabel:SetColor(unpack(colorOf(self.colors, "text")))
+		self.timeLabel:SetColor(unpack(colorOf(self.colors, "timer")))
+		self.stacksLabel:SetColor(unpack(colorOf(self.colors, "stacks")))
+	end
+
+	-- Ephemeral per-element recolor from a runtime condition. Never persisted.
+	function control:SetElementColor(element, c)
+		if not c then
+			return
+		end
+		if element == "background" then
+			self.bg:SetCenterColor(unpack(c))
+		elseif element == "border" then
+			self.bg:SetEdgeColor(unpack(c))
+		elseif element == "bar" and self.bar then
 			self.bar:SetColor(unpack(c))
+		elseif element == "text" then
+			self.nameLabel:SetColor(unpack(c))
+		elseif element == "timer" then
+			self.timeLabel:SetColor(unpack(c))
+		elseif element == "stacks" then
+			self.stacksLabel:SetColor(unpack(c))
 		end
 	end
 
-	-- The bar fill and the numeric readout come from the phase's value source:
-	--   "time"   - remaining / duration (a countdown bar)
-	--   "stacks" - stacks / maxStacks   (a stack meter; full if no maxStacks set)
-	--   "none"   - static full bar, name only
-	-- remaining/duration may be nil for a timer-less phase (e.g. "Ready"): a time
-	-- source then shows full and the label is just the name.
+	-- Position the icon-kind number overlays: one number centers; two split to
+	-- stacks-top / time-bottom.
+	function control:placeIconNumbers(showTime, showStacks)
+		self.timeLabel:ClearAnchors()
+		self.stacksLabel:ClearAnchors()
+		if showTime and showStacks then
+			self.stacksLabel:SetAnchor(TOP, self.tlw, TOP, 0, 2)
+			self.timeLabel:SetAnchor(BOTTOM, self.tlw, BOTTOM, 0, -2)
+		else
+			self.timeLabel:SetAnchor(CENTER, self.tlw, CENTER, 0, 0)
+			self.stacksLabel:SetAnchor(CENTER, self.tlw, CENTER, 0, 0)
+		end
+	end
+
 	function control:SetState(active, remaining, duration, stacks)
-		if not active then
+		if not active or self.kind == "none" then
 			self.tlw:SetHidden(true)
 			return
 		end
@@ -136,32 +219,30 @@ function QAT.display.Create(def)
 		stacks = stacks or 0
 
 		local hasTimer = duration ~= nil and duration > 0
-		local src = self.valueSource
-		local fill = 1
-		if src == "time" and hasTimer then
-			fill = zo_clamp(remaining / duration, 0, 1)
-		elseif src == "stacks" then
-			fill = (self.maxStacks and self.maxStacks > 0) and zo_clamp(stacks / self.maxStacks, 0, 1) or 1
-		end
+		local showTime = hasTimer
+		local showStacks = self.showStacks and stacks > 0
+
+		self:resetColors()
+
 		if self.bar then
-			self.bar:SetValue(fill)
-			self.bar:SetColor(unpack(self.baseColor)) -- reset; runtime conds re-apply after
+			self.bar:SetValue(hasTimer and zo_clamp(remaining / duration, 0, 1) or 1)
 		end
 
-		local text = self.name
-		if src == "time" and hasTimer then
-			text = text .. "  " .. string.format("%." .. self.decimals .. "f", remaining or 0)
-		elseif src == "stacks" then
-			text = text .. "  " .. stacks
-		end
-		-- Optional stacks badge, when the readout isn't already the stack count.
-		if self.showStacks and src ~= "stacks" and stacks > 1 then
-			text = text .. " (" .. stacks .. ")"
-		end
-		self.label:SetText(text)
+		self.nameLabel:SetText(self.name)
+		self.timeLabel:SetText(showTime and string.format("%." .. self.decimals .. "f", remaining or 0) or "")
+		self.stacksLabel:SetText(showStacks and tostring(stacks) or "")
+		self.timeLabel:SetHidden(not showTime)
+		self.stacksLabel:SetHidden(not showStacks)
 
+		if self.kind == "icon" then
+			self:placeIconNumbers(showTime, showStacks)
+		end
+
+		-- Cooldown tint: desaturate the icon once a timed phase has run out (a
+		-- lockout still showing) — keeps the at-a-glance "not ready" read.
 		if self.icon then
-			self.icon:SetDesaturation((hasTimer and remaining and remaining <= 0) and 1 or 0)
+			local onCooldown = hasTimer and remaining and remaining <= 0
+			self.icon:SetDesaturation(onCooldown and 1 or 0)
 		end
 	end
 

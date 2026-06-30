@@ -1,8 +1,10 @@
--- Phases tab: the per-phase state-machine editor.
+-- Phases tab (Stage-A interim).
 --
--- Top: a flow summary plus a strip of selectable phase chips (with add / delete /
--- set-initial). Below: the detail editor for the selected phase — its look,
--- duration source, enter trigger and on-expire transition.
+-- The full editor IA (header Load, phase selector, and separate Appearance /
+-- Behavior / Conditions tabs with the transitions editor and per-element colors)
+-- lands in Stage B. This interim view keeps live editing working against the new
+-- schema: appearance basics + duration are editable, and a phase's transitions are
+-- shown read-only so the new state machine is visible while it is being tested.
 
 local WM = GetWindowManager()
 local PAD = 12
@@ -13,24 +15,14 @@ local DISPLAY_OPTS = {
 	{ label = "Bar", value = "bar" },
 	{ label = "Icon", value = "icon" },
 	{ label = "Text", value = "text" },
-	{ label = "None (cue only)", value = "none" },
-}
-local VALUE_OPTS = {
-	{ label = "Time (countdown)", value = "time" },
-	{ label = "Stacks", value = "stacks" },
-	{ label = "None (static)", value = "none" },
+	{ label = "None (hidden)", value = "none" },
 }
 local DURATION_OPTS = {
 	{ label = "Follows effect", value = "effect" },
 	{ label = "Fixed seconds", value = "fixed" },
 	{ label = "None (static)", value = "none" },
 }
-local RESULT_OPTS = {
-	{ label = "gained", value = "gained" },
-	{ label = "faded", value = "faded" },
-}
 
--- Comma-separated ability id string <-> array of numbers.
 local function idsToText(ids)
 	return table.concat(ids or {}, ", ")
 end
@@ -52,23 +44,11 @@ local function selectedPhase(def)
 	return def.phases[1]
 end
 
-local function phaseOptions(def, includeNone)
-	local opts = {}
-	if includeNone then
-		table.insert(opts, { label = "(idle)", value = nil })
-	end
-	for _, p in ipairs(def.phases) do
-		table.insert(opts, { label = p.id, value = p.id })
-	end
-	return opts
-end
-
 local function commit(def)
 	QAT.CanonicalizeDef(def)
 	QAT.widgets.NotifyTrackerChanged(def.id)
 end
 
--- A readable one-line summary of the state flow, e.g. "Ready -> Active -> Cooldown".
 local function flowText(def)
 	local parts = {}
 	for _, p in ipairs(def.phases) do
@@ -76,6 +56,18 @@ local function flowText(def)
 		table.insert(parts, marker)
 	end
 	return "Phases:  " .. table.concat(parts, "    ")
+end
+
+-- One human-readable line for a transition trigger.
+local function whenText(when)
+	if when.kind == "effect" then
+		return when.result .. " " .. idsToText(when.abilityIds) .. " on " .. (when.unit or "player")
+	elseif when.kind == "stacks" then
+		return "stacks " .. (when.op or ">=") .. " " .. tostring(when.value or 0)
+	elseif when.kind == "remaining" then
+		return "remaining " .. (when.op or "<=") .. " " .. tostring(when.value or 0)
+	end
+	return "timer ends"
 end
 
 local function render(container, def)
@@ -98,18 +90,13 @@ local function render(container, def)
 		return
 	end
 
-	-- Defensive: guarantee a canonical (phased) def so the editor never renders a
-	-- flat shorthand from an import or older data.
 	QAT.CanonicalizeDef(def)
-
-	-- Ensure a valid selected phase.
 	if not selectedPhase(def) then
 		QAT.editor.selectedPhaseId = def.phases[1] and def.phases[1].id
 	end
 
 	local y = PAD
 
-	-- Flow summary line.
 	local flow = get("flow", function()
 		return QAT.widgets.Label(container, "QAT_Ph_Flow", "")
 	end)
@@ -137,7 +124,6 @@ local function render(container, def)
 		x = x + 96 + 8
 	end
 
-	-- Add phase.
 	local addBtn = get("add", function()
 		return QAT.widgets.TextButton(container, "QAT_Ph_Add", "+ Phase", nil)
 	end)
@@ -148,7 +134,7 @@ local function render(container, def)
 		local n = #def.phases + 1
 		table.insert(
 			def.phases,
-			{ id = "phase" .. n, look = { display = "bar" }, duration = { type = "none" }, enter = {} }
+			{ id = "phase" .. n, look = { display = "bar" }, duration = { type = "none" }, transitions = {} }
 		)
 		QAT.editor.selectedPhaseId = "phase" .. n
 		commit(def)
@@ -156,18 +142,14 @@ local function render(container, def)
 	end
 	y = y + ROW_H + GAP
 
-	-- Detail editor for the selected phase.
 	local phase = selectedPhase(def)
 	if not phase then
 		QAT.widgets.PoolEnd(pool)
 		return
 	end
-	local trig = phase.enter[1] or { kind = "effect", abilityIds = {}, result = "gained" }
-	phase.enter[1] = trig
 
-	local LX = PAD + 110 -- control column
+	local LX = PAD + 110
 
-	-- A field caption at the left, with a hover tooltip explaining the field.
 	local function fieldLabel(key, text, yy, tip)
 		local l = get(key, function()
 			return QAT.widgets.Label(container, "QAT_Ph_" .. key, "")
@@ -194,7 +176,7 @@ local function render(container, def)
 		"lId",
 		"Phase id",
 		y,
-		"Internal name for this phase (e.g. Ready, Active, Cooldown). 'On expire' targets phases by this name."
+		"Internal name for this phase (e.g. Idle, Active, Cooldown). Transitions target phases by this name."
 	)
 	local idBox = get("idBox", function()
 		return QAT.widgets.EditBox(container, "QAT_Ph_IdBox", 180, ROW_H)
@@ -215,16 +197,15 @@ local function render(container, def)
 	idBox:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
 	y = y + ROW_H + GAP
 
-	-- ===== Appearance: how the phase draws and what it reads out. =====
+	-- ===== Appearance =====
 	sectionHeader("hAppear", "Appearance", y)
 	y = y + ROW_H
 
-	-- Display kind.
 	fieldLabel(
 		"lDisp",
 		"Display",
 		y,
-		"How this phase draws: Bar, Icon, Text, or None (cues only — nothing is drawn)."
+		"How this phase draws: Bar, Icon, Text, or None (hidden - used for an idle phase)."
 	)
 	local dispDD = get("dispDD", function()
 		return QAT.widgets.Dropdown(container, "QAT_Ph_Disp", 180, DISPLAY_OPTS, "bar")
@@ -232,34 +213,14 @@ local function render(container, def)
 	dispDD.onSelect = function(v)
 		phase.look.display = v
 		commit(def)
-		render(container, def) -- show/hide the icon field for the new kind
+		render(container, def)
 	end
 	dispDD:SetValue(phase.look.display or "bar")
 	dispDD:ClearAnchors()
 	dispDD:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
 	y = y + ROW_H + GAP
 
-	-- Value source: what the bar fills from and the number shows.
-	fieldLabel(
-		"lValue",
-		"Value",
-		y,
-		"What the bar fills from and the number shows: Time (countdown), Stacks (current stacks), or None (static)."
-	)
-	local valueDD = get("valueDD", function()
-		return QAT.widgets.Dropdown(container, "QAT_Ph_Value", 180, VALUE_OPTS, "time")
-	end)
-	valueDD.onSelect = function(v)
-		phase.look.value = v
-		commit(def)
-		render(container, def) -- show/hide the Max stacks field
-	end
-	valueDD:SetValue(phase.look.value or "time")
-	valueDD:ClearAnchors()
-	valueDD:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
-	y = y + ROW_H + GAP
-
-	-- Icon override (icon display only). Empty = auto from the tracked ability.
+	-- Icon override (icon display only).
 	local iconBox = get("iconBox", function()
 		return QAT.widgets.EditBox(container, "QAT_Ph_IconBox", 260, ROW_H)
 	end)
@@ -278,7 +239,6 @@ local function render(container, def)
 			iconLabel,
 			"Texture path for the icon. Leave empty to use the tracked ability's own icon automatically."
 		)
-
 		iconBox:SetHidden(false)
 		iconBox.onChange = function(text)
 			text = zo_strtrim(text or "")
@@ -289,7 +249,6 @@ local function render(container, def)
 		iconBox:SetText(phase.look.icon or "")
 		iconBox:ClearAnchors()
 		iconBox:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
-
 		iconPreview:SetHidden(false)
 		iconPreview:SetDimensions(ROW_H, ROW_H)
 		iconPreview:SetTexture(QAT.util.PhaseIcon(phase) or "/esoui/art/icons/icon_missing.dds")
@@ -303,7 +262,12 @@ local function render(container, def)
 	end
 
 	-- Label text.
-	fieldLabel("lName", "Label text", y, "Text drawn next to the bar/icon. Leave empty to use the tracker's name.")
+	fieldLabel(
+		"lName",
+		"Label text",
+		y,
+		"Text drawn next to the bar / on icons. Leave empty to use the tracker's name."
+	)
 	local nameBox = get("nameBox", function()
 		return QAT.widgets.EditBox(container, "QAT_Ph_NameBox", 220, ROW_H)
 	end)
@@ -316,16 +280,17 @@ local function render(container, def)
 	nameBox:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
 	y = y + ROW_H + GAP
 
-	-- Color + Decimals on one row.
-	fieldLabel("lColor", "Color", y, "Bar fill colour (or icon tint).")
+	-- Primary (bar / fill) color + Decimals. (Full per-element colors come in Stage B.)
+	fieldLabel("lColor", "Color", y, "Primary fill / bar colour. Per-element colours arrive with the Appearance tab.")
 	local colorSw = get("colorSw", function()
 		return QAT.widgets.ColorSwatch(container, "QAT_Ph_Color", ROW_H, { 1, 1, 1, 1 })
 	end)
 	colorSw.onChange = function(c)
-		phase.look.color = c
+		phase.look.colors = phase.look.colors or {}
+		phase.look.colors.bar = c
 		commit(def)
 	end
-	colorSw:SetColor(phase.look.color or { 1, 1, 1, 1 })
+	colorSw:SetColor((phase.look.colors and phase.look.colors.bar) or { 0.2, 0.8, 0.35, 1 })
 	colorSw:ClearAnchors()
 	colorSw:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
 
@@ -335,7 +300,7 @@ local function render(container, def)
 	decLabel:SetText("Decimals")
 	decLabel:ClearAnchors()
 	decLabel:SetAnchor(TOPLEFT, container, TOPLEFT, LX + 44, y + 3)
-	QAT.widgets.Tooltip(decLabel, "Decimal places on the time readout (e.g. 1 -> 12.3).")
+	QAT.widgets.Tooltip(decLabel, "Decimal places on the time readout.")
 	local decBox = get("decBox", function()
 		return QAT.widgets.EditBox(container, "QAT_Ph_Dec", 50, ROW_H)
 	end)
@@ -348,12 +313,12 @@ local function render(container, def)
 	decBox:SetAnchor(TOPLEFT, container, TOPLEFT, LX + 120, y)
 	y = y + ROW_H + GAP
 
-	-- Show-stacks badge toggle.
+	-- Show stacks.
 	fieldLabel(
 		"lShowStacks",
 		"Show stacks",
 		y,
-		"Append a ' (N)' stack count to the label. Ignored when Value is already Stacks."
+		"This effect has stacks - show the stack number when the game reports stacks."
 	)
 	local stacksChk = get("stacksChk", function()
 		return QAT.widgets.Checkbox(container, "QAT_Ph_ShowStacks", false)
@@ -367,43 +332,15 @@ local function render(container, def)
 	stacksChk:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y + 2)
 	y = y + ROW_H + GAP
 
-	-- Max stacks (denominator for a Stacks bar). Only when Value = Stacks.
-	if phase.look.value == "stacks" then
-		fieldLabel(
-			"lMaxStacks",
-			"Max stacks",
-			y,
-			"Stack count that fills the bar (the denominator). Leave blank to keep the bar full."
-		)
-		local maxBox = get("maxBox", function()
-			return QAT.widgets.EditBox(container, "QAT_Ph_MaxStacks", 80, ROW_H)
-		end)
-		maxBox.onChange = function(text)
-			text = zo_strtrim(text or "")
-			phase.look.maxStacks = (text ~= "" and tonumber(text)) or nil
-			commit(def)
-		end
-		maxBox:SetText(phase.look.maxStacks and tostring(phase.look.maxStacks) or "")
-		maxBox:ClearAnchors()
-		maxBox:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
-		y = y + ROW_H + GAP
-	else
-		local maxBox = get("maxBox", function()
-			return QAT.widgets.EditBox(container, "QAT_Ph_MaxStacks", 80, ROW_H)
-		end)
-		maxBox:SetHidden(true)
-	end
-
-	-- ===== Behavior: the timer and the state-machine transitions. =====
+	-- ===== Behavior =====
 	sectionHeader("hBehavior", "Behavior", y)
 	y = y + ROW_H
 
-	-- Duration type.
 	fieldLabel(
 		"lDur",
 		"Duration",
 		y,
-		"How long this phase lasts: Follows effect (ends when the buff fades), Fixed seconds (a set timer, e.g. a cooldown), or None (stays until a trigger changes it)."
+		"The phase's timer: Follows effect (while the buff is on the unit; permanent buffs show static), Fixed seconds (e.g. a cooldown), or None."
 	)
 	local durDD = get("durDD", function()
 		return QAT.widgets.Dropdown(container, "QAT_Ph_Dur", 180, DURATION_OPTS, "none")
@@ -418,7 +355,6 @@ local function render(container, def)
 	durDD:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
 	y = y + ROW_H + GAP
 
-	-- Duration parameter (seconds for fixed, ability ids for effect).
 	if phase.duration.type == "fixed" then
 		fieldLabel("lSecs", "Seconds", y, "Length of the fixed timer, in seconds.")
 		local secsBox = get("secsBox", function()
@@ -433,7 +369,7 @@ local function render(container, def)
 		secsBox:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
 		y = y + ROW_H + GAP
 	elseif phase.duration.type == "effect" then
-		fieldLabel("lDurIds", "Effect ids", y, "Ability id(s) whose remaining time drives this phase. Comma-separated.")
+		fieldLabel("lDurIds", "Effect ids", y, "Ability id(s) this phase follows. Comma-separated.")
 		local durIdBox = get("durIdBox", function()
 			return QAT.widgets.EditBox(container, "QAT_Ph_DurIds", 220, ROW_H)
 		end)
@@ -447,52 +383,36 @@ local function render(container, def)
 		y = y + ROW_H + GAP
 	end
 
-	-- Enter trigger (single, common case): result + ability ids.
+	-- Read-only transitions summary (editor lands in Stage B).
 	fieldLabel(
-		"lEnter",
-		"Enter on",
+		"lTrans",
+		"Transitions",
 		y,
-		"Enter this phase when one of these ability ids is gained or faded on the unit."
+		"Outgoing transitions of this phase (read-only here; the editor arrives with the Behavior tab)."
 	)
-	local resDD = get("resDD", function()
-		return QAT.widgets.Dropdown(container, "QAT_Ph_Res", 110, RESULT_OPTS, "gained")
-	end)
-	resDD.onSelect = function(v)
-		trig.result = v
-		commit(def)
+	y = y + ROW_H
+	if #phase.transitions == 0 then
+		local none = get("trNone", function()
+			return QAT.widgets.Label(container, "QAT_Ph_TrNone", "")
+		end)
+		none:SetText("  (none)")
+		none:ClearAnchors()
+		none:SetAnchor(TOPLEFT, container, TOPLEFT, PAD + 12, y + 3)
+		y = y + ROW_H
+	else
+		for i, tr in ipairs(phase.transitions) do
+			local row = get("tr" .. i, function()
+				return QAT.widgets.Label(container, "QAT_Ph_Tr" .. i, "")
+			end)
+			row:SetText("  IF " .. whenText(tr.when) .. "  ->  " .. tostring(tr.to or "(hidden)"))
+			row:ClearAnchors()
+			row:SetAnchor(TOPLEFT, container, TOPLEFT, PAD + 12, y + 3)
+			y = y + ROW_H
+		end
 	end
-	resDD:SetValue(trig.result or "gained")
-	resDD:ClearAnchors()
-	resDD:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
+	y = y + GAP
 
-	local enterIdBox = get("enterIdBox", function()
-		return QAT.widgets.EditBox(container, "QAT_Ph_EnterIds", 200, ROW_H)
-	end)
-	enterIdBox.onChange = function(text)
-		trig.abilityIds = textToIds(text)
-		commit(def)
-	end
-	enterIdBox:SetText(idsToText(trig.abilityIds))
-	enterIdBox:ClearAnchors()
-	enterIdBox:SetAnchor(TOPLEFT, container, TOPLEFT, LX + 120, y)
-	y = y + ROW_H + GAP
-
-	-- On-expire transition. Options are rebuilt each render (the phase list changes).
-	fieldLabel("lExpire", "On expire", y, "When this phase's timer reaches zero, switch to this phase (or idle).")
-	local expireDD = get("expireDD", function()
-		return QAT.widgets.Dropdown(container, "QAT_Ph_Expire", 180, {}, nil)
-	end)
-	expireDD:SetOptions(phaseOptions(def, true))
-	expireDD.onSelect = function(v)
-		phase.onExpire = v
-		commit(def)
-	end
-	expireDD:SetValue(phase.onExpire)
-	expireDD:ClearAnchors()
-	expireDD:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
-	y = y + ROW_H + GAP
-
-	-- Set-initial / delete buttons for the selected phase.
+	-- Set-initial / delete phase.
 	local initBtn = get("initBtn", function()
 		return QAT.widgets.TextButton(container, "QAT_Ph_Init", "Set as initial", nil)
 	end)

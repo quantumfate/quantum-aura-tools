@@ -1,29 +1,26 @@
--- Conditions tab: runtime conditions that change a tracker's look in response to
--- its live state. Each row is: when [stat] [op] [value] then [action] (+ color).
+-- Conditions tab (Stage-A interim).
+--
+-- Runtime conditions now live per-phase (phase.runtime) and are applied ephemerally
+-- by the engine. The per-phase editor (stat -> Set X Color / Show Proc) arrives with
+-- the Stage-B IA. This interim view summarizes the conditions already on each phase
+-- read-only; existing conditions still run on the HUD.
 
 local PAD = 12
 local ROW_H = 26
-local GAP = 6
 
-local STAT_OPTS = {
-	{ label = "Remaining", value = "remaining" },
-	{ label = "Stacks", value = "stacks" },
-}
-local OP_OPTS = {
-	{ label = "<", value = "<" },
-	{ label = "<=", value = "<=" },
-	{ label = "==", value = "==" },
-	{ label = "~=", value = "~=" },
-	{ label = ">=", value = ">=" },
-	{ label = ">", value = ">" },
-}
-local ACTION_OPTS = {
-	{ label = "Recolor", value = "color" },
-	{ label = "Hide", value = "hide" },
-}
-
-local function commit(def)
-	QAT.widgets.NotifyTrackerChanged(def.id)
+local function actionText(c)
+	if c.action == "showProc" then
+		return "Show Proc"
+	end
+	local map = {
+		setBackgroundColor = "Set Background Color",
+		setBarColor = "Set Bar Color",
+		setBorderColor = "Set Border Color",
+		setStacksColor = "Set Stacks Color",
+		setTextColor = "Set Text Color",
+		setTimerColor = "Set Timer Color",
+	}
+	return map[c.action] or tostring(c.action)
 end
 
 local function render(container, def)
@@ -45,113 +42,61 @@ local function render(container, def)
 		return
 	end
 
-	def.runtime = def.runtime or {}
+	QAT.CanonicalizeDef(def)
 	local y = PAD
 
 	local header = get("hdr", function()
-		return QAT.widgets.SectionHeader(container, "QAT_Cond_Hdr", "Runtime conditions")
+		return QAT.widgets.SectionHeader(container, "QAT_Cond_Hdr", "Runtime conditions (per phase)")
 	end)
 	header:ClearAnchors()
 	header:SetAnchor(TOPLEFT, container, TOPLEFT, PAD, y)
-	y = y + ROW_H + GAP
+	y = y + ROW_H
 
-	for i, cond in ipairs(def.runtime) do
-		local x = PAD
-		local idx = i
-
-		local statDD = get("stat" .. i, function()
-			return QAT.widgets.Dropdown(container, "QAT_Cond_Stat" .. i, 110, STAT_OPTS, "remaining")
-		end)
-		statDD.onSelect = function(v)
-			cond.stat = v
-			commit(def)
-		end
-		statDD:SetValue(cond.stat or "remaining")
-		statDD:ClearAnchors()
-		statDD:SetAnchor(TOPLEFT, container, TOPLEFT, x, y)
-		x = x + 116
-
-		local opDD = get("op" .. i, function()
-			return QAT.widgets.Dropdown(container, "QAT_Cond_Op" .. i, 60, OP_OPTS, "<")
-		end)
-		opDD.onSelect = function(v)
-			cond.op = v
-			commit(def)
-		end
-		opDD:SetValue(cond.op or "<")
-		opDD:ClearAnchors()
-		opDD:SetAnchor(TOPLEFT, container, TOPLEFT, x, y)
-		x = x + 66
-
-		local valBox = get("val" .. i, function()
-			return QAT.widgets.EditBox(container, "QAT_Cond_Val" .. i, 70, ROW_H)
-		end)
-		valBox.onChange = function(text)
-			cond.value = tonumber(text) or 0
-			commit(def)
-		end
-		valBox:SetText(tostring(cond.value or 0))
-		valBox:ClearAnchors()
-		valBox:SetAnchor(TOPLEFT, container, TOPLEFT, x, y)
-		x = x + 80
-
-		local actDD = get("act" .. i, function()
-			return QAT.widgets.Dropdown(container, "QAT_Cond_Act" .. i, 100, ACTION_OPTS, "color")
-		end)
-		actDD.onSelect = function(v)
-			cond.action = v
-			commit(def)
-			render(container, def)
-		end
-		actDD:SetValue(cond.action or "color")
-		actDD:ClearAnchors()
-		actDD:SetAnchor(TOPLEFT, container, TOPLEFT, x, y)
-		x = x + 106
-
-		-- The color swatch is always pooled (so it can be reused), shown only for
-		-- the "color" action.
-		local sw = get("col" .. i, function()
-			return QAT.widgets.ColorSwatch(container, "QAT_Cond_Col" .. i, ROW_H, { 1, 0, 0, 1 })
-		end)
-		if cond.action == "color" then
-			sw.onChange = function(c)
-				cond.color = c
-				commit(def)
-			end
-			sw:SetColor(cond.color or { 1, 0, 0, 1 })
-			sw:SetHidden(false)
-			sw:ClearAnchors()
-			sw:SetAnchor(TOPLEFT, container, TOPLEFT, x, y)
-			x = x + ROW_H + 6
-		else
-			sw:SetHidden(true)
-		end
-
-		local del = get("del" .. i, function()
-			return QAT.widgets.TextButton(container, "QAT_Cond_Del" .. i, "X", nil)
-		end)
-		del:SetDimensions(ROW_H, ROW_H)
-		del:ClearAnchors()
-		del:SetAnchor(TOPLEFT, container, TOPLEFT, x, y)
-		del.onClick = function()
-			table.remove(def.runtime, idx)
-			commit(def)
-			render(container, def)
-		end
-
-		y = y + ROW_H + GAP
-	end
-
-	local addBtn = get("add", function()
-		return QAT.widgets.TextButton(container, "QAT_Cond_Add", "+ Condition", nil)
+	local note = get("note", function()
+		return QAT.widgets.Label(container, "QAT_Cond_Note", "")
 	end)
-	addBtn:SetDimensions(110, ROW_H)
-	addBtn:ClearAnchors()
-	addBtn:SetAnchor(TOPLEFT, container, TOPLEFT, PAD, y + GAP)
-	addBtn.onClick = function()
-		table.insert(def.runtime, { stat = "remaining", op = "<", value = 3, action = "color", color = { 1, 0, 0, 1 } })
-		commit(def)
-		render(container, def)
+	note:SetText("Conditions are per-phase and run on the HUD now; the editor arrives with the Stage-B Conditions tab.")
+	note:ClearAnchors()
+	note:SetAnchor(TOPLEFT, container, TOPLEFT, PAD, y + 3)
+	y = y + ROW_H + 6
+
+	for _, phase in ipairs(def.phases) do
+		local ph = get("ph_" .. phase.id, function()
+			return QAT.widgets.Label(container, "QAT_Cond_Ph_" .. phase.id, "", "$(BOLD_FONT)|18|soft-shadow-thin")
+		end)
+		ph:SetText(phase.id .. ":")
+		ph:ClearAnchors()
+		ph:SetAnchor(TOPLEFT, container, TOPLEFT, PAD, y + 3)
+		y = y + ROW_H
+
+		if #(phase.runtime or {}) == 0 then
+			local row = get("c_none_" .. phase.id, function()
+				return QAT.widgets.Label(container, "QAT_Cond_None_" .. phase.id, "")
+			end)
+			row:SetText("  (none)")
+			row:ClearAnchors()
+			row:SetAnchor(TOPLEFT, container, TOPLEFT, PAD + 12, y + 3)
+			y = y + ROW_H
+		else
+			for i, c in ipairs(phase.runtime) do
+				local row = get("c_" .. phase.id .. "_" .. i, function()
+					return QAT.widgets.Label(container, "QAT_Cond_Row_" .. phase.id .. "_" .. i, "")
+				end)
+				row:SetText(
+					"  IF "
+						.. (c.stat or "remaining")
+						.. " "
+						.. (c.op or "<")
+						.. " "
+						.. tostring(c.value or 0)
+						.. "  ->  "
+						.. actionText(c)
+				)
+				row:ClearAnchors()
+				row:SetAnchor(TOPLEFT, container, TOPLEFT, PAD + 12, y + 3)
+				y = y + ROW_H
+			end
+		end
 	end
 
 	QAT.widgets.PoolEnd(pool)

@@ -15,14 +15,16 @@ function QAT.util.DeepCopy(t)
 end
 
 -- Resolve a phase's icon: an explicit look.icon override, else the game icon of
--- the first tracked ability id (duration or enter trigger), else nil.
+-- the first tracked ability id (duration or an effect transition), else nil.
 function QAT.util.PhaseIcon(phase)
 	if phase.look and phase.look.icon and phase.look.icon ~= "" then
 		return phase.look.icon
 	end
 	local sources = { phase.duration and phase.duration.abilityIds }
-	for _, trig in ipairs(phase.enter or {}) do
-		table.insert(sources, trig.abilityIds)
+	for _, tr in ipairs(phase.transitions or {}) do
+		if tr.when and tr.when.kind == "effect" then
+			table.insert(sources, tr.when.abilityIds)
+		end
 	end
 	for _, ids in ipairs(sources) do
 		for _, id in ipairs(ids or {}) do

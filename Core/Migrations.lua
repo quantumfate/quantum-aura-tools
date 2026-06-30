@@ -24,6 +24,14 @@ QAT.migrations = {
 	[2] = function(sv)
 		QAT.CanonicalizeTree(sv.trackers)
 	end,
+
+	-- schema 3 -> 4: phase model overhaul. enter[]/onExpire collapse into
+	-- source-attached transitions, idle becomes a real phase, look gains per-element
+	-- colors + showStacks (value/maxStacks removed), and tracker-level runtime
+	-- conditions move onto the phases. CanonicalizeDef performs all of it.
+	[3] = function(sv)
+		QAT.CanonicalizeTree(sv.trackers)
+	end,
 }
 
 function QAT.RunMigrations(sv)
