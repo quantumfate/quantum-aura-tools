@@ -4,7 +4,7 @@
 -- for the expected node counts.
 
 local WM = GetWindowManager()
-local TOOLBAR_H, ROW_H, INDENT = 28, 24, 16
+local TOOLBAR_H, ROW_H, INDENT = 30, 30, 16
 
 local idCounter = 0
 local function newId(prefix)
@@ -226,8 +226,7 @@ function QAT.Editor_Tree_Build(pane)
 		tb:SetHeight(TOOLBAR_H)
 		QAT.editor.treeToolbar = tb
 
-		-- Add actions chained left to right; Delete follows with a slightly wider gap
-		-- to set the destructive action apart without flinging it across the bar.
+		-- Three toolbar actions, evenly spaced, chained left to right.
 		local GAP = 8
 		local addT = QAT.widgets.TextButton(tb, "QAT_Tree_Btn_AddTracker", "+ Tracker", addTracker)
 		addT:SetHeight(TOOLBAR_H - 6)
@@ -239,7 +238,7 @@ function QAT.Editor_Tree_Build(pane)
 		QAT.widgets.Tooltip(addG, "Add a group (folder). Its Load conditions cascade to the trackers inside it.")
 		local delBtn = QAT.widgets.TextButton(tb, "QAT_Tree_Btn_Delete", "Delete", deleteSelected)
 		delBtn:SetHeight(TOOLBAR_H - 6)
-		delBtn:SetAnchor(LEFT, addG, RIGHT, GAP + 10, 0)
+		delBtn:SetAnchor(LEFT, addG, RIGHT, GAP, 0)
 		QAT.widgets.Tooltip(delBtn, "Delete the selected tracker or group.")
 
 		-- Fixed viewport filling the pane below the toolbar. It needs a real rect

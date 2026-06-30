@@ -135,6 +135,31 @@ local function BuildTrackers(defs, parentLoads)
 	end
 end
 
+-- Enable/disable on-HUD dragging for every live tracker control. Driven by the
+-- editor's open/closed state so trackers don't eat the mouse during play.
+function QAT.Runtime_SetTrackersMovable(on)
+	QAT.trackersMovable = on and true or false
+	for _, tracker in ipairs(QAT.runtime.list) do
+		for _, phase in pairs(tracker.phases) do
+			local tlw = phase.control.tlw
+			tlw:SetMovable(QAT.trackersMovable)
+			tlw:SetMouseEnabled(QAT.trackersMovable)
+		end
+	end
+end
+
+-- Move a tracker's live controls to a new centre-relative offset, without a rebuild
+-- (used by the editor's position sliders and the on-HUD drag).
+function QAT.Runtime_RepositionTracker(id, x, y)
+	local tracker = QAT.runtime.trackers[id]
+	if not tracker then
+		return
+	end
+	for _, phase in pairs(tracker.phases) do
+		phase.control:Reposition(x, y)
+	end
+end
+
 -- Re-evaluate every tracker's load conditions.
 function QAT.Runtime_RefreshLoad()
 	for _, tracker in ipairs(QAT.runtime.list) do

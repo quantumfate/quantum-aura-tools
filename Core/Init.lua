@@ -29,9 +29,9 @@ QAT.defaults = {
 	editor = { -- editor window geometry
 		x = 200,
 		y = 200,
-		width = 900,
+		width = 960,
 		height = 560,
-		treeWidth = 260,
+		treeWidth = 300,
 	},
 }
 

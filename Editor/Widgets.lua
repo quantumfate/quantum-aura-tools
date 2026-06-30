@@ -241,6 +241,70 @@ function QAT.widgets.SectionHeader(parent, name, text)
 	return l
 end
 
+-- A horizontal slider (custom: a track + a draggable thumb). onChange(value) fires
+-- while dragging. Use :SetMinMax(min, max) and :SetValue(v). Integer-ish values are
+-- the caller's concern (floor in onChange).
+local SLIDER_THUMB_W = 12
+function QAT.widgets.Slider(parent, name, width, onChange)
+	local s = WM:CreateControl(name, parent, CT_CONTROL)
+	s:SetDimensions(width, 18)
+	s:SetMouseEnabled(true)
+	s.min, s.max, s.value, s.width = 0, 1, 0, width
+	s.onChange = onChange
+
+	local track = QAT.widgets.Panel(s, name .. "_Track", { 0.05, 0.06, 0.08, 1 }, C.fieldEdge)
+	track:SetHeight(6)
+	track:SetAnchor(LEFT, s, LEFT, 0, 0)
+	track:SetAnchor(RIGHT, s, RIGHT, 0, 0)
+
+	local thumb = QAT.widgets.Panel(s, name .. "_Thumb", { 0.42, 0.52, 0.68, 1 }, C.btnEdge)
+	thumb:SetDimensions(SLIDER_THUMB_W, 16)
+	s.thumb = thumb
+
+	local function fraction(v)
+		if s.max <= s.min then
+			return 0
+		end
+		return zo_clamp((v - s.min) / (s.max - s.min), 0, 1)
+	end
+	local function placeThumb(frac)
+		thumb:ClearAnchors()
+		thumb:SetAnchor(LEFT, s, LEFT, frac * (s.width - SLIDER_THUMB_W), 0)
+	end
+
+	function s:SetMinMax(mn, mx)
+		self.min, self.max = mn, mx
+		placeThumb(fraction(self.value))
+	end
+	function s:SetValue(v)
+		self.value = v
+		placeThumb(fraction(v))
+	end
+
+	local function updateFromMouse()
+		local mx = GetUIMousePosition()
+		local frac = zo_clamp((mx - s:GetLeft() - SLIDER_THUMB_W / 2) / (s.width - SLIDER_THUMB_W), 0, 1)
+		s.value = s.min + frac * (s.max - s.min)
+		placeThumb(frac)
+		if s.onChange then
+			s.onChange(s.value)
+		end
+	end
+	s:SetHandler("OnMouseDown", function()
+		s.dragging = true
+		updateFromMouse()
+	end)
+	s:SetHandler("OnMouseUp", function()
+		s.dragging = false
+	end)
+	s:SetHandler("OnUpdate", function()
+		if s.dragging then
+			updateFromMouse()
+		end
+	end)
+	return s
+end
+
 -- A single-line text entry (backdrop + ZO_DefaultEditForBackdrop edit box).
 -- The commit callback is read from frame.onChange at fire time (not captured), so
 -- a pooled box can be rebound to the current target on each render. Commits on

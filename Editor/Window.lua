@@ -7,9 +7,11 @@ QAT.editor = QAT.editor or {}
 local WM = GetWindowManager()
 -- Per-phase tabs (Load is a tracker-wide panel reached from the header, not a tab).
 local TABS = { "Appearance", "Behavior", "Conditions" }
-local TITLE_H, TAB_H, SPLITTER_W, HEADER_H, PHASESEL_H = 28, 28, 6, 64, 36
+local TITLE_H, TAB_H, SPLITTER_W, HEADER_H, PHASESEL_H = 28, 28, 6, 100, 36
+local HEADER_GAP = 30 -- breathing space between the header and the phase config
 QAT.editor.HEADER_H, QAT.editor.TAB_H, QAT.editor.PHASESEL_H = HEADER_H, TAB_H, PHASESEL_H
-local MIN_TREE, MIN_INSPECTOR = 160, 320
+QAT.editor.HEADER_GAP = HEADER_GAP
+local MIN_TREE, MIN_INSPECTOR = 300, 320
 
 local function saveGeometry()
 	local f = QAT.editor.frame
@@ -177,10 +179,11 @@ function QAT.Editor_Init()
 
 	QAT.editor.inspectorPane = QAT.widgets.Panel(f, "QAT_Editor_InspectorPane", { 0.06, 0.07, 0.09, 1 })
 
-	-- The tab bar sits below the header and the shared phase-selector strip.
+	-- The tab bar sits below the header, the content gap, and the phase-selector strip.
+	local tabY = HEADER_H + HEADER_GAP + PHASESEL_H
 	local tabBar = WM:CreateControl("QAT_Editor_TabBar", QAT.editor.inspectorPane, CT_CONTROL)
-	tabBar:SetAnchor(TOPLEFT, QAT.editor.inspectorPane, TOPLEFT, 0, HEADER_H + PHASESEL_H)
-	tabBar:SetAnchor(TOPRIGHT, QAT.editor.inspectorPane, TOPRIGHT, 0, HEADER_H + PHASESEL_H)
+	tabBar:SetAnchor(TOPLEFT, QAT.editor.inspectorPane, TOPLEFT, 12, tabY)
+	tabBar:SetAnchor(TOPRIGHT, QAT.editor.inspectorPane, TOPRIGHT, -12, tabY)
 	tabBar:SetHeight(TAB_H)
 	QAT.editor.tabBar = tabBar
 	buildTabBar(tabBar)
@@ -205,5 +208,9 @@ function QAT.Editor_Toggle()
 	end
 	local show = f:IsHidden()
 	f:SetHidden(not show)
+	-- Trackers are only draggable on the HUD while the editor is open.
+	if QAT.Runtime_SetTrackersMovable then
+		QAT.Runtime_SetTrackersMovable(show)
+	end
 	QAT.log.editor:Debug("editor %s", show and "shown" or "hidden")
 end

@@ -54,6 +54,7 @@ local function Normalize(def)
 		end
 		local displayDef = {
 			id = def.id .. "_" .. p.id,
+			trackerId = def.id, -- so an on-HUD drag knows which tracker to move
 			display = look.display,
 			name = look.name or def.name or def.id,
 			icon = icon,
