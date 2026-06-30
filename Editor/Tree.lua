@@ -56,6 +56,10 @@ local function addTracker()
 	-- Land on the visible "active" phase, not the empty hidden "idle" one.
 	QAT.editor.selectedPhaseId = "active"
 	selectNode(def.id)
+	-- First-run hint: a new tracker is hidden until its effect triggers.
+	if QAT.Editor_ShowAddTrackerHint then
+		QAT.Editor_ShowAddTrackerHint()
+	end
 end
 
 local function addGroup()
@@ -65,14 +69,31 @@ local function addGroup()
 	selectNode(def.id)
 end
 
-local function deleteSelected()
-	if QAT.editor.selectedId and removeById(QAT.sv.trackers, QAT.editor.selectedId) then
-		QAT.log.editor:Debug("deleted node '%s'", tostring(QAT.editor.selectedId))
+local function performDelete(id)
+	if removeById(QAT.sv.trackers, id) then
+		QAT.log.editor:Debug("deleted node '%s'", tostring(id))
 		QAT.editor.selectedId = nil
 		QAT.Editor_Tree_Build()
 		if QAT.Editor_Inspector_Show then
 			QAT.Editor_Inspector_Show(nil)
 		end
+		QAT.widgets.NotifyTrackerChanged() -- rebuild the HUD so the deleted tracker vanishes
+	end
+end
+
+local function deleteSelected()
+	local id = QAT.editor.selectedId
+	if not id then
+		return
+	end
+	local def = QAT.Editor_FindDef and QAT.Editor_FindDef(QAT.sv.trackers, id)
+	local name = (def and (def.name or def.id)) or "this tracker"
+	if QAT.Editor_ConfirmDelete then
+		QAT.Editor_ConfirmDelete(name, function()
+			performDelete(id)
+		end)
+	else
+		performDelete(id)
 	end
 end
 

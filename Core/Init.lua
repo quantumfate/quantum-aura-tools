@@ -22,6 +22,7 @@ QAT.defaults = {
 		backgroundCapture = false, -- passive recently-seen recording; off by default
 		capturePopupSeen = false, -- whether the one-time capture popup has been dismissed
 		examplesSeeded = false, -- whether starter example trackers were seeded once
+		addTrackerHintSeen = false, -- whether the "trackers start hidden" hint was dismissed for good
 	},
 	trackers = {}, -- tree of tracker and folder defs
 	userLibrary = {}, -- user-captured ability ids, kept separate from the bundled library
