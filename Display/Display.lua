@@ -181,6 +181,7 @@ function QAT.display.Create(def)
 	for _, l in ipairs({ nameLabel, timeLabel, stacksLabel }) do
 		l:SetVerticalAlignment(TEXT_ALIGN_CENTER)
 		l:SetHorizontalAlignment(TEXT_ALIGN_CENTER)
+		l:SetDrawLevel(5) -- readouts stay legible above the proc glow
 	end
 
 	-- Static label anchors per kind (icon-kind number anchors are set live in
@@ -202,6 +203,20 @@ function QAT.display.Create(def)
 		end
 	end
 
+	-- Proc glow: the game's looping ability-proc swirl, overlaid on the icon (or the
+	-- whole control) and shown while a Show-Proc condition holds.
+	local proc = reuse(name .. "_Proc", function()
+		return WM:CreateControl(name .. "_Proc", tlw, CT_TEXTURE)
+	end)
+	proc:SetTexture("EsoUI/Art/ActionBar/abilityHighlightAnimation.dds")
+	proc:SetBlendMode(TEX_BLEND_MODE_ADD)
+	proc:SetDrawLevel(1) -- above icon/bar (0), below the readout labels (5)
+	local procTarget = showIcon and icon or tlw
+	proc:ClearAnchors()
+	proc:SetAnchor(TOPLEFT, procTarget, TOPLEFT, -8, -8)
+	proc:SetAnchor(BOTTOMRIGHT, procTarget, BOTTOMRIGHT, 8, 8)
+	proc:SetHidden(true)
+
 	local control = {
 		tlw = tlw,
 		kind = kind,
@@ -211,6 +226,7 @@ function QAT.display.Create(def)
 		nameLabel = nameLabel,
 		timeLabel = timeLabel,
 		stacksLabel = stacksLabel,
+		proc = proc,
 		colors = colors,
 		name = def.name or tostring(def.id),
 		decimals = def.decimals or 1,
@@ -218,8 +234,35 @@ function QAT.display.Create(def)
 		showTime = def.showTime ~= false,
 	}
 
+	-- Show/hide the looping proc swirl. The flipbook animation is created lazily and
+	-- only (re)started on the hidden->shown edge.
+	function control:SetProc(on)
+		local p = self.proc
+		if on then
+			if not p.qatAnim then
+				local a = CreateSimpleAnimation(ANIMATION_TEXTURE, p)
+				a:SetImageData(64, 1)
+				a:SetFramerate(30)
+				a:GetTimeline():SetPlaybackType(ANIMATION_PLAYBACK_LOOP, LOOP_INDEFINITELY)
+				p.qatAnim = a
+			end
+			if p:IsHidden() then
+				p:SetHidden(false)
+				p.qatAnim:GetTimeline():PlayFromStart()
+			end
+		elseif not p:IsHidden() then
+			p:SetHidden(true)
+			if p.qatAnim then
+				p.qatAnim:GetTimeline():Stop()
+			end
+		end
+	end
+
 	function control:SetHidden(hidden)
 		self.tlw:SetHidden(hidden)
+		if hidden then
+			self:SetProc(false)
+		end
 	end
 
 	-- Move the control to a new top-left position (live, without a rebuild).
@@ -278,6 +321,7 @@ function QAT.display.Create(def)
 	function control:SetState(active, remaining, duration, stacks)
 		if not active or self.kind == "none" or self.kind == "audio" then
 			self.tlw:SetHidden(true) -- non-visual kinds; an audio cue fires on enter
+			self:SetProc(false)
 			return
 		end
 		self.tlw:SetHidden(false)

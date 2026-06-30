@@ -28,8 +28,6 @@ local ACTION_ELEMENT = {
 	setTextColor = "text",
 	setTimerColor = "timer",
 }
-local PROC_FLASH = { flash = { color = { 1, 0.9, 0.3, 0.45 }, duration = 250 } }
-
 local function contains(arr, v)
 	for _, x in ipairs(arr or {}) do
 		if x == v then
@@ -100,7 +98,6 @@ function QAT.Tracker.New(def, loadChain)
 	self.expiresAt = nil
 	self.duration = nil
 	self.stacks = 0
-	self.procFired = {} -- edge state for Show Proc conditions, reset on Enter
 	return self
 end
 
@@ -160,7 +157,6 @@ function QAT.Tracker:Enter(phaseId, timing)
 	end
 	QAT.log.engine:Debug("tracker '%s': %s -> %s", self.id, tostring(self.current), tostring(phaseId or "hidden"))
 	self.current = phaseId
-	self.procFired = {}
 	if not phaseId then
 		self.expiresAt, self.duration, self.stacks = nil, nil, 0
 		return
@@ -223,21 +219,17 @@ function QAT.Tracker:OnEffect(unitTag, abilityId, result, beginTime, endTime, st
 	return false
 end
 
--- Per-phase reactive conditions: ephemeral element recolors plus edge-triggered
--- Show Proc cues. Returns a table { element = color, ... } of overrides, or nil.
--- Never writes to the def (the authored colors stay untouched in SavedVars).
+-- Per-phase reactive conditions: ephemeral element recolors plus the Show-Proc
+-- glow. Returns (overrides, procActive): a table { element = color, ... } (or nil)
+-- and whether any Show-Proc condition currently holds. Never writes to the def.
 function QAT.Tracker:EvalRuntime(remaining)
 	local cur = self.phases[self.current]
-	local overrides
-	for i, c in ipairs(cur.runtime or {}) do
+	local overrides, procActive = nil, false
+	for _, c in ipairs(cur.runtime or {}) do
 		local statVal = (c.stat == "stacks") and self.stacks or (remaining or 0)
 		local sat = QAT.conditions.Compare(statVal, c.op, c.value)
 		if c.action == "showProc" then
-			local key = i
-			if sat and not self.procFired[key] then
-				QAT.FireCues(c.cue or PROC_FLASH)
-			end
-			self.procFired[key] = sat
+			procActive = procActive or sat -- sustained glow while the condition holds
 		elseif sat then
 			local elem = ACTION_ELEMENT[c.action]
 			if elem and c.color then
@@ -246,7 +238,7 @@ function QAT.Tracker:EvalRuntime(remaining)
 			end
 		end
 	end
-	return overrides
+	return overrides, procActive
 end
 
 function QAT.Tracker:Render(now)
@@ -257,12 +249,13 @@ function QAT.Tracker:Render(now)
 	local remaining = self.expiresAt and (self.expiresAt - now) or nil
 
 	control:SetState(true, remaining, self.duration, self.stacks)
-	local overrides = self:EvalRuntime(remaining)
+	local overrides, procActive = self:EvalRuntime(remaining)
 	if overrides then
 		for elem, c in pairs(overrides) do
 			control:SetElementColor(elem, c) -- after SetState's reset to base colors
 		end
 	end
+	control:SetProc(procActive)
 end
 
 -- Poll the current phase's threshold/expire transitions. Returns true if it

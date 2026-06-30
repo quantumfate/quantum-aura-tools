@@ -175,7 +175,10 @@ QAT.Examples = {
 					{ when = { kind = "stacks", op = "<", value = 5 }, to = "building" },
 					{ when = { kind = "effect", result = "faded", abilityIds = { 61919 } }, to = "idle" },
 				},
-				cues = { flash = { color = { 1, 0.9, 0.3, 0.35 }, duration = 250 } },
+				-- Glow on the icon while proc-ready (the game's ability-proc swirl).
+				runtime = {
+					{ stat = "stacks", op = ">=", value = 5, action = "showProc" },
+				},
 			},
 		},
 	},
