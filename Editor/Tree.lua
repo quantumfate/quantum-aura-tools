@@ -26,6 +26,84 @@ local function removeById(defs, id)
 	return false
 end
 
+-- Depth-first find of a def by id.
+local function findNode(defs, id)
+	for _, def in ipairs(defs) do
+		if def.id == id then
+			return def
+		end
+		if def.children then
+			local found = findNode(def.children, id)
+			if found then
+				return found
+			end
+		end
+	end
+	return nil
+end
+
+-- The list (and index) that directly contains id, so a node can be inserted next
+-- to it as a sibling.
+local function findParentList(defs, id)
+	for i, def in ipairs(defs) do
+		if def.id == id then
+			return defs, i
+		end
+		if def.children then
+			local list, idx = findParentList(def.children, id)
+			if list then
+				return list, idx
+			end
+		end
+	end
+	return nil
+end
+
+-- True if id is within node's subtree (so we never drop a folder into itself).
+local function isInSubtree(node, id)
+	if node.id == id then
+		return true
+	end
+	for _, c in ipairs(node.children or {}) do
+		if isInSubtree(c, id) then
+			return true
+		end
+	end
+	return false
+end
+
+-- Move a node by drag-drop: onto a folder nests it inside; onto a tracker makes it
+-- a sibling next to it; onto empty space moves it to the top level.
+local function dropNode(dragId, targetDef)
+	if not dragId or (targetDef and dragId == targetDef.id) then
+		return
+	end
+	local dragged = findNode(QAT.sv.trackers, dragId)
+	if not dragged then
+		return
+	end
+	if targetDef and isInSubtree(dragged, targetDef.id) then
+		return -- can't move a group into its own descendant
+	end
+	removeById(QAT.sv.trackers, dragId)
+	if targetDef and targetDef.kind == "folder" then
+		targetDef.children = targetDef.children or {}
+		table.insert(targetDef.children, dragged)
+	elseif targetDef then
+		local list, idx = findParentList(QAT.sv.trackers, targetDef.id)
+		if list then
+			table.insert(list, idx + 1, dragged)
+		else
+			table.insert(QAT.sv.trackers, dragged)
+		end
+	else
+		table.insert(QAT.sv.trackers, dragged) -- dropped on empty space
+	end
+	QAT.CanonicalizeTree(QAT.sv.trackers)
+	QAT.widgets.NotifyTrackerChanged() -- load chain changed; rebuild runtime + views
+	QAT.Editor_Tree_Build()
+end
+
 local function selectNode(id)
 	QAT.log.editor:Debug("select node '%s'", tostring(id))
 	QAT.editor.selectedId = id
@@ -120,6 +198,19 @@ local function trackerIcon(def)
 	return ICON_MISSING
 end
 
+-- The tracker/folder def under a given screen Y (the drop target), or nil.
+local function rowAt(my)
+	if not my then
+		return nil
+	end
+	for _, row in pairs(rows) do
+		if not row:IsHidden() and my >= row:GetTop() and my <= row:GetBottom() then
+			return findNode(QAT.sv.trackers, row.defId)
+		end
+	end
+	return nil
+end
+
 local function makeRow(parent, def, depth, y)
 	local name = "QAT_TreeRow_" .. def.id
 	local isFolder = def.kind == "folder"
@@ -133,12 +224,27 @@ local function makeRow(parent, def, depth, y)
 	row:SetAnchor(TOPRIGHT, parent, TOPRIGHT, 0, y)
 	row:SetHeight(ROW_H)
 
+	row.defId = def.id
 	local selected = QAT.editor.selectedId == def.id
 	row.bg:SetCenterColor(unpack(selected and { 0.20, 0.28, 0.40, 1 } or { 0, 0, 0, 0 }))
+	-- Click selects; a vertical drag onto another row reparents (drag-drop nesting).
+	row:SetHandler("OnMouseDown", function()
+		QAT.editor.treeDragId = def.id
+		local _, my = GetUIMousePosition()
+		QAT.editor.treeDragY = my
+	end)
 	row:SetHandler("OnMouseUp", function(_, button, upInside)
-		if upInside and button == MOUSE_BUTTON_INDEX_LEFT then
+		if button ~= MOUSE_BUTTON_INDEX_LEFT then
+			return
+		end
+		local _, my = GetUIMousePosition()
+		local moved = math.abs((my or 0) - (QAT.editor.treeDragY or 0)) > 8
+		if moved and QAT.editor.treeDragId then
+			dropNode(QAT.editor.treeDragId, rowAt(my))
+		elseif upInside then
 			selectNode(def.id)
 		end
+		QAT.editor.treeDragId = nil
 	end)
 
 	-- Left glyph: a folder's expand arrow (clickable, toggles collapse) or a
