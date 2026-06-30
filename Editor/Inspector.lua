@@ -192,14 +192,22 @@ function QAT.Editor_Inspector_Build(pane)
 	insp.heightBox:SetAnchor(LEFT, insp.sizeX, RIGHT, 4, 0)
 	insp.heightBox.onChange = dimChange("height")
 
-	-- Load toggle: it lives on the tab-bar row (so it reads as a section switch like
-	-- the tabs) but right-aligned and set off, to signal its tracker-wide scope.
-	insp.loadBtn = QAT.widgets.TextButton(QAT.editor.tabBar, "QAT_Insp_LoadBtn", "Load", function()
-		QAT.editor.loadMode = not QAT.editor.loadMode -- toggle, so clicking it again returns
+	-- Top-level mode switch (tracker scope), header right edge: Phases (the phase
+	-- editor — the default) and Load (the load-condition panel). Exactly one is
+	-- active; together they make Load's toggle nature obvious.
+	insp.loadBtn = QAT.widgets.TextButton(header, "QAT_Insp_LoadBtn", "Load", function()
+		QAT.editor.loadMode = true
 		refreshBody()
 	end)
-	insp.loadBtn:SetDimensions(96, QAT.editor.TAB_H)
-	insp.loadBtn:SetAnchor(RIGHT, QAT.editor.tabBar, RIGHT, -4, 0)
+	insp.loadBtn:SetDimensions(80, 22)
+	insp.loadBtn:SetAnchor(BOTTOMRIGHT, header, BOTTOMRIGHT, -10, -6)
+
+	insp.phasesBtn = QAT.widgets.TextButton(header, "QAT_Insp_PhasesBtn", "Phases", function()
+		QAT.editor.loadMode = false
+		refreshBody()
+	end)
+	insp.phasesBtn:SetDimensions(80, 22)
+	insp.phasesBtn:SetAnchor(RIGHT, insp.loadBtn, LEFT, -6, 0)
 
 	-- Shared phase-selector strip (between the header and the tab bar).
 	local sel = WM:CreateControl("QAT_Insp_PhaseSel", pane, CT_CONTROL)
@@ -248,6 +256,15 @@ refreshBody = function()
 	if not insp then
 		return
 	end
+	-- Re-entrancy guard: hiding a container that holds a focused EditBox fires its
+	-- OnFocusLost (a commit), which can call back into refreshBody. Coalesce any such
+	-- nested call into a single re-render after the current one finishes.
+	if insp.refreshing then
+		insp.refreshPending = true
+		return
+	end
+	insp.refreshing = true
+
 	local def = insp.currentId and findDef(QAT.sv.trackers, insp.currentId)
 
 	for _, c in pairs(insp.tabContainers or {}) do
@@ -263,50 +280,58 @@ refreshBody = function()
 			QAT.editor.tabBar:SetHidden(true)
 		end
 		insp.loadBtn:SetHidden(true)
-		return
-	end
-	insp.placeholder:SetHidden(true)
-	insp.loadBtn:SetHidden(false)
+		insp.phasesBtn:SetHidden(true)
+	else
+		insp.placeholder:SetHidden(true)
+		insp.loadBtn:SetHidden(false)
 
-	-- Folders have no phases, so they only ever show the Load panel.
-	local isFolder = def.kind == "folder"
-	local showLoad = QAT.editor.loadMode or isFolder
+		-- Folders have no phases, so they only ever show the Load panel.
+		local isFolder = def.kind == "folder"
+		local showLoad = QAT.editor.loadMode or isFolder
 
-	insp.loadBtn:SetSelected(showLoad)
-	if QAT.editor.tabButtons then
-		for _, n in ipairs(PHASE_TABS) do
-			QAT.editor.tabButtons[n]:SetSelected(not showLoad and QAT.editor.activeTab == n)
+		insp.phasesBtn:SetHidden(isFolder) -- a folder has only Load
+		insp.phasesBtn:SetSelected(not showLoad)
+		insp.loadBtn:SetSelected(showLoad)
+		if QAT.editor.tabButtons then
+			for _, n in ipairs(PHASE_TABS) do
+				QAT.editor.tabButtons[n]:SetSelected(not showLoad and QAT.editor.activeTab == n)
+			end
+		end
+		-- In Load mode the phase strip and tabs are hidden; the header Phases button
+		-- is the way back.
+		insp.phaseSel:SetHidden(showLoad)
+		if QAT.editor.tabBar then
+			QAT.editor.tabBar:SetHidden(showLoad)
+		end
+
+		if showLoad then
+			local renderer = QAT.editor.tabRenderers["Load"]
+			if renderer then
+				insp.loadContainer:SetHidden(false)
+				QAT.Safe("tab Load", function()
+					renderer(insp.loadContainer, def)
+				end)
+			end
+		else
+			ensureSelectedPhase(def)
+			renderPhaseSel(def)
+
+			local tab = QAT.editor.activeTab or "Appearance"
+			local container = insp.tabContainers[tab]
+			local renderer = QAT.editor.tabRenderers[tab]
+			if container and renderer then
+				container:SetHidden(false)
+				QAT.Safe("tab " .. tab, function()
+					renderer(container, def)
+				end)
+			end
 		end
 	end
-	-- The phase strip is irrelevant in Load mode, but keep the tab bar visible (for a
-	-- non-folder) so clicking a tab is an obvious way back out of Load.
-	insp.phaseSel:SetHidden(showLoad)
-	if QAT.editor.tabBar then
-		QAT.editor.tabBar:SetHidden(isFolder)
-	end
 
-	if showLoad then
-		local renderer = QAT.editor.tabRenderers["Load"]
-		if renderer then
-			insp.loadContainer:SetHidden(false)
-			QAT.Safe("tab Load", function()
-				renderer(insp.loadContainer, def)
-			end)
-		end
-		return
-	end
-
-	ensureSelectedPhase(def)
-	renderPhaseSel(def)
-
-	local tab = QAT.editor.activeTab or "Appearance"
-	local container = insp.tabContainers[tab]
-	local renderer = QAT.editor.tabRenderers[tab]
-	if container and renderer then
-		container:SetHidden(false)
-		QAT.Safe("tab " .. tab, function()
-			renderer(container, def)
-		end)
+	insp.refreshing = false
+	if insp.refreshPending then
+		insp.refreshPending = false
+		refreshBody()
 	end
 end
 QAT.Editor_Inspector_Refresh = refreshBody
@@ -325,6 +350,7 @@ function QAT.Editor_Inspector_Show(id)
 	insp.move:SetHidden(not def)
 	insp.popout:SetHidden(not def)
 	insp.loadBtn:SetHidden(not def)
+	insp.phasesBtn:SetHidden(not def)
 	local showTracker = def ~= nil and def.kind ~= "folder"
 	insp.sizeCaption:SetHidden(not showTracker)
 	insp.widthBox:SetHidden(not showTracker)

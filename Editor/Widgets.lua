@@ -163,11 +163,14 @@ end
 -- A single-line text entry (backdrop + ZO_DefaultEditForBackdrop edit box).
 -- The commit callback is read from frame.onChange at fire time (not captured), so
 -- a pooled box can be rebound to the current target on each render. Commits on
--- focus loss or Enter.
+-- focus loss or Enter, but ONLY when the text actually changed since it was last
+-- set/committed — otherwise hiding a focused box (which fires OnFocusLost) would
+-- spuriously re-commit and, if onChange re-renders, recurse.
 function QAT.widgets.EditBox(parent, name, width, height, initial, onChange)
 	local frame = QAT.widgets.Panel(parent, name, { 0.03, 0.04, 0.05, 1 })
 	frame:SetDimensions(width, height or 24)
 	frame.onChange = onChange
+	frame._committed = initial or ""
 	local edit = CreateControlFromVirtual(name .. "_Edit", frame, "ZO_DefaultEditForBackdrop")
 	edit:SetAnchor(TOPLEFT, frame, TOPLEFT, 4, 0)
 	edit:SetAnchor(BOTTOMRIGHT, frame, BOTTOMRIGHT, -4, 0)
@@ -176,13 +179,20 @@ function QAT.widgets.EditBox(parent, name, width, height, initial, onChange)
 		self:LoseFocus()
 	end)
 	edit:SetHandler("OnFocusLost", function(self)
+		local t = self:GetText()
+		if t == frame._committed then
+			return -- unchanged; don't re-fire (prevents SetHidden -> commit loops)
+		end
+		frame._committed = t
 		if frame.onChange then
-			frame.onChange(self:GetText())
+			frame.onChange(t)
 		end
 	end)
 	frame.edit = edit
 	function frame:SetText(t)
-		edit:SetText(t or "")
+		t = t or ""
+		self._committed = t -- programmatic set is the new baseline, not a user edit
+		edit:SetText(t)
 	end
 	function frame:GetText()
 		return edit:GetText()
