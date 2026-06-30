@@ -7,7 +7,7 @@ QAT.editor = QAT.editor or {}
 local WM = GetWindowManager()
 -- Per-phase tabs (Load is a tracker-wide panel reached from the header, not a tab).
 local TABS = { "Appearance", "Behavior", "Conditions" }
-local TITLE_H, TAB_H, SPLITTER_W, HEADER_H, PHASESEL_H = 28, 26, 6, 56, 30
+local TITLE_H, TAB_H, SPLITTER_W, HEADER_H, PHASESEL_H = 28, 28, 6, 64, 36
 QAT.editor.HEADER_H, QAT.editor.TAB_H, QAT.editor.PHASESEL_H = HEADER_H, TAB_H, PHASESEL_H
 local MIN_TREE, MIN_INSPECTOR = 160, 320
 
@@ -83,7 +83,7 @@ local function buildTitleBar(f)
 	close:SetAnchor(RIGHT, bar, RIGHT, -4, 0)
 end
 
-local TAB_W, TAB_GAP = 110, 8
+local TAB_GAP, TAB_MIN_W = 6, 96
 
 local function selectTab(name)
 	QAT.editor.activeTab = name
@@ -99,15 +99,20 @@ QAT.Editor_SelectTab = selectTab
 
 local function buildTabBar(pane)
 	QAT.editor.tabButtons = {}
-	local x = 0
+	local prev
 	for _, name in ipairs(TABS) do
 		local btn = QAT.widgets.TextButton(pane, "QAT_Editor_Tab_" .. name, name, function()
 			selectTab(name)
 		end)
-		btn:SetDimensions(TAB_W, TAB_H)
-		btn:SetAnchor(TOPLEFT, pane, TOPLEFT, x, 0)
+		btn:SetHeight(TAB_H)
+		btn:SetMinWidth(TAB_MIN_W) -- uniform-ish tabs that still grow for long labels
+		if prev then
+			btn:SetAnchor(LEFT, prev, RIGHT, TAB_GAP, 0)
+		else
+			btn:SetAnchor(TOPLEFT, pane, TOPLEFT, 0, 0)
+		end
 		QAT.editor.tabButtons[name] = btn
-		x = x + TAB_W + TAB_GAP
+		prev = btn
 	end
 end
 

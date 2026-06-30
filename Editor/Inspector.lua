@@ -46,36 +46,37 @@ local function renderPhaseSel(def)
 		return QAT.widgets.PoolGet(pool, key, factory)
 	end
 
+	local GAP, h = 8, QAT.editor.PHASESEL_H - 12
 	local cap = get("cap", function()
 		return QAT.widgets.Label(sel, "QAT_PhaseSel_Cap", "Phase:")
 	end)
 	cap:ClearAnchors()
-	cap:SetAnchor(LEFT, sel, LEFT, 10, 0)
+	cap:SetAnchor(LEFT, sel, LEFT, 12, 0)
 
-	local x = 58
+	local prev = cap
 	for i, p in ipairs(def.phases) do
 		local pid = p.id
 		local chip = get("chip" .. i, function()
 			return QAT.widgets.TextButton(sel, "QAT_PhaseSel_Chip" .. i, "", nil)
 		end)
 		chip:SetSelected(pid == QAT.editor.selectedPhaseId)
-		chip.label:SetText(pid)
-		chip:SetDimensions(84, QAT.editor.PHASESEL_H - 8)
+		chip:SetText(pid) -- auto-fits width to the phase name
+		chip:SetHeight(h)
 		chip:ClearAnchors()
-		chip:SetAnchor(LEFT, sel, LEFT, x, 0)
+		chip:SetAnchor(LEFT, prev, RIGHT, GAP, 0)
 		chip.onClick = function()
 			QAT.editor.selectedPhaseId = pid
 			refreshBody()
 		end
-		x = x + 88
+		prev = chip
 	end
 
 	local addBtn = get("add", function()
 		return QAT.widgets.TextButton(sel, "QAT_PhaseSel_Add", "+ Phase", nil)
 	end)
-	addBtn:SetDimensions(76, QAT.editor.PHASESEL_H - 8)
+	addBtn:SetHeight(h)
 	addBtn:ClearAnchors()
-	addBtn:SetAnchor(LEFT, sel, LEFT, x, 0)
+	addBtn:SetAnchor(LEFT, prev, RIGHT, GAP, 0)
 	addBtn.onClick = function()
 		local n = #def.phases + 1
 		table.insert(
@@ -89,15 +90,14 @@ local function renderPhaseSel(def)
 
 	-- Phase actions for the SELECTED phase, right-aligned so they read against the
 	-- highlighted chip ("delete the active phase").
-	local h = QAT.editor.PHASESEL_H - 8
 	local selId = QAT.editor.selectedPhaseId
 
 	local delBtn = get("delPhase", function()
 		return QAT.widgets.TextButton(sel, "QAT_PhaseSel_Del", "Delete phase", nil)
 	end)
-	delBtn:SetDimensions(100, h)
+	delBtn:SetHeight(h)
 	delBtn:ClearAnchors()
-	delBtn:SetAnchor(RIGHT, sel, RIGHT, -10, 0)
+	delBtn:SetAnchor(RIGHT, sel, RIGHT, -12, 0)
 	delBtn.onClick = function()
 		if #def.phases <= 1 then
 			return
@@ -116,9 +116,9 @@ local function renderPhaseSel(def)
 	local initBtn = get("initPhase", function()
 		return QAT.widgets.TextButton(sel, "QAT_PhaseSel_Init", "Set initial", nil)
 	end)
-	initBtn:SetDimensions(90, h)
+	initBtn:SetHeight(h)
 	initBtn:ClearAnchors()
-	initBtn:SetAnchor(RIGHT, delBtn, LEFT, -6, 0)
+	initBtn:SetAnchor(RIGHT, delBtn, LEFT, GAP, 0)
 	initBtn:SetSelected(selId == def.initial) -- lit when the selected phase is the initial one
 	initBtn.onClick = function()
 		def.initial = selId
@@ -137,6 +137,9 @@ function QAT.Editor_Inspector_Build(pane)
 	local header = QAT.widgets.Panel(pane, "QAT_Insp_Header", { 0.10, 0.11, 0.14, 1 })
 	header:SetAnchor(TOPLEFT, pane, TOPLEFT, 0, 0)
 	header:SetAnchor(TOPRIGHT, pane, TOPRIGHT, 0, 0)
+	local headerDiv = QAT.widgets.Divider(pane, "QAT_Insp_HeaderDiv")
+	headerDiv:SetAnchor(BOTTOMLEFT, header, BOTTOMLEFT, 0, 0)
+	headerDiv:SetAnchor(BOTTOMRIGHT, header, BOTTOMRIGHT, 0, 0)
 	header:SetHeight(QAT.editor.HEADER_H)
 	insp.header = header
 
@@ -160,14 +163,14 @@ function QAT.Editor_Inspector_Build(pane)
 			QAT.Editor_MoveTracker(insp.currentId)
 		end
 	end)
-	insp.move:SetDimensions(120, 22)
-	insp.move:SetAnchor(BOTTOMLEFT, header, BOTTOMLEFT, 10, -6)
+	insp.move:SetHeight(22)
+	insp.move:SetAnchor(BOTTOMLEFT, header, BOTTOMLEFT, 12, -8)
 
 	insp.popout = QAT.widgets.TextButton(header, "QAT_Insp_Popout", "Pop out", function()
 		d(QAT.displayName .. ": detachable inspector is not yet available.")
 	end)
-	insp.popout:SetDimensions(70, 22)
-	insp.popout:SetAnchor(LEFT, insp.move, RIGHT, 10, 0)
+	insp.popout:SetHeight(22)
+	insp.popout:SetAnchor(LEFT, insp.move, RIGHT, 8, 0)
 
 	-- Tracker dimensions (W x H). Bars use both; icons are square and use H only.
 	local function dimChange(field)
@@ -201,15 +204,17 @@ function QAT.Editor_Inspector_Build(pane)
 		QAT.editor.loadMode = true
 		refreshBody()
 	end)
-	insp.loadBtn:SetDimensions(80, 22)
-	insp.loadBtn:SetAnchor(BOTTOMRIGHT, header, BOTTOMRIGHT, -10, -6)
+	insp.loadBtn:SetHeight(22)
+	insp.loadBtn:SetMinWidth(72)
+	insp.loadBtn:SetAnchor(BOTTOMRIGHT, header, BOTTOMRIGHT, -12, -8)
 
 	insp.phasesBtn = QAT.widgets.TextButton(header, "QAT_Insp_PhasesBtn", "Phases", function()
 		QAT.editor.loadMode = false
 		refreshBody()
 	end)
-	insp.phasesBtn:SetDimensions(80, 22)
-	insp.phasesBtn:SetAnchor(RIGHT, insp.loadBtn, LEFT, -6, 0)
+	insp.phasesBtn:SetHeight(22)
+	insp.phasesBtn:SetMinWidth(72)
+	insp.phasesBtn:SetAnchor(RIGHT, insp.loadBtn, LEFT, 8, 0)
 
 	-- Shared phase-selector strip (between the header and the tab bar).
 	local sel = WM:CreateControl("QAT_Insp_PhaseSel", pane, CT_CONTROL)

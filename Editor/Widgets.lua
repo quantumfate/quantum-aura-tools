@@ -57,17 +57,38 @@ end
 local IDLE_COLOR = C.btnBg
 local SELECTED_COLOR = C.selBg
 
+local BTN_H = 24 -- default button height
+local BTN_PAD = 14 -- horizontal padding around a button's text
+
 function QAT.widgets.TextButton(parent, name, text, onClick)
 	local b = QAT.widgets.Clickable(parent, name, IDLE_COLOR)
 	b.bg:SetEdgeColor(unpack(C.btnEdge))
 	b.baseColor = IDLE_COLOR
 	b.onClick = onClick -- read at fire time, so a pooled button can be rebound
+	b.minWidth = 0
 	local label = QAT.widgets.Label(b, name .. "_Label", text)
-	label:SetAnchor(LEFT, b, LEFT, 5, 0)
-	label:SetAnchor(RIGHT, b, RIGHT, -5, 0)
+	label:SetAnchor(CENTER)
 	label:SetHorizontalAlignment(TEXT_ALIGN_CENTER)
 	label:SetMaxLineCount(1) -- never wrap; keep button text on one line
 	b.label = label
+	b:SetHeight(BTN_H)
+
+	-- Buttons size to their text (+ padding) so labels never clip and rows can be
+	-- laid out by chaining widths with a single gap. SetText refits.
+	function b:FitWidth()
+		local w = math.ceil(self.label:GetTextWidth()) + BTN_PAD * 2
+		self:SetWidth(math.max(self.minWidth or 0, w))
+		return self
+	end
+	function b:SetText(t)
+		self.label:SetText(t or "")
+		self:FitWidth()
+	end
+	function b:SetMinWidth(w)
+		self.minWidth = w or 0
+		self:FitWidth()
+	end
+	b:FitWidth()
 
 	function b:SetSelected(sel)
 		self.baseColor = sel and SELECTED_COLOR or IDLE_COLOR
@@ -184,6 +205,16 @@ function QAT.widgets.Tooltip(control, text)
 		ClearTooltip(InformationTooltip)
 	end)
 	return control
+end
+
+-- A 1px horizontal rule for separating sections. Anchor it yourself (left/right).
+function QAT.widgets.Divider(parent, name)
+	local d = WM:CreateControl(name, parent, CT_BACKDROP)
+	d:SetHeight(1)
+	d:SetCenterColor(0.30, 0.34, 0.42, 0.7)
+	d:SetEdgeColor(0, 0, 0, 0)
+	d:SetEdgeTexture("", 1, 1, 1)
+	return d
 end
 
 -- A bold section header label.
