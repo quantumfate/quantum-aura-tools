@@ -93,6 +93,15 @@ local function render(container, def)
 		return l
 	end
 
+	-- Two columns: General (left) and Colors (right, see below).
+	local COLX = 430
+	local genHeader = get("hGen", function()
+		return QAT.widgets.SectionHeader(container, "QAT_App_hGen", "General")
+	end)
+	genHeader:ClearAnchors()
+	genHeader:SetAnchor(TOPLEFT, container, TOPLEFT, PAD, y)
+	y = y + ROW_H
+
 	-- Phase id.
 	fieldLabel(
 		"lId",
@@ -201,40 +210,8 @@ local function render(container, def)
 		y = y + ROW_H + GAP
 	end
 
-	-- Per-element colours (two per row) + border thickness, gated by Kind.
+	-- Border width (General column; the colours live in the right column).
 	if isVisual then
-		local fields = COLOR_SET[kind] or {}
-		local colX = { PAD, PAD + 190 }
-		for i, f in ipairs(fields) do
-			local key = f[1]
-			local col = (i - 1) % 2
-			local fx = colX[col + 1]
-			local cap = get("cc_" .. key, function()
-				return QAT.widgets.Label(container, "QAT_App_CC_" .. key, "")
-			end)
-			cap:SetText(f[2])
-			cap:ClearAnchors()
-			cap:SetAnchor(TOPLEFT, container, TOPLEFT, fx, y + 3)
-			QAT.widgets.Tooltip(cap, f[2] .. " colour.")
-			local sw = get("cs_" .. key, function()
-				return QAT.widgets.ColorSwatch(container, "QAT_App_CS_" .. key, ROW_H, { 1, 1, 1, 1 })
-			end)
-			sw.onChange = function(c)
-				phase.look.colors = phase.look.colors or {}
-				phase.look.colors[key] = c
-				commit(def)
-			end
-			sw:SetColor((phase.look.colors and phase.look.colors[key]) or DEFAULT_COLORS[key])
-			sw:ClearAnchors()
-			sw:SetAnchor(TOPLEFT, container, TOPLEFT, fx + 96, y)
-			if col == 1 then
-				y = y + ROW_H + GAP
-			end
-		end
-		if #fields % 2 == 1 then
-			y = y + ROW_H + GAP
-		end
-
 		fieldLabel("lBorderT", "Border width", y, "Border thickness in pixels (must be a power of two).")
 		local btDD = get("btDD", function()
 			return QAT.widgets.Dropdown(container, "QAT_App_BorderT", 70, BORDER_OPTS, 1)
@@ -333,6 +310,44 @@ local function render(container, def)
 			fx = fx + 16 + 60 + 14
 		end
 		y = y + ROW_H + GAP
+
+		-- ===== Right column: Colors =====
+		local colHeader = get("hColors", function()
+			return QAT.widgets.SectionHeader(container, "QAT_App_hColors", "Colors")
+		end)
+		colHeader:ClearAnchors()
+		colHeader:SetAnchor(TOPLEFT, container, TOPLEFT, COLX, PAD)
+		local cy = PAD + ROW_H
+		for _, f in ipairs(COLOR_SET[kind] or {}) do
+			local key = f[1]
+			local cap = get("cc_" .. key, function()
+				return QAT.widgets.Label(container, "QAT_App_CC_" .. key, "")
+			end)
+			cap:SetText(f[2])
+			cap:ClearAnchors()
+			cap:SetAnchor(TOPLEFT, container, TOPLEFT, COLX, cy + 3)
+			QAT.widgets.Tooltip(cap, f[2] .. " colour.")
+			local sw = get("cs_" .. key, function()
+				return QAT.widgets.ColorSwatch(container, "QAT_App_CS_" .. key, ROW_H, { 1, 1, 1, 1 })
+			end)
+			sw.onChange = function(c)
+				phase.look.colors = phase.look.colors or {}
+				phase.look.colors[key] = c
+				commit(def)
+			end
+			sw:SetColor((phase.look.colors and phase.look.colors[key]) or DEFAULT_COLORS[key])
+			sw:ClearAnchors()
+			sw:SetAnchor(TOPLEFT, container, TOPLEFT, COLX + 110, cy)
+			cy = cy + ROW_H + GAP
+		end
+
+		-- Vertical rule separating the two columns.
+		local vdiv = get("vdiv", function()
+			return QAT.widgets.Panel(container, "QAT_App_VDiv", { 0.30, 0.34, 0.42, 0.6 }, { 0, 0, 0, 0 })
+		end)
+		vdiv:ClearAnchors()
+		vdiv:SetDimensions(1, math.max(y, cy) - PAD)
+		vdiv:SetAnchor(TOPLEFT, container, TOPLEFT, COLX - 24, PAD)
 	end
 
 	if kind == "audio" then

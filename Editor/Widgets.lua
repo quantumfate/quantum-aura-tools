@@ -450,7 +450,7 @@ function QAT.widgets.ColorSwatch(parent, name, size, color, onChange)
 	sw.color = color or { 1, 1, 1, 1 }
 	sw.onChange = onChange
 	sw.bg:SetCenterColor(unpack(sw.color))
-	sw.bg:SetEdgeColor(0, 0, 0, 1)
+	sw.bg:SetEdgeColor(unpack(C.fieldEdge)) -- light frame so a black swatch is still visible
 	sw:SetHandler("OnMouseUp", function(_, button, upInside)
 		if upInside and button == MOUSE_BUTTON_INDEX_LEFT then
 			local c = sw.color

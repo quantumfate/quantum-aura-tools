@@ -214,15 +214,14 @@ function QAT.display.Create(def)
 		return WM:CreateControl(name .. "_Proc", tlw, CT_TEXTURE)
 	end)
 	proc:SetTexture("EsoUI/Art/ActionBar/abilityHighlightAnimation.dds")
-	proc:SetBlendMode(TEX_BLEND_MODE_ADD)
+	proc:SetBlendMode(TEX_BLEND_MODE_ADD) -- additive: the texture's black is transparent
 	proc:SetDrawLevel(1) -- above icon/bar (0), below the readout labels (5)
-	-- Size the glow to the icon (a touch larger), centred on it; for a bar it covers
-	-- the left icon, otherwise the whole control.
+	-- Fill the icon exactly (or the whole control if there's no icon) so the glow
+	-- matches the icon's dimensions.
 	local procTarget = showIcon and icon or tlw
-	local procSize = (showIcon and h or math.min(w, h)) * 1.35
 	proc:ClearAnchors()
-	proc:SetDimensions(procSize, procSize)
-	proc:SetAnchor(CENTER, procTarget, CENTER, 0, 0)
+	proc:SetAnchor(TOPLEFT, procTarget, TOPLEFT, 0, 0)
+	proc:SetAnchor(BOTTOMRIGHT, procTarget, BOTTOMRIGHT, 0, 0)
 	proc:SetHidden(true)
 
 	local control = {
