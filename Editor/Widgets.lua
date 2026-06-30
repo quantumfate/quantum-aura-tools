@@ -404,9 +404,16 @@ function QAT.widgets.Dropdown(parent, name, width, options, current, onSelect)
 		return val == nil and "" or tostring(val)
 	end
 
-	local list = WM:CreateControl(name .. "_List", dd, CT_CONTROL)
+	-- Parent the open list to the owning top-level window (anchored to the dropdown)
+	-- rather than to the dropdown itself. As a deep child it would be buried beneath
+	-- later-sibling fields and lose the mouse hit even with a high draw tier; hung off
+	-- the top level it reliably draws and captures clicks above every field.
+	local top = (dd.GetOwningWindow and dd:GetOwningWindow()) or dd
+	local list = WM:CreateControl(name .. "_List", top, CT_CONTROL)
 	list:SetAnchor(TOPLEFT, dd, BOTTOMLEFT, 0, 2)
 	list:SetDrawTier(DT_HIGH)
+	list:SetDrawLayer(DL_OVERLAY)
+	list:SetDrawLevel(5)
 	list:SetHidden(true)
 	local listBg = QAT.widgets.Panel(list, name .. "_ListBg", { 0.11, 0.12, 0.15, 1 }, C.fieldEdge)
 	listBg:SetAnchorFill()
