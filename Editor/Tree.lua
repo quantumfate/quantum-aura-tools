@@ -53,6 +53,8 @@ local function addTracker()
 	})
 	table.insert(QAT.sv.trackers, def)
 	QAT.log.editor:Debug("added tracker '%s'", def.id)
+	-- Land on the visible "active" phase, not the empty hidden "idle" one.
+	QAT.editor.selectedPhaseId = "active"
 	selectNode(def.id)
 end
 
