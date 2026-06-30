@@ -32,6 +32,25 @@ QAT.migrations = {
 	[3] = function(sv)
 		QAT.CanonicalizeTree(sv.trackers)
 	end,
+
+	-- schema 4 -> 5: positions switch from centre-relative to a top-left origin.
+	-- Convert each stored offset (control centre from screen centre) to the control's
+	-- top-left corner from the screen's top-left, using the current screen size.
+	[4] = function(sv)
+		local w, h = GuiRoot:GetWidth(), GuiRoot:GetHeight()
+		local function convert(defs)
+			for _, def in ipairs(defs or {}) do
+				if def.kind == "folder" then
+					convert(def.children)
+				elseif def.pos then
+					local p = def.pos
+					p.x = math.floor(w / 2 + (p.x or 0) - (p.width or 220) / 2)
+					p.y = math.floor(h / 2 + (p.y or 0) - (p.height or 30) / 2)
+				end
+			end
+		end
+		convert(sv.trackers)
+	end,
 }
 
 function QAT.RunMigrations(sv)

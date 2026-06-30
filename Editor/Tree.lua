@@ -124,9 +124,8 @@ local function addTracker()
 		name = "New Tracker",
 		abilityIds = {},
 		unit = "player",
-		point = CENTER,
-		x = 0,
-		y = 0,
+		x = math.floor(GuiRoot:GetWidth() / 2 - 110), -- centred (top-left origin, 220x30)
+		y = math.floor(GuiRoot:GetHeight() / 2 - 15),
 		enabled = true,
 	})
 	table.insert(QAT.sv.trackers, def)

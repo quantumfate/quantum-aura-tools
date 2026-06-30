@@ -9,7 +9,7 @@ local WM = GetWindowManager()
 local TABS = { "Appearance", "Behavior", "Conditions" }
 -- The header is two rows (identity/geometry + the phase strip); the tab bar sits a
 -- gap below it.
-local TITLE_H, TAB_H, SPLITTER_W, HEADER_H, PHASESEL_H = 28, 28, 6, 94, 36
+local TITLE_H, TAB_H, SPLITTER_W, HEADER_H, PHASESEL_H = 28, 28, 6, 74, 36
 local HEADER_GAP = 30 -- breathing space between the header and the tab content
 QAT.editor.HEADER_H, QAT.editor.TAB_H, QAT.editor.PHASESEL_H = HEADER_H, TAB_H, PHASESEL_H
 QAT.editor.HEADER_GAP = HEADER_GAP

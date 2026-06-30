@@ -81,9 +81,9 @@ function QAT.display.Create(def)
 	local fontSizes = def.fontSizes
 	local showLeftIcon = (kind == "bar") and def.icon ~= nil and def.icon ~= ""
 
-	-- Trackers anchor from screen centre; pos.x/pos.y are centre-relative offsets, so
-	-- an on-HUD drag round-trips cleanly (centre-to-centre).
-	local point, posX, posY = CENTER, value(def, "x"), value(def, "y")
+	-- Top-left origin: pos.x/pos.y are the control's top-left corner from the screen's
+	-- top-left (x right, y down), matching the editor's Position fields.
+	local point, posX, posY = TOPLEFT, value(def, "x"), value(def, "y")
 	local tlw = reuse(name, function()
 		return WM:CreateTopLevelWindow(name)
 	end)
@@ -96,11 +96,9 @@ function QAT.display.Create(def)
 	tlw:SetMovable(QAT.trackersMovable or false)
 	tlw:SetMouseEnabled(QAT.trackersMovable or false)
 	tlw:SetHandler("OnMoveStop", function(self)
-		-- Convert the dragged window back to an offset from screen centre and persist.
-		local cx, cy = self:GetCenter()
-		local gx, gy = GuiRoot:GetCenter()
+		-- Persist the dragged window's top-left corner (screen top-left origin).
 		if QAT.Editor_OnTrackerDragged and self.qatTrackerId then
-			QAT.Editor_OnTrackerDragged(self.qatTrackerId, zo_round(cx - gx), zo_round(cy - gy))
+			QAT.Editor_OnTrackerDragged(self.qatTrackerId, zo_round(self:GetLeft()), zo_round(self:GetTop()))
 		end
 	end)
 	tlw:ClearAnchors()
@@ -193,10 +191,10 @@ function QAT.display.Create(def)
 		self.tlw:SetHidden(hidden)
 	end
 
-	-- Move the control to a new centre-relative offset (live, without a rebuild).
+	-- Move the control to a new top-left position (live, without a rebuild).
 	function control:Reposition(x, y)
 		self.tlw:ClearAnchors()
-		self.tlw:SetAnchor(CENTER, GuiRoot, CENTER, x, y)
+		self.tlw:SetAnchor(TOPLEFT, GuiRoot, TOPLEFT, x, y)
 	end
 
 	-- Reset every element to its authored base color. SetState calls this first so a

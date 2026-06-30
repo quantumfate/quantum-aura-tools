@@ -17,7 +17,7 @@ QAT.Examples = {
 		kind = "tracker",
 		name = "Major Resolve",
 		unit = "player",
-		pos = { point = CENTER, x = 0, y = -220, width = 220, height = 30 },
+		pos = { x = 850, y = 300, width = 220, height = 30 },
 		initial = "idle",
 		phases = {
 			{
@@ -52,7 +52,7 @@ QAT.Examples = {
 		kind = "tracker",
 		name = "Rapid Maneuver",
 		unit = "player",
-		pos = { point = CENTER, x = 0, y = -185 },
+		pos = { x = 850, y = 340 },
 		initial = "idle",
 		phases = {
 			{
@@ -78,7 +78,7 @@ QAT.Examples = {
 		kind = "tracker",
 		name = "Inner Light",
 		unit = "player",
-		pos = { point = CENTER, x = -120, y = -150, width = 40, height = 40 },
+		pos = { x = 740, y = 400, width = 40, height = 40 },
 		initial = "idle",
 		phases = {
 			{
@@ -105,7 +105,7 @@ QAT.Examples = {
 		kind = "tracker",
 		name = "Huntsman",
 		unit = "player",
-		pos = { point = CENTER, x = 0, y = -150, width = 240, height = 34 },
+		pos = { x = 840, y = 450, width = 240, height = 34 },
 		initial = "ready",
 		phases = {
 			{
@@ -142,7 +142,7 @@ QAT.Examples = {
 		kind = "tracker",
 		name = "Merciless Resolve",
 		unit = "player",
-		pos = { point = CENTER, x = 120, y = -150, width = 44, height = 44 },
+		pos = { x = 1040, y = 450, width = 44, height = 44 },
 		initial = "idle",
 		phases = {
 			{

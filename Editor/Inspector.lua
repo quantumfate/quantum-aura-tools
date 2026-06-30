@@ -46,7 +46,7 @@ local function renderPhaseSel(def)
 		return QAT.widgets.PoolGet(pool, key, factory)
 	end
 
-	local GAP, h = 8, QAT.editor.PHASESEL_H - 12
+	local GAP, h = 8, 20 -- slim chips to fit the thinner phase bar
 	local cap = get("cap", function()
 		return QAT.widgets.Label(sel, "QAT_PhaseSel_Cap", "Phase:")
 	end)
@@ -155,16 +155,23 @@ function QAT.Editor_Inspector_Build(pane)
 	header:SetAnchor(TOPRIGHT, pane, TOPRIGHT, 0, 0)
 	header:SetHeight(QAT.editor.HEADER_H)
 	insp.header = header
-	local ROW1_Y, DIV1_Y, ROW2_Y = 11, 42, 50
+	local ROW1_Y, BAR_Y, BAR_H = 8, 44, 28
 
 	local function curDef()
 		return insp.currentId and findDef(QAT.sv.trackers, insp.currentId)
 	end
 
+	-- Row 1 lives in a fixed-height container so the mixed labels / boxes / buttons
+	-- all centre on one line.
+	local row1 = WM:CreateControl("QAT_Insp_Row1", header, CT_CONTROL)
+	row1:SetAnchor(TOPLEFT, header, TOPLEFT, 12, ROW1_Y)
+	row1:SetAnchor(TOPRIGHT, header, TOPRIGHT, -12, ROW1_Y)
+	row1:SetHeight(24)
+
 	-- Name (left).
-	insp.nameCaption = QAT.widgets.Label(header, "QAT_Insp_NameCaption", "Name")
-	insp.nameCaption:SetAnchor(TOPLEFT, header, TOPLEFT, 12, ROW1_Y + 3)
-	insp.nameBox = QAT.widgets.EditBox(header, "QAT_Insp_NameBox", 150, 22)
+	insp.nameCaption = QAT.widgets.Label(row1, "QAT_Insp_NameCaption", "Name")
+	insp.nameCaption:SetAnchor(LEFT, row1, LEFT, 0, 0)
+	insp.nameBox = QAT.widgets.EditBox(row1, "QAT_Insp_NameBox", 150, 22)
 	insp.nameBox:SetAnchor(LEFT, insp.nameCaption, RIGHT, 8, 0)
 	insp.nameBox.onChange = function(text)
 		local def = curDef()
@@ -187,26 +194,26 @@ function QAT.Editor_Inspector_Build(pane)
 			end
 		end
 	end
-	insp.sizeCaption = QAT.widgets.Label(header, "QAT_Insp_SizeCaption", "Size")
+	insp.sizeCaption = QAT.widgets.Label(row1, "QAT_Insp_SizeCaption", "Size")
 	insp.sizeCaption:SetAnchor(LEFT, insp.nameBox, RIGHT, 18, 0)
-	insp.widthBox = QAT.widgets.EditBox(header, "QAT_Insp_WidthBox", 44, 22)
+	insp.widthBox = QAT.widgets.EditBox(row1, "QAT_Insp_WidthBox", 44, 22)
 	insp.widthBox:SetAnchor(LEFT, insp.sizeCaption, RIGHT, 6, 0)
 	insp.widthBox.onChange = dimChange("width")
-	insp.sizeX = QAT.widgets.Label(header, "QAT_Insp_SizeX", "x")
+	insp.sizeX = QAT.widgets.Label(row1, "QAT_Insp_SizeX", "x")
 	insp.sizeX:SetAnchor(LEFT, insp.widthBox, RIGHT, 4, 0)
-	insp.heightBox = QAT.widgets.EditBox(header, "QAT_Insp_HeightBox", 44, 22)
+	insp.heightBox = QAT.widgets.EditBox(row1, "QAT_Insp_HeightBox", 44, 22)
 	insp.heightBox:SetAnchor(LEFT, insp.sizeX, RIGHT, 4, 0)
 	insp.heightBox.onChange = dimChange("height")
 
-	-- Position (chained after Size). Same "n x n" shape as Size, clamped to the
-	-- current screen (offset from screen centre), and moved live.
+	-- Position (chained after Size). Top-left origin: 0,0 is the screen's top-left
+	-- corner, x grows right and y grows down; clamped to the screen. Moves live.
 	local function posChange(field, box)
 		return function(text)
 			local n = tonumber(text)
 			local def = curDef()
 			if def and n then
-				local half = ((field == "x") and GuiRoot:GetWidth() or GuiRoot:GetHeight()) / 2
-				n = zo_clamp(zo_round(n), -half, half)
+				local maxv = (field == "x") and GuiRoot:GetWidth() or GuiRoot:GetHeight()
+				n = zo_clamp(zo_round(n), 0, maxv)
 				def.pos = def.pos or {}
 				def.pos[field] = n
 				box:SetText(tostring(n)) -- reflect the clamped value
@@ -216,36 +223,36 @@ function QAT.Editor_Inspector_Build(pane)
 			end
 		end
 	end
-	insp.posCaption = QAT.widgets.Label(header, "QAT_Insp_PosCaption", "Position")
+	insp.posCaption = QAT.widgets.Label(row1, "QAT_Insp_PosCaption", "Position")
 	insp.posCaption:SetAnchor(LEFT, insp.heightBox, RIGHT, 18, 0)
-	insp.posXBox = QAT.widgets.EditBox(header, "QAT_Insp_PosXBox", 44, 22)
+	insp.posXBox = QAT.widgets.EditBox(row1, "QAT_Insp_PosXBox", 44, 22)
 	insp.posXBox:SetAnchor(LEFT, insp.posCaption, RIGHT, 6, 0)
 	insp.posXBox.onChange = posChange("x", insp.posXBox)
-	insp.posX = QAT.widgets.Label(header, "QAT_Insp_PosX", "x")
+	insp.posX = QAT.widgets.Label(row1, "QAT_Insp_PosX", "x")
 	insp.posX:SetAnchor(LEFT, insp.posXBox, RIGHT, 4, 0)
-	insp.posYBox = QAT.widgets.EditBox(header, "QAT_Insp_PosYBox", 44, 22)
+	insp.posYBox = QAT.widgets.EditBox(row1, "QAT_Insp_PosYBox", 44, 22)
 	insp.posYBox:SetAnchor(LEFT, insp.posX, RIGHT, 4, 0)
 	insp.posYBox.onChange = posChange("y", insp.posYBox)
 	QAT.widgets.Tooltip(
 		insp.posCaption,
-		"Position as an offset from screen centre (clamped to the screen). Drag the tracker on the HUD for fine control."
+		"Position of the top-left corner from the screen's top-left (x right, y down), clamped to the screen. Drag the tracker on the HUD for fine control."
 	)
 
 	-- Row 1 right group: Center, Pop out, then the Phases/Load mode switch. Chained
 	-- right-to-left so they read Center | Pop out  ...  Phases | Load.
-	insp.loadBtn = QAT.widgets.TextButton(header, "QAT_Insp_LoadBtn", "Load", function()
+	insp.loadBtn = QAT.widgets.TextButton(row1, "QAT_Insp_LoadBtn", "Load", function()
 		QAT.editor.loadMode = true
 		refreshBody()
 	end)
 	insp.loadBtn:SetHeight(22)
 	insp.loadBtn:SetMinWidth(70)
-	insp.loadBtn:SetAnchor(TOPRIGHT, header, TOPRIGHT, -12, ROW1_Y)
+	insp.loadBtn:SetAnchor(RIGHT, row1, RIGHT, 0, 0)
 	QAT.widgets.Tooltip(
 		insp.loadBtn,
 		"When this tracker is active: class, role, combat, zone, boss and set conditions."
 	)
 
-	insp.phasesBtn = QAT.widgets.TextButton(header, "QAT_Insp_PhasesBtn", "Phases", function()
+	insp.phasesBtn = QAT.widgets.TextButton(row1, "QAT_Insp_PhasesBtn", "Phases", function()
 		QAT.editor.loadMode = false
 		refreshBody()
 	end)
@@ -254,43 +261,40 @@ function QAT.Editor_Inspector_Build(pane)
 	insp.phasesBtn:SetAnchor(RIGHT, insp.loadBtn, LEFT, -8, 0)
 	QAT.widgets.Tooltip(insp.phasesBtn, "Edit this tracker's phases — appearance, behavior and runtime conditions.")
 
-	insp.popout = QAT.widgets.TextButton(header, "QAT_Insp_Popout", "Pop out", function()
+	insp.popout = QAT.widgets.TextButton(row1, "QAT_Insp_Popout", "Pop out", function()
 		d(QAT.displayName .. ": detachable inspector is not yet available.")
 	end)
 	insp.popout:SetHeight(22)
 	insp.popout:SetAnchor(RIGHT, insp.phasesBtn, LEFT, -18, 0)
 	QAT.widgets.Tooltip(insp.popout, "Detach this inspector into its own window. (Not yet available.)")
 
-	insp.move = QAT.widgets.TextButton(header, "QAT_Insp_Move", "Center", function()
+	insp.move = QAT.widgets.TextButton(row1, "QAT_Insp_Move", "Center", function()
 		local def = curDef()
 		if def then
-			def.pos = def.pos or {}
-			def.pos.x, def.pos.y = 0, 0
+			local pos = def.pos or {}
+			def.pos = pos
+			pos.x = zo_round(GuiRoot:GetWidth() / 2 - (pos.width or 220) / 2)
+			pos.y = zo_round(GuiRoot:GetHeight() / 2 - (pos.height or 30) / 2)
 			if QAT.Runtime_RepositionTracker then
-				QAT.Runtime_RepositionTracker(def.id, 0, 0)
+				QAT.Runtime_RepositionTracker(def.id, pos.x, pos.y)
 			end
 			QAT.Editor_Inspector_Show(insp.currentId) -- refresh the X/Y boxes
 		end
 	end)
 	insp.move:SetHeight(22)
 	insp.move:SetAnchor(RIGHT, insp.popout, LEFT, -8, 0)
-	QAT.widgets.Tooltip(insp.move, "Recentre this tracker on screen (position 0, 0).")
+	QAT.widgets.Tooltip(insp.move, "Recentre this tracker on screen.")
 
-	-- Divider between row 1 and the phase strip.
-	insp.headerDiv1 = QAT.widgets.Divider(header, "QAT_Insp_HeaderDiv1")
-	insp.headerDiv1:SetAnchor(TOPLEFT, header, TOPLEFT, 0, DIV1_Y)
-	insp.headerDiv1:SetAnchor(TOPRIGHT, header, TOPRIGHT, 0, DIV1_Y)
+	-- Row 2: the phase "config-nav" bar — a distinct, thinner coloured band so it
+	-- reads as navigation rather than part of the identity header.
+	insp.phaseBar = QAT.widgets.Panel(header, "QAT_Insp_PhaseBar", { 0.10, 0.12, 0.18, 1 }, { 0.18, 0.22, 0.30, 1 })
+	insp.phaseBar:SetAnchor(TOPLEFT, header, TOPLEFT, 0, BAR_Y)
+	insp.phaseBar:SetAnchor(TOPRIGHT, header, TOPRIGHT, 0, BAR_Y)
+	insp.phaseBar:SetHeight(BAR_H)
 
-	-- End-of-header divider.
-	local headerDiv = QAT.widgets.Divider(pane, "QAT_Insp_HeaderDiv")
-	headerDiv:SetAnchor(BOTTOMLEFT, header, BOTTOMLEFT, 0, 0)
-	headerDiv:SetAnchor(BOTTOMRIGHT, header, BOTTOMRIGHT, 0, 0)
-
-	-- Row 2: the shared phase-selector strip lives inside the header now.
-	local sel = WM:CreateControl("QAT_Insp_PhaseSel", header, CT_CONTROL)
-	sel:SetAnchor(TOPLEFT, header, TOPLEFT, 12, ROW2_Y)
-	sel:SetAnchor(TOPRIGHT, header, TOPRIGHT, -12, ROW2_Y)
-	sel:SetHeight(QAT.editor.PHASESEL_H)
+	local sel = WM:CreateControl("QAT_Insp_PhaseSel", insp.phaseBar, CT_CONTROL)
+	sel:SetAnchor(TOPLEFT, insp.phaseBar, TOPLEFT, 12, 0)
+	sel:SetAnchor(BOTTOMRIGHT, insp.phaseBar, BOTTOMRIGHT, -12, 0)
 	insp.phaseSel = sel
 	insp.phaseSelPool = QAT.widgets.NewPool()
 
@@ -374,8 +378,9 @@ refreshBody = function()
 				QAT.editor.tabButtons[n]:SetSelected(not showLoad and QAT.editor.activeTab == n)
 			end
 		end
-		-- In Load mode the phase strip and tabs are hidden; the header Phases button
+		-- In Load mode the phase bar and tabs are hidden; the header Phases button
 		-- is the way back.
+		insp.phaseBar:SetHidden(showLoad)
 		insp.phaseSel:SetHidden(showLoad)
 		if QAT.editor.tabBar then
 			QAT.editor.tabBar:SetHidden(showLoad)
