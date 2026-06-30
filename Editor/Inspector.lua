@@ -212,7 +212,9 @@ function QAT.Editor_Inspector_Build(pane)
 			local n = tonumber(text)
 			local def = curDef()
 			if def and n then
-				local maxv = (field == "x") and GuiRoot:GetWidth() or GuiRoot:GetHeight()
+				local pos = def.pos or {}
+				local maxv = (field == "x") and (GuiRoot:GetWidth() - (pos.width or 220))
+					or (GuiRoot:GetHeight() - (pos.height or 30))
 				n = zo_clamp(zo_round(n), 0, maxv)
 				def.pos = def.pos or {}
 				def.pos[field] = n
@@ -461,8 +463,24 @@ function QAT.Editor_Inspector_Show(id)
 	refreshBody()
 end
 
--- Called by Display when a tracker is dragged on the HUD: persist the new offset
--- and refresh the inspector so its position sliders track the drag.
+-- Live update while a tracker is being dragged on the HUD: persist the top-left
+-- position and reflect it in the X/Y boxes, without a full inspector rebuild.
+function QAT.Editor_SetTrackerPosLive(id, x, y)
+	local def = findDef(QAT.sv.trackers, id)
+	if not def then
+		return
+	end
+	def.pos = def.pos or {}
+	def.pos.x, def.pos.y = x, y
+	local insp = QAT.editor.inspector
+	if insp and insp.currentId == id and insp.posXBox then
+		insp.posXBox:SetText(tostring(x))
+		insp.posYBox:SetText(tostring(y))
+	end
+end
+
+-- Called by Display when a drag ends: persist the final top-left position and
+-- refresh the inspector so its X/Y boxes track the drag.
 function QAT.Editor_OnTrackerDragged(id, x, y)
 	local def = findDef(QAT.sv.trackers, id)
 	if not def then
@@ -471,7 +489,7 @@ function QAT.Editor_OnTrackerDragged(id, x, y)
 	def.pos = def.pos or {}
 	def.pos.x, def.pos.y = x, y
 	if QAT.Runtime_RepositionTracker then
-		QAT.Runtime_RepositionTracker(id, x, y) -- re-anchor cleanly (centre + offset)
+		QAT.Runtime_RepositionTracker(id, x, y) -- re-anchor all phases cleanly
 	end
 	local insp = QAT.editor.inspector
 	if insp and insp.currentId == id then

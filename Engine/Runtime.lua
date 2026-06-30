@@ -141,9 +141,7 @@ function QAT.Runtime_SetTrackersMovable(on)
 	QAT.trackersMovable = on and true or false
 	for _, tracker in ipairs(QAT.runtime.list) do
 		for _, phase in pairs(tracker.phases) do
-			local tlw = phase.control.tlw
-			tlw:SetMovable(QAT.trackersMovable)
-			tlw:SetMouseEnabled(QAT.trackersMovable)
+			phase.control.tlw:SetMouseEnabled(QAT.trackersMovable) -- custom drag; see Display
 		end
 	end
 end

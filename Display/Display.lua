@@ -88,17 +88,43 @@ function QAT.display.Create(def)
 		return WM:CreateTopLevelWindow(name)
 	end)
 	tlw:SetDimensions(w, h)
-	-- Trackers are only draggable while the editor is open (QAT.trackersMovable).
-	-- Dragging is committed to the def on move-stop; otherwise they ignore the mouse.
-	tlw:SetClampedToScreen(true)
 	tlw:SetHidden(true)
-	tlw.qatPoint, tlw.qatTrackerId = point, def.trackerId
-	tlw:SetMovable(QAT.trackersMovable or false)
+	tlw.qatTrackerId = def.trackerId
+	-- Custom drag (only while the editor is open, gated by QAT.trackersMovable):
+	-- ESO's SetMovable rewrites the anchor mid-drag, so GetLeft/GetTop read back
+	-- garbage. Instead we drive the anchor ourselves from the mouse, keeping the
+	-- whole control in one coordinate space (UI mouse pos == anchor offset == the
+	-- editor's clamp), so positions are exact top-left pixels.
 	tlw:SetMouseEnabled(QAT.trackersMovable or false)
-	tlw:SetHandler("OnMoveStop", function(self)
-		-- Persist the dragged window's top-left corner (screen top-left origin).
-		if QAT.Editor_OnTrackerDragged and self.qatTrackerId then
-			QAT.Editor_OnTrackerDragged(self.qatTrackerId, zo_round(self:GetLeft()), zo_round(self:GetTop()))
+	tlw:SetHandler("OnMouseDown", function(self, button)
+		if button ~= MOUSE_BUTTON_INDEX_LEFT or not QAT.trackersMovable then
+			return
+		end
+		local mx, my = GetUIMousePosition()
+		self.qatGrabX, self.qatGrabY = mx - self:GetLeft(), my - self:GetTop()
+		self.qatDragging = true
+	end)
+	tlw:SetHandler("OnMouseUp", function(self)
+		if self.qatDragging then
+			self.qatDragging = false
+			-- Finalize from the last computed offset (GetLeft can be a frame stale).
+			if QAT.Editor_OnTrackerDragged and self.qatTrackerId then
+				QAT.Editor_OnTrackerDragged(self.qatTrackerId, self.qatLastX or 0, self.qatLastY or 0)
+			end
+		end
+	end)
+	tlw:SetHandler("OnUpdate", function(self)
+		if not self.qatDragging then
+			return
+		end
+		local mx, my = GetUIMousePosition()
+		local x = zo_clamp(mx - self.qatGrabX, 0, GuiRoot:GetWidth() - self:GetWidth())
+		local y = zo_clamp(my - self.qatGrabY, 0, GuiRoot:GetHeight() - self:GetHeight())
+		self:ClearAnchors()
+		self:SetAnchor(TOPLEFT, GuiRoot, TOPLEFT, x, y)
+		self.qatLastX, self.qatLastY = zo_round(x), zo_round(y)
+		if QAT.Editor_SetTrackerPosLive and self.qatTrackerId then
+			QAT.Editor_SetTrackerPosLive(self.qatTrackerId, self.qatLastX, self.qatLastY)
 		end
 	end)
 	tlw:ClearAnchors()
