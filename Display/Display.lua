@@ -64,6 +64,12 @@ function QAT.display.Create(def)
 	local kind = def.display or "bar"
 	local name = "QAT_Tracker_" .. tostring(def.id)
 	local w, h = value(def, "width"), value(def, "height")
+	-- An icon is square: it uses the height for both dimensions so it does not
+	-- inherit the bar's width (phases each own their control, so an icon phase and a
+	-- bar phase in the same tracker can be sized independently).
+	if kind == "icon" then
+		w = h
+	end
 	local colors = def.colors
 	local font = value(def, "font")
 	local showLeftIcon = (kind == "bar") and def.icon ~= nil and def.icon ~= ""

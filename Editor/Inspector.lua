@@ -62,6 +62,29 @@ function QAT.Editor_Inspector_Build(pane)
 	insp.popout:SetDimensions(70, 22)
 	insp.popout:SetAnchor(LEFT, insp.move, RIGHT, 10, 0)
 
+	-- Tracker dimensions (W x H). Bars use both; icons are square and use H only.
+	local function dimChange(field)
+		return function(text)
+			local def = insp.currentId and findDef(QAT.sv.trackers, insp.currentId)
+			local n = tonumber(text)
+			if def and n and n > 0 then
+				def.pos = def.pos or {}
+				def.pos[field] = n
+				QAT.widgets.NotifyTrackerChanged(def.id)
+			end
+		end
+	end
+	insp.sizeCaption = QAT.widgets.Label(header, "QAT_Insp_SizeCaption", "Size")
+	insp.sizeCaption:SetAnchor(LEFT, insp.popout, RIGHT, 16, 0)
+	insp.widthBox = QAT.widgets.EditBox(header, "QAT_Insp_WidthBox", 46, 22)
+	insp.widthBox:SetAnchor(LEFT, insp.sizeCaption, RIGHT, 6, 0)
+	insp.widthBox.onChange = dimChange("width")
+	insp.sizeX = QAT.widgets.Label(header, "QAT_Insp_SizeX", "x")
+	insp.sizeX:SetAnchor(LEFT, insp.widthBox, RIGHT, 4, 0)
+	insp.heightBox = QAT.widgets.EditBox(header, "QAT_Insp_HeightBox", 46, 22)
+	insp.heightBox:SetAnchor(LEFT, insp.sizeX, RIGHT, 4, 0)
+	insp.heightBox.onChange = dimChange("height")
+
 	-- Tab body host (below the tab bar).
 	local body = QAT.widgets.Panel(pane, "QAT_Insp_Body", { 0.06, 0.07, 0.09, 1 })
 	body:SetAnchor(TOPLEFT, pane, TOPLEFT, 0, QAT.editor.HEADER_H + QAT.editor.TAB_H)
@@ -134,6 +157,12 @@ function QAT.Editor_Inspector_Show(id)
 	insp.nameBox:SetHidden(not def)
 	insp.move:SetHidden(not def)
 	insp.popout:SetHidden(not def)
+	-- Size fields apply to a tracker's drawn dimensions; folders have none.
+	local showSize = def ~= nil and def.kind ~= "folder"
+	insp.sizeCaption:SetHidden(not showSize)
+	insp.widthBox:SetHidden(not showSize)
+	insp.sizeX:SetHidden(not showSize)
+	insp.heightBox:SetHidden(not showSize)
 	if QAT.editor.tabBar then
 		QAT.editor.tabBar:SetHidden(not def)
 	end
@@ -144,6 +173,11 @@ function QAT.Editor_Inspector_Show(id)
 
 	if def then
 		insp.nameBox:SetText(def.name or def.id)
+		if def.kind ~= "folder" then
+			local pos = def.pos or {}
+			insp.widthBox:SetText(tostring(pos.width or 220))
+			insp.heightBox:SetText(tostring(pos.height or 30))
+		end
 	end
 	refreshBody()
 end

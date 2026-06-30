@@ -22,6 +22,45 @@ local DURATION_OPTS = {
 	{ label = "Fixed seconds", value = "fixed" },
 	{ label = "None (static)", value = "none" },
 }
+-- A transition's trigger, flattened for the dropdown (effect result is folded in).
+local TRIGGER_OPTS = {
+	{ label = "Effect gained", value = "gained" },
+	{ label = "Effect faded", value = "faded" },
+	{ label = "Stacks", value = "stacks" },
+	{ label = "Time left", value = "remaining" },
+	{ label = "Timer ends", value = "expire" },
+}
+local OP_OPTS = {
+	{ label = "<", value = "<" },
+	{ label = "<=", value = "<=" },
+	{ label = "==", value = "==" },
+	{ label = "~=", value = "~=" },
+	{ label = ">=", value = ">=" },
+	{ label = ">", value = ">" },
+}
+
+-- The flattened trigger value for an existing `when`.
+local function triggerValue(when)
+	if when.kind == "effect" then
+		return when.result or "gained"
+	end
+	return when.kind
+end
+
+-- Reshape a `when` in place for a newly chosen trigger value, keeping fields valid.
+local function setTriggerKind(when, v)
+	if v == "gained" or v == "faded" then
+		when.kind = "effect"
+		when.result = v
+		when.abilityIds = when.abilityIds or {}
+	elseif v == "stacks" or v == "remaining" then
+		when.kind = v
+		when.op = when.op or ">="
+		when.value = when.value or 0
+	else
+		when.kind = "expire"
+	end
+end
 
 local function idsToText(ids)
 	return table.concat(ids or {}, ", ")
@@ -44,6 +83,15 @@ local function selectedPhase(def)
 	return def.phases[1]
 end
 
+-- Target options for a transition: every phase, plus "(hidden)" = nil.
+local function phaseOptions(def)
+	local opts = { { label = "(hidden)", value = nil } }
+	for _, p in ipairs(def.phases) do
+		table.insert(opts, { label = p.id, value = p.id })
+	end
+	return opts
+end
+
 local function commit(def)
 	QAT.CanonicalizeDef(def)
 	QAT.widgets.NotifyTrackerChanged(def.id)
@@ -56,18 +104,6 @@ local function flowText(def)
 		table.insert(parts, marker)
 	end
 	return "Phases:  " .. table.concat(parts, "    ")
-end
-
--- One human-readable line for a transition trigger.
-local function whenText(when)
-	if when.kind == "effect" then
-		return when.result .. " " .. idsToText(when.abilityIds) .. " on " .. (when.unit or "player")
-	elseif when.kind == "stacks" then
-		return "stacks " .. (when.op or ">=") .. " " .. tostring(when.value or 0)
-	elseif when.kind == "remaining" then
-		return "remaining " .. (when.op or "<=") .. " " .. tostring(when.value or 0)
-	end
-	return "timer ends"
 end
 
 local function render(container, def)
@@ -383,34 +419,127 @@ local function render(container, def)
 		y = y + ROW_H + GAP
 	end
 
-	-- Read-only transitions summary (editor lands in Stage B).
+	-- Transitions editor: each row is "IF <trigger> -> <target phase>".
 	fieldLabel(
 		"lTrans",
 		"Transitions",
 		y,
-		"Outgoing transitions of this phase (read-only here; the editor arrives with the Behavior tab)."
+		"When does this phase hand off, and to which phase. Effect = a buff gained/faded; Stacks/Time left = a live threshold; Timer ends = the duration ran out."
 	)
 	y = y + ROW_H
-	if #phase.transitions == 0 then
-		local none = get("trNone", function()
-			return QAT.widgets.Label(container, "QAT_Ph_TrNone", "")
+
+	for i, tr in ipairs(phase.transitions) do
+		local idx = i
+		local when = tr.when
+		local x = PAD + 12
+
+		local trigDD = get("trTrig" .. i, function()
+			return QAT.widgets.Dropdown(container, "QAT_Ph_TrTrig" .. i, 120, TRIGGER_OPTS, "gained")
 		end)
-		none:SetText("  (none)")
-		none:ClearAnchors()
-		none:SetAnchor(TOPLEFT, container, TOPLEFT, PAD + 12, y + 3)
-		y = y + ROW_H
-	else
-		for i, tr in ipairs(phase.transitions) do
-			local row = get("tr" .. i, function()
-				return QAT.widgets.Label(container, "QAT_Ph_Tr" .. i, "")
-			end)
-			row:SetText("  IF " .. whenText(tr.when) .. "  ->  " .. tostring(tr.to or "(hidden)"))
-			row:ClearAnchors()
-			row:SetAnchor(TOPLEFT, container, TOPLEFT, PAD + 12, y + 3)
-			y = y + ROW_H
+		trigDD.onSelect = function(v)
+			setTriggerKind(when, v)
+			commit(def)
+			render(container, def)
 		end
+		trigDD:SetValue(triggerValue(when))
+		trigDD:ClearAnchors()
+		trigDD:SetAnchor(TOPLEFT, container, TOPLEFT, x, y)
+		x = x + 126
+
+		local idsBox = get("trIds" .. i, function()
+			return QAT.widgets.EditBox(container, "QAT_Ph_TrIds" .. i, 150, ROW_H)
+		end)
+		local opDD = get("trOp" .. i, function()
+			return QAT.widgets.Dropdown(container, "QAT_Ph_TrOp" .. i, 54, OP_OPTS, ">=")
+		end)
+		local valBox = get("trVal" .. i, function()
+			return QAT.widgets.EditBox(container, "QAT_Ph_TrVal" .. i, 56, ROW_H)
+		end)
+		if when.kind == "effect" then
+			opDD:SetHidden(true)
+			valBox:SetHidden(true)
+			idsBox:SetHidden(false)
+			idsBox.onChange = function(text)
+				when.abilityIds = textToIds(text)
+				commit(def)
+			end
+			idsBox:SetText(idsToText(when.abilityIds))
+			idsBox:ClearAnchors()
+			idsBox:SetAnchor(TOPLEFT, container, TOPLEFT, x, y)
+			x = x + 156
+		elseif when.kind == "stacks" or when.kind == "remaining" then
+			idsBox:SetHidden(true)
+			opDD:SetHidden(false)
+			opDD.onSelect = function(v)
+				when.op = v
+				commit(def)
+			end
+			opDD:SetValue(when.op or ">=")
+			opDD:ClearAnchors()
+			opDD:SetAnchor(TOPLEFT, container, TOPLEFT, x, y)
+			valBox:SetHidden(false)
+			valBox.onChange = function(text)
+				when.value = tonumber(text) or 0
+				commit(def)
+			end
+			valBox:SetText(tostring(when.value or 0))
+			valBox:ClearAnchors()
+			valBox:SetAnchor(TOPLEFT, container, TOPLEFT, x + 60, y)
+			x = x + 122
+		else -- expire: no parameter
+			idsBox:SetHidden(true)
+			opDD:SetHidden(true)
+			valBox:SetHidden(true)
+		end
+
+		local arrow = get("trArrow" .. i, function()
+			return QAT.widgets.Label(container, "QAT_Ph_TrArrow" .. i, "->")
+		end)
+		arrow:SetText("->")
+		arrow:ClearAnchors()
+		arrow:SetAnchor(TOPLEFT, container, TOPLEFT, x, y + 3)
+		x = x + 24
+
+		local toDD = get("trTo" .. i, function()
+			return QAT.widgets.Dropdown(container, "QAT_Ph_TrTo" .. i, 110, {}, nil)
+		end)
+		toDD:SetOptions(phaseOptions(def))
+		toDD.onSelect = function(v)
+			tr.to = v
+			commit(def)
+		end
+		toDD:SetValue(tr.to)
+		toDD:ClearAnchors()
+		toDD:SetAnchor(TOPLEFT, container, TOPLEFT, x, y)
+		x = x + 116
+
+		local del = get("trDel" .. i, function()
+			return QAT.widgets.TextButton(container, "QAT_Ph_TrDel" .. i, "X", nil)
+		end)
+		del:SetDimensions(ROW_H, ROW_H)
+		del:ClearAnchors()
+		del:SetAnchor(TOPLEFT, container, TOPLEFT, x, y)
+		del.onClick = function()
+			table.remove(phase.transitions, idx)
+			commit(def)
+			render(container, def)
+		end
+
+		y = y + ROW_H + GAP
 	end
-	y = y + GAP
+
+	local addTrans = get("addTrans", function()
+		return QAT.widgets.TextButton(container, "QAT_Ph_AddTrans", "+ Transition", nil)
+	end)
+	addTrans:SetDimensions(110, ROW_H)
+	addTrans:ClearAnchors()
+	addTrans:SetAnchor(TOPLEFT, container, TOPLEFT, PAD + 12, y)
+	addTrans.onClick = function()
+		table.insert(phase.transitions, { when = { kind = "effect", result = "gained", abilityIds = {} }, to = nil })
+		commit(def)
+		render(container, def)
+	end
+	y = y + ROW_H + GAP
 
 	-- Set-initial / delete phase.
 	local initBtn = get("initBtn", function()
