@@ -147,36 +147,24 @@ function QAT.Editor_Inspector_Build(pane)
 	local insp = QAT.editor.inspector or {}
 	QAT.editor.inspector = insp
 
-	-- ===== Header (tracker scope) =====
-	-- Row 1:  Name [____]   Size [w] x [h]   X [slider]   Y [slider]
-	-- (divider) -- gap -- Row 2:  Center  Pop out ............ Phases  Load  (end divider)
-	local header = QAT.widgets.Panel(pane, "QAT_Insp_Header", { 0.10, 0.11, 0.14, 1 })
+	-- ===== Header (tracker scope), two rows =====
+	-- Row 1:  Name | Size | Position (left)            Center  Pop out   Phases  Load (right)
+	-- Row 2:  the phase strip (Phase: chips +Phase ............ Set initial  Delete phase)
+	local header = QAT.widgets.Panel(pane, "QAT_Insp_Header", { 0.12, 0.13, 0.17, 1 })
 	header:SetAnchor(TOPLEFT, pane, TOPLEFT, 0, 0)
 	header:SetAnchor(TOPRIGHT, pane, TOPRIGHT, 0, 0)
 	header:SetHeight(QAT.editor.HEADER_H)
 	insp.header = header
-	local ROW1_Y, DIV1_Y, ROW2_Y = 12, 44, 70
+	local ROW1_Y, DIV1_Y, ROW2_Y = 11, 42, 50
 
 	local function curDef()
 		return insp.currentId and findDef(QAT.sv.trackers, insp.currentId)
 	end
-	-- Live position update from the sliders / Center: write the def and move the live
-	-- controls, without a full inspector refresh (so sliders don't reset mid-drag).
-	local function setPos(field, v)
-		local def = curDef()
-		if def then
-			def.pos = def.pos or {}
-			def.pos[field] = v
-			if QAT.Runtime_RepositionTracker then
-				QAT.Runtime_RepositionTracker(def.id, def.pos.x or 0, def.pos.y or 0)
-			end
-		end
-	end
 
-	-- Name.
+	-- Name (left).
 	insp.nameCaption = QAT.widgets.Label(header, "QAT_Insp_NameCaption", "Name")
 	insp.nameCaption:SetAnchor(TOPLEFT, header, TOPLEFT, 12, ROW1_Y + 3)
-	insp.nameBox = QAT.widgets.EditBox(header, "QAT_Insp_NameBox", 170, 22)
+	insp.nameBox = QAT.widgets.EditBox(header, "QAT_Insp_NameBox", 150, 22)
 	insp.nameBox:SetAnchor(LEFT, insp.nameCaption, RIGHT, 8, 0)
 	insp.nameBox.onChange = function(text)
 		local def = curDef()
@@ -187,8 +175,7 @@ function QAT.Editor_Inspector_Build(pane)
 		end
 	end
 
-	-- Size + position, right-aligned and built right-to-left so they read
-	-- "Size w x h   X [slider]   Y [slider]".
+	-- Size (chained after Name). Whole-number pixels.
 	local function dimChange(field)
 		return function(text)
 			local n = tonumber(text)
@@ -200,63 +187,59 @@ function QAT.Editor_Inspector_Build(pane)
 			end
 		end
 	end
-	insp.posYSlider = QAT.widgets.Slider(header, "QAT_Insp_PosY", 96, function(v)
-		setPos("y", zo_round(v))
-	end)
-	insp.posYSlider:SetAnchor(TOPRIGHT, header, TOPRIGHT, -12, ROW1_Y + 2)
-	insp.posYCap = QAT.widgets.Label(header, "QAT_Insp_PosYCap", "Y")
-	insp.posYCap:SetAnchor(RIGHT, insp.posYSlider, LEFT, -6, 0)
-	insp.posXSlider = QAT.widgets.Slider(header, "QAT_Insp_PosX", 96, function(v)
-		setPos("x", zo_round(v))
-	end)
-	insp.posXSlider:SetAnchor(RIGHT, insp.posYCap, LEFT, -14, 0)
-	insp.posXCap = QAT.widgets.Label(header, "QAT_Insp_PosXCap", "X")
-	insp.posXCap:SetAnchor(RIGHT, insp.posXSlider, LEFT, -6, 0)
-	insp.heightBox = QAT.widgets.EditBox(header, "QAT_Insp_HeightBox", 46, 22)
-	insp.heightBox:SetAnchor(RIGHT, insp.posXCap, LEFT, -16, 0)
-	insp.heightBox.onChange = dimChange("height")
-	insp.sizeX = QAT.widgets.Label(header, "QAT_Insp_SizeX", "x")
-	insp.sizeX:SetAnchor(RIGHT, insp.heightBox, LEFT, -5, 0)
-	insp.widthBox = QAT.widgets.EditBox(header, "QAT_Insp_WidthBox", 46, 22)
-	insp.widthBox:SetAnchor(RIGHT, insp.sizeX, LEFT, -5, 0)
-	insp.widthBox.onChange = dimChange("width")
 	insp.sizeCaption = QAT.widgets.Label(header, "QAT_Insp_SizeCaption", "Size")
-	insp.sizeCaption:SetAnchor(RIGHT, insp.widthBox, LEFT, -6, 0)
+	insp.sizeCaption:SetAnchor(LEFT, insp.nameBox, RIGHT, 18, 0)
+	insp.widthBox = QAT.widgets.EditBox(header, "QAT_Insp_WidthBox", 44, 22)
+	insp.widthBox:SetAnchor(LEFT, insp.sizeCaption, RIGHT, 6, 0)
+	insp.widthBox.onChange = dimChange("width")
+	insp.sizeX = QAT.widgets.Label(header, "QAT_Insp_SizeX", "x")
+	insp.sizeX:SetAnchor(LEFT, insp.widthBox, RIGHT, 4, 0)
+	insp.heightBox = QAT.widgets.EditBox(header, "QAT_Insp_HeightBox", 44, 22)
+	insp.heightBox:SetAnchor(LEFT, insp.sizeX, RIGHT, 4, 0)
+	insp.heightBox.onChange = dimChange("height")
+
+	-- Position (chained after Size). Same "n x n" shape as Size, clamped to the
+	-- current screen (offset from screen centre), and moved live.
+	local function posChange(field, box)
+		return function(text)
+			local n = tonumber(text)
+			local def = curDef()
+			if def and n then
+				local half = ((field == "x") and GuiRoot:GetWidth() or GuiRoot:GetHeight()) / 2
+				n = zo_clamp(zo_round(n), -half, half)
+				def.pos = def.pos or {}
+				def.pos[field] = n
+				box:SetText(tostring(n)) -- reflect the clamped value
+				if QAT.Runtime_RepositionTracker then
+					QAT.Runtime_RepositionTracker(def.id, def.pos.x or 0, def.pos.y or 0)
+				end
+			end
+		end
+	end
+	insp.posCaption = QAT.widgets.Label(header, "QAT_Insp_PosCaption", "Position")
+	insp.posCaption:SetAnchor(LEFT, insp.heightBox, RIGHT, 18, 0)
+	insp.posXBox = QAT.widgets.EditBox(header, "QAT_Insp_PosXBox", 44, 22)
+	insp.posXBox:SetAnchor(LEFT, insp.posCaption, RIGHT, 6, 0)
+	insp.posXBox.onChange = posChange("x", insp.posXBox)
+	insp.posX = QAT.widgets.Label(header, "QAT_Insp_PosX", "x")
+	insp.posX:SetAnchor(LEFT, insp.posXBox, RIGHT, 4, 0)
+	insp.posYBox = QAT.widgets.EditBox(header, "QAT_Insp_PosYBox", 44, 22)
+	insp.posYBox:SetAnchor(LEFT, insp.posX, RIGHT, 4, 0)
+	insp.posYBox.onChange = posChange("y", insp.posYBox)
 	QAT.widgets.Tooltip(
-		insp.posXCap,
-		"Horizontal position (offset from screen centre). Drag the tracker on the HUD for fine control."
+		insp.posCaption,
+		"Position as an offset from screen centre (clamped to the screen). Drag the tracker on the HUD for fine control."
 	)
-	QAT.widgets.Tooltip(insp.posYCap, "Vertical position (offset from screen centre).")
 
-	-- Divider between row 1 and the action row.
-	insp.headerDiv1 = QAT.widgets.Divider(header, "QAT_Insp_HeaderDiv1")
-	insp.headerDiv1:SetAnchor(TOPLEFT, header, TOPLEFT, 0, DIV1_Y)
-	insp.headerDiv1:SetAnchor(TOPRIGHT, header, TOPRIGHT, 0, DIV1_Y)
-
-	-- Row 2: actions (left) and the Phases/Load mode switch (right).
-	insp.move = QAT.widgets.TextButton(header, "QAT_Insp_Move", "Center", function()
-		setPos("x", 0)
-		setPos("y", 0)
-		refreshBody() -- update the sliders
-	end)
-	insp.move:SetHeight(24)
-	insp.move:SetAnchor(TOPLEFT, header, TOPLEFT, 12, ROW2_Y)
-	QAT.widgets.Tooltip(insp.move, "Recentre this tracker on screen (position 0, 0).")
-
-	insp.popout = QAT.widgets.TextButton(header, "QAT_Insp_Popout", "Pop out", function()
-		d(QAT.displayName .. ": detachable inspector is not yet available.")
-	end)
-	insp.popout:SetHeight(24)
-	insp.popout:SetAnchor(LEFT, insp.move, RIGHT, 8, 0)
-	QAT.widgets.Tooltip(insp.popout, "Detach this inspector into its own window. (Not yet available.)")
-
+	-- Row 1 right group: Center, Pop out, then the Phases/Load mode switch. Chained
+	-- right-to-left so they read Center | Pop out  ...  Phases | Load.
 	insp.loadBtn = QAT.widgets.TextButton(header, "QAT_Insp_LoadBtn", "Load", function()
 		QAT.editor.loadMode = true
 		refreshBody()
 	end)
-	insp.loadBtn:SetHeight(24)
-	insp.loadBtn:SetMinWidth(76)
-	insp.loadBtn:SetAnchor(TOPRIGHT, header, TOPRIGHT, -12, ROW2_Y)
+	insp.loadBtn:SetHeight(22)
+	insp.loadBtn:SetMinWidth(70)
+	insp.loadBtn:SetAnchor(TOPRIGHT, header, TOPRIGHT, -12, ROW1_Y)
 	QAT.widgets.Tooltip(
 		insp.loadBtn,
 		"When this tracker is active: class, role, combat, zone, boss and set conditions."
@@ -266,27 +249,53 @@ function QAT.Editor_Inspector_Build(pane)
 		QAT.editor.loadMode = false
 		refreshBody()
 	end)
-	insp.phasesBtn:SetHeight(24)
-	insp.phasesBtn:SetMinWidth(76)
+	insp.phasesBtn:SetHeight(22)
+	insp.phasesBtn:SetMinWidth(70)
 	insp.phasesBtn:SetAnchor(RIGHT, insp.loadBtn, LEFT, -8, 0)
 	QAT.widgets.Tooltip(insp.phasesBtn, "Edit this tracker's phases — appearance, behavior and runtime conditions.")
+
+	insp.popout = QAT.widgets.TextButton(header, "QAT_Insp_Popout", "Pop out", function()
+		d(QAT.displayName .. ": detachable inspector is not yet available.")
+	end)
+	insp.popout:SetHeight(22)
+	insp.popout:SetAnchor(RIGHT, insp.phasesBtn, LEFT, -18, 0)
+	QAT.widgets.Tooltip(insp.popout, "Detach this inspector into its own window. (Not yet available.)")
+
+	insp.move = QAT.widgets.TextButton(header, "QAT_Insp_Move", "Center", function()
+		local def = curDef()
+		if def then
+			def.pos = def.pos or {}
+			def.pos.x, def.pos.y = 0, 0
+			if QAT.Runtime_RepositionTracker then
+				QAT.Runtime_RepositionTracker(def.id, 0, 0)
+			end
+			QAT.Editor_Inspector_Show(insp.currentId) -- refresh the X/Y boxes
+		end
+	end)
+	insp.move:SetHeight(22)
+	insp.move:SetAnchor(RIGHT, insp.popout, LEFT, -8, 0)
+	QAT.widgets.Tooltip(insp.move, "Recentre this tracker on screen (position 0, 0).")
+
+	-- Divider between row 1 and the phase strip.
+	insp.headerDiv1 = QAT.widgets.Divider(header, "QAT_Insp_HeaderDiv1")
+	insp.headerDiv1:SetAnchor(TOPLEFT, header, TOPLEFT, 0, DIV1_Y)
+	insp.headerDiv1:SetAnchor(TOPRIGHT, header, TOPRIGHT, 0, DIV1_Y)
 
 	-- End-of-header divider.
 	local headerDiv = QAT.widgets.Divider(pane, "QAT_Insp_HeaderDiv")
 	headerDiv:SetAnchor(BOTTOMLEFT, header, BOTTOMLEFT, 0, 0)
 	headerDiv:SetAnchor(BOTTOMRIGHT, header, BOTTOMRIGHT, 0, 0)
 
-	-- Shared phase-selector strip, set below the header by the content gap.
-	local selTop = QAT.editor.HEADER_H + QAT.editor.HEADER_GAP
-	local sel = WM:CreateControl("QAT_Insp_PhaseSel", pane, CT_CONTROL)
-	sel:SetAnchor(TOPLEFT, pane, TOPLEFT, 12, selTop)
-	sel:SetAnchor(TOPRIGHT, pane, TOPRIGHT, -12, selTop)
+	-- Row 2: the shared phase-selector strip lives inside the header now.
+	local sel = WM:CreateControl("QAT_Insp_PhaseSel", header, CT_CONTROL)
+	sel:SetAnchor(TOPLEFT, header, TOPLEFT, 12, ROW2_Y)
+	sel:SetAnchor(TOPRIGHT, header, TOPRIGHT, -12, ROW2_Y)
 	sel:SetHeight(QAT.editor.PHASESEL_H)
 	insp.phaseSel = sel
 	insp.phaseSelPool = QAT.widgets.NewPool()
 
-	-- Body host (below the tab bar).
-	local bodyTop = QAT.editor.HEADER_H + QAT.editor.HEADER_GAP + QAT.editor.PHASESEL_H + QAT.editor.TAB_H
+	-- Body host (below the tab bar; the phase strip is in the header now).
+	local bodyTop = QAT.editor.HEADER_H + QAT.editor.HEADER_GAP + QAT.editor.TAB_H
 	local body = QAT.widgets.Panel(pane, "QAT_Insp_Body", { 0.06, 0.07, 0.09, 1 })
 	body:SetAnchor(TOPLEFT, pane, TOPLEFT, 0, bodyTop)
 	body:SetAnchor(BOTTOMRIGHT, pane, BOTTOMRIGHT, 0, 0)
@@ -426,10 +435,10 @@ function QAT.Editor_Inspector_Show(id)
 		insp.widthBox,
 		insp.sizeX,
 		insp.heightBox,
-		insp.posXCap,
-		insp.posXSlider,
-		insp.posYCap,
-		insp.posYSlider,
+		insp.posCaption,
+		insp.posXBox,
+		insp.posX,
+		insp.posYBox,
 	}) do
 		c:SetHidden(not showTracker)
 	end
@@ -440,12 +449,8 @@ function QAT.Editor_Inspector_Show(id)
 			local pos = def.pos or {}
 			insp.widthBox:SetText(tostring(pos.width or 220))
 			insp.heightBox:SetText(tostring(pos.height or 30))
-			-- Slider range spans the screen, centred on 0.
-			local halfW, halfH = GuiRoot:GetWidth() / 2, GuiRoot:GetHeight() / 2
-			insp.posXSlider:SetMinMax(-halfW, halfW)
-			insp.posYSlider:SetMinMax(-halfH, halfH)
-			insp.posXSlider:SetValue(pos.x or 0)
-			insp.posYSlider:SetValue(pos.y or 0)
+			insp.posXBox:SetText(tostring(pos.x or 0))
+			insp.posYBox:SetText(tostring(pos.y or 0))
 		end
 	end
 	refreshBody()

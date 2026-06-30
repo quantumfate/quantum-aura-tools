@@ -7,8 +7,10 @@ QAT.editor = QAT.editor or {}
 local WM = GetWindowManager()
 -- Per-phase tabs (Load is a tracker-wide panel reached from the header, not a tab).
 local TABS = { "Appearance", "Behavior", "Conditions" }
-local TITLE_H, TAB_H, SPLITTER_W, HEADER_H, PHASESEL_H = 28, 28, 6, 100, 36
-local HEADER_GAP = 30 -- breathing space between the header and the phase config
+-- The header is two rows (identity/geometry + the phase strip); the tab bar sits a
+-- gap below it.
+local TITLE_H, TAB_H, SPLITTER_W, HEADER_H, PHASESEL_H = 28, 28, 6, 94, 36
+local HEADER_GAP = 30 -- breathing space between the header and the tab content
 QAT.editor.HEADER_H, QAT.editor.TAB_H, QAT.editor.PHASESEL_H = HEADER_H, TAB_H, PHASESEL_H
 QAT.editor.HEADER_GAP = HEADER_GAP
 local MIN_TREE, MIN_INSPECTOR = 300, 320
@@ -179,8 +181,8 @@ function QAT.Editor_Init()
 
 	QAT.editor.inspectorPane = QAT.widgets.Panel(f, "QAT_Editor_InspectorPane", { 0.06, 0.07, 0.09, 1 })
 
-	-- The tab bar sits below the header, the content gap, and the phase-selector strip.
-	local tabY = HEADER_H + HEADER_GAP + PHASESEL_H
+	-- The tab bar sits a gap below the header (the phase strip now lives in the header).
+	local tabY = HEADER_H + HEADER_GAP
 	local tabBar = WM:CreateControl("QAT_Editor_TabBar", QAT.editor.inspectorPane, CT_CONTROL)
 	tabBar:SetAnchor(TOPLEFT, QAT.editor.inspectorPane, TOPLEFT, 12, tabY)
 	tabBar:SetAnchor(TOPRIGHT, QAT.editor.inspectorPane, TOPRIGHT, -12, tabY)

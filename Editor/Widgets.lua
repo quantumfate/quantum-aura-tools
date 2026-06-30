@@ -8,11 +8,11 @@ local FONT = "$(MEDIUM_FONT)|18|soft-shadow-thin"
 -- Shared palette so inputs, dropdowns and buttons read as one toolkit and stand
 -- apart from the panel background.
 local C = {
-	fieldBg = { 0.09, 0.10, 0.13, 1 }, -- text inputs (inset, darker)
-	fieldEdge = { 0.30, 0.34, 0.42, 1 },
-	ddBg = { 0.15, 0.16, 0.20, 1 }, -- dropdowns (slightly raised)
-	btnBg = { 0.17, 0.19, 0.24, 1 },
-	btnEdge = { 0.34, 0.38, 0.47, 1 },
+	fieldBg = { 0.03, 0.04, 0.06, 1 }, -- text inputs: near-black inset so they pop
+	fieldEdge = { 0.36, 0.42, 0.52, 1 }, -- brighter border for clear separation
+	ddBg = { 0.11, 0.13, 0.17, 1 }, -- dropdowns: a touch raised vs inputs
+	btnBg = { 0.18, 0.20, 0.26, 1 },
+	btnEdge = { 0.38, 0.43, 0.53, 1 },
 	selBg = { 0.20, 0.34, 0.52, 1 }, -- active tab / chip / selected
 }
 local DROPDOWN_ARROW = "EsoUI/Art/Buttons/scrollbox_downArrow_up.dds"
