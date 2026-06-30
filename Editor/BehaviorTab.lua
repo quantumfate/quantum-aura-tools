@@ -25,6 +25,12 @@ local OP_OPTS = {
 	{ label = ">=", value = ">=" },
 	{ label = ">", value = ">" },
 }
+-- The unit each effect is watched on. Per-effect, so one phase can watch self for
+-- one trigger and the target for another.
+local UNIT_OPTS = {
+	{ label = "Self", value = "player" },
+	{ label = "Target", value = "reticleover" },
+}
 
 local function triggerValue(when)
 	if when.kind == "effect" then
@@ -144,9 +150,24 @@ local function render(container, def)
 		secsBox:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
 		y = y + ROW_H + GAP
 	elseif phase.duration.type == "effect" then
-		fieldLabel("lDurIds", "Effect ids", y, "Ability id(s) this phase follows. Comma-separated.")
+		fieldLabel(
+			"lDurIds",
+			"Effect",
+			y,
+			"The unit this effect is on, and the ability id(s) to follow (comma-separated)."
+		)
+		local durUnitDD = get("durUnit", function()
+			return QAT.widgets.Dropdown(container, "QAT_Beh_DurUnit", 90, UNIT_OPTS, "player")
+		end)
+		durUnitDD.onSelect = function(v)
+			phase.duration.unit = v
+			commit(def)
+		end
+		durUnitDD:SetValue(phase.duration.unit or def.unit or "player")
+		durUnitDD:ClearAnchors()
+		durUnitDD:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
 		local durIdBox = get("durIdBox", function()
-			return QAT.widgets.EditBox(container, "QAT_Beh_DurIds", 220, ROW_H)
+			return QAT.widgets.EditBox(container, "QAT_Beh_DurIds", 180, ROW_H)
 		end)
 		durIdBox.onChange = function(text)
 			phase.duration.abilityIds = textToIds(text)
@@ -154,7 +175,7 @@ local function render(container, def)
 		end
 		durIdBox:SetText(idsToText(phase.duration.abilityIds))
 		durIdBox:ClearAnchors()
-		durIdBox:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
+		durIdBox:SetAnchor(TOPLEFT, container, TOPLEFT, LX + 96, y)
 		y = y + ROW_H + GAP
 	end
 
@@ -203,8 +224,11 @@ local function render(container, def)
 		trigDD:SetAnchor(TOPLEFT, container, TOPLEFT, x, y)
 		x = x + 126
 
+		local unitDD = get("trUnit" .. i, function()
+			return QAT.widgets.Dropdown(container, "QAT_Beh_TrUnit" .. i, 86, UNIT_OPTS, "player")
+		end)
 		local idsBox = get("trIds" .. i, function()
-			return QAT.widgets.EditBox(container, "QAT_Beh_TrIds" .. i, 150, ROW_H)
+			return QAT.widgets.EditBox(container, "QAT_Beh_TrIds" .. i, 130, ROW_H)
 		end)
 		local opDD = get("trOp" .. i, function()
 			return QAT.widgets.Dropdown(container, "QAT_Beh_TrOp" .. i, 54, OP_OPTS, ">=")
@@ -215,6 +239,16 @@ local function render(container, def)
 		if when.kind == "effect" then
 			opDD:SetHidden(true)
 			valBox:SetHidden(true)
+			-- "<result> on <unit> of <ids>": who gained/faded it matters.
+			unitDD:SetHidden(false)
+			unitDD.onSelect = function(v)
+				when.unit = v
+				commit(def)
+			end
+			unitDD:SetValue(when.unit or def.unit or "player")
+			unitDD:ClearAnchors()
+			unitDD:SetAnchor(TOPLEFT, container, TOPLEFT, x, y)
+			x = x + 92
 			idsBox:SetHidden(false)
 			idsBox.onChange = function(text)
 				when.abilityIds = textToIds(text)
@@ -223,8 +257,9 @@ local function render(container, def)
 			idsBox:SetText(idsToText(when.abilityIds))
 			idsBox:ClearAnchors()
 			idsBox:SetAnchor(TOPLEFT, container, TOPLEFT, x, y)
-			x = x + 156
+			x = x + 136
 		elseif when.kind == "stacks" or when.kind == "remaining" then
+			unitDD:SetHidden(true)
 			idsBox:SetHidden(true)
 			opDD:SetHidden(false)
 			opDD.onSelect = function(v)
@@ -244,6 +279,7 @@ local function render(container, def)
 			valBox:SetAnchor(TOPLEFT, container, TOPLEFT, x + 60, y)
 			x = x + 122
 		else
+			unitDD:SetHidden(true)
 			idsBox:SetHidden(true)
 			opDD:SetHidden(true)
 			valBox:SetHidden(true)

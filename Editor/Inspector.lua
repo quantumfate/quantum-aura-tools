@@ -7,28 +7,9 @@
 
 local WM = GetWindowManager()
 local PHASE_TABS = { "Appearance", "Behavior", "Conditions" }
--- The unit an effect is watched on. (Group/boss units come with the raid work.)
-local UNIT_OPTS = {
-	{ label = "Self", value = "player" },
-	{ label = "Target", value = "reticleover" },
-}
 
 -- Forward declaration so header/phase-strip callbacks can call it.
 local refreshBody
-
--- Set the tracker's unit and cascade it to every effect trigger / effect duration
--- (the unit is uniform per tracker for now; per-trigger units can come later).
-local function applyUnit(def, unit)
-	def.unit = unit
-	for _, p in ipairs(def.phases) do
-		for _, tr in ipairs(p.transitions) do
-			if tr.when.kind == "effect" then
-				tr.when.unit = unit
-			end
-		end
-		p.duration.unit = unit
-	end
-end
 
 local function findDef(defs, id)
 	for _, def in ipairs(defs or {}) do
@@ -174,19 +155,6 @@ function QAT.Editor_Inspector_Build(pane)
 		end
 	end
 
-	-- Unit the effects are watched on (Self / Target).
-	insp.unitCaption = QAT.widgets.Label(header, "QAT_Insp_UnitCaption", "On")
-	insp.unitCaption:SetAnchor(LEFT, insp.nameBox, RIGHT, 16, 0)
-	insp.unitDD = QAT.widgets.Dropdown(header, "QAT_Insp_Unit", 96, UNIT_OPTS, "player", function(v)
-		local def = insp.currentId and findDef(QAT.sv.trackers, insp.currentId)
-		if def then
-			applyUnit(def, v)
-			QAT.CanonicalizeDef(def)
-			QAT.widgets.NotifyTrackerChanged(def.id)
-		end
-	end)
-	insp.unitDD:SetAnchor(LEFT, insp.unitCaption, RIGHT, 6, 0)
-
 	insp.move = QAT.widgets.TextButton(header, "QAT_Insp_Move", "Move on screen", function()
 		if QAT.Editor_MoveTracker and insp.currentId then
 			QAT.Editor_MoveTracker(insp.currentId)
@@ -224,13 +192,14 @@ function QAT.Editor_Inspector_Build(pane)
 	insp.heightBox:SetAnchor(LEFT, insp.sizeX, RIGHT, 4, 0)
 	insp.heightBox.onChange = dimChange("height")
 
-	-- Load toggle (tracker scope), set off on the header's right edge.
-	insp.loadBtn = QAT.widgets.TextButton(header, "QAT_Insp_LoadBtn", "Load", function()
+	-- Load toggle: it lives on the tab-bar row (so it reads as a section switch like
+	-- the tabs) but right-aligned and set off, to signal its tracker-wide scope.
+	insp.loadBtn = QAT.widgets.TextButton(QAT.editor.tabBar, "QAT_Insp_LoadBtn", "Load", function()
 		QAT.editor.loadMode = not QAT.editor.loadMode -- toggle, so clicking it again returns
 		refreshBody()
 	end)
-	insp.loadBtn:SetDimensions(76, 22)
-	insp.loadBtn:SetAnchor(BOTTOMRIGHT, header, BOTTOMRIGHT, -10, -6)
+	insp.loadBtn:SetDimensions(96, QAT.editor.TAB_H)
+	insp.loadBtn:SetAnchor(RIGHT, QAT.editor.tabBar, RIGHT, -4, 0)
 
 	-- Shared phase-selector strip (between the header and the tab bar).
 	local sel = WM:CreateControl("QAT_Insp_PhaseSel", pane, CT_CONTROL)
@@ -361,8 +330,6 @@ function QAT.Editor_Inspector_Show(id)
 	insp.widthBox:SetHidden(not showTracker)
 	insp.sizeX:SetHidden(not showTracker)
 	insp.heightBox:SetHidden(not showTracker)
-	insp.unitCaption:SetHidden(not showTracker)
-	insp.unitDD:SetHidden(not showTracker)
 
 	if def then
 		insp.nameBox:SetText(def.name or def.id)
@@ -370,7 +337,6 @@ function QAT.Editor_Inspector_Show(id)
 			local pos = def.pos or {}
 			insp.widthBox:SetText(tostring(pos.width or 220))
 			insp.heightBox:SetText(tostring(pos.height or 30))
-			insp.unitDD:SetValue(def.unit or "player")
 		end
 	end
 	refreshBody()
