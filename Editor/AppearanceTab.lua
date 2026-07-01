@@ -154,9 +154,8 @@ local function render(container, def)
 		return QAT.widgets.Dropdown(src, "QAT_App_Kind", 180, KIND_OPTS, "bar")
 	end)
 	kindDD.onSelect = function(v)
-		look.display = v
-		commit(def)
-		render(container, def)
+		phase.look.display = v -- write the live look; commit's canonicalize replaces the table
+		commit(def) -- re-renders this tab via the TrackerChanged callback
 	end
 	kindDD:SetValue(kind)
 	kindDD:SetDimensions(sFieldW, DD_H)
@@ -171,9 +170,8 @@ local function render(container, def)
 		end)
 		iconBox.onChange = function(text)
 			text = zo_strtrim(text or "")
-			look.icon = (text ~= "" and text) or nil
-			commit(def)
-			render(container, def)
+			phase.look.icon = (text ~= "" and text) or nil
+			commit(def) -- re-renders this tab via the TrackerChanged callback
 		end
 		iconBox:SetDimensions(sFieldW - ROW_H - 8, ROW_H)
 		iconBox:SetText(look.icon or "")
@@ -192,7 +190,7 @@ local function render(container, def)
 			return QAT.widgets.EditBox(src, "QAT_App_NameBox", 100, ROW_H)
 		end)
 		nameBox.onChange = function(text)
-			look.name = text
+			phase.look.name = text
 			commit(def)
 		end
 		nameBox:SetDimensions(sFieldW, ROW_H)
@@ -255,7 +253,7 @@ local function render(container, def)
 				return QAT.widgets.ColorSwatch(col, "QAT_App_CS_" .. key, SW, { 1, 1, 1, 1 })
 			end)
 			sw.onChange = function(c)
-				look.colors[key] = c
+				phase.look.colors[key] = c
 				commit(def)
 			end
 			sw:SetColor(look.colors[key] or DEFAULT_COLORS[key])
@@ -274,7 +272,7 @@ local function render(container, def)
 			return QAT.widgets.Dropdown(col, "QAT_App_BorderT", 70, BORDER_OPTS, 1)
 		end)
 		btDD.onSelect = function(v)
-			look.borderThickness = v
+			phase.look.borderThickness = v
 			commit(def)
 		end
 		btDD:SetValue(look.borderThickness or 1)
@@ -306,7 +304,7 @@ local function render(container, def)
 	end)
 	timeChk:SetChecked(look.showTime ~= false)
 	timeChk.onToggle = function(v)
-		look.showTime = v
+		phase.look.showTime = v
 		commit(def)
 	end
 	timeChk:ClearAnchors()
@@ -320,7 +318,7 @@ local function render(container, def)
 		end)
 		stacksChk:SetChecked(look.showStacks or false)
 		stacksChk.onToggle = function(v)
-			look.showStacks = v or nil
+			phase.look.showStacks = v or nil
 			commit(def)
 		end
 		stacksChk:ClearAnchors()
@@ -333,7 +331,7 @@ local function render(container, def)
 		return QAT.widgets.Dropdown(tt, "QAT_App_Dec", 60, DECIMAL_OPTS, 1)
 	end)
 	decDD.onSelect = function(v)
-		look.decimals = v
+		phase.look.decimals = v
 		commit(def)
 	end
 	decDD:SetValue(look.decimals or 1)
@@ -361,7 +359,7 @@ local function render(container, def)
 			return QAT.widgets.Dropdown(font, "QAT_App_FDD_" .. fk, 64, FONT_OPTS, 20)
 		end)
 		dd.onSelect = function(v)
-			look.fontSizes[fk] = v
+			phase.look.fontSizes[fk] = v
 			commit(def)
 		end
 		dd:SetValue(look.fontSizes[fk] or FONT_DEFAULTS[fk])

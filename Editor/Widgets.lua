@@ -376,6 +376,59 @@ end
 -- The select callback is read from dd.onSelect at fire time (rebindable per
 -- render). Options can be replaced with dd:SetOptions(options). The option list
 -- draws above siblings (DT_HIGH).
+-- A shared, full-screen top-level layer that hosts open dropdown lists. Because it
+-- is its own top-level at DT_HIGH, its rows hit-test above every field in the editor
+-- window (a same-window overlay draw tier is not enough to beat an EditBox drawn in
+-- another branch, which is why options overlapping a field below were unclickable).
+-- The layer itself is mouse-transparent; only the visible list rows capture clicks.
+-- Exactly one dropdown list may be open at a time. It is parented to a full-screen
+-- "eater" top-level so the list (and its options) hit-test above every field, while a
+-- click anywhere outside the list lands on the eater and closes it. A list can never
+-- linger and swallow clicks in its region after the dropdown lost focus.
+local openList, eater
+local function closeDropdowns()
+	if openList then
+		openList:SetHidden(true)
+		openList = nil
+	end
+	if eater then
+		eater:SetHidden(true)
+	end
+end
+QAT.widgets.CloseDropdowns = closeDropdowns
+
+-- The eater must be its own full-screen top-level: as a child of a zero-size control
+-- its hit area collapses to nothing, so it never catches the outside click that
+-- should close the list. A DT_HIGH top-level hit-tests full-screen above the editor.
+local function getEater()
+	if not eater then
+		eater = WM:CreateTopLevelWindow("QAT_Widgets_DropdownLayer")
+		eater:SetAnchor(TOPLEFT, GuiRoot, TOPLEFT, 0, 0)
+		eater:SetDimensions(GuiRoot:GetWidth(), GuiRoot:GetHeight())
+		eater:SetMouseEnabled(true)
+		eater:SetDrawTier(DT_HIGH)
+		eater:SetHidden(true)
+		-- Close on outside click. Defer the hide to the next frame for the same reason
+		-- as options: hiding the eater inside its own mouse dispatch would strand the
+		-- capture on the hidden eater and swallow later clicks.
+		eater:SetHandler("OnMouseDown", function()
+			zo_callLater(closeDropdowns, 0)
+		end)
+	end
+	return eater
+end
+
+local function openDropdownList(list)
+	if openList == list then
+		closeDropdowns() -- clicking the open dropdown again closes it
+		return
+	end
+	closeDropdowns() -- only one open at a time
+	getEater():SetHidden(false)
+	list:SetHidden(false)
+	openList = list
+end
+
 function QAT.widgets.Dropdown(parent, name, width, options, current, onSelect)
 	local dd = QAT.widgets.Clickable(parent, name, C.ddBg)
 	dd.bg:SetEdgeColor(unpack(C.fieldEdge))
@@ -404,12 +457,11 @@ function QAT.widgets.Dropdown(parent, name, width, options, current, onSelect)
 		return val == nil and "" or tostring(val)
 	end
 
-	-- Parent the open list to the owning top-level window (anchored to the dropdown)
-	-- rather than to the dropdown itself. As a deep child it would be buried beneath
-	-- later-sibling fields and lose the mouse hit even with a high draw tier; hung off
-	-- the top level it reliably draws and captures clicks above every field.
-	local top = (dd.GetOwningWindow and dd:GetOwningWindow()) or dd
-	local list = WM:CreateControl(name .. "_List", top, CT_CONTROL)
+	-- Host the open list on the eater (a full-screen catcher under a DT_HIGH top-level),
+	-- anchored to the dropdown. This puts the option rows above every field in the
+	-- editor window, so an option overlapping a field below still captures the click,
+	-- while a click outside the list hits the eater and closes it.
+	local list = WM:CreateControl(name .. "_List", getEater(), CT_CONTROL)
 	list:SetAnchor(TOPLEFT, dd, BOTTOMLEFT, 0, 2)
 	list:SetDrawTier(DT_HIGH)
 	list:SetDrawLayer(DL_OVERLAY)
@@ -444,10 +496,16 @@ function QAT.widgets.Dropdown(parent, name, width, options, current, onSelect)
 					if upInside and button == MOUSE_BUTTON_INDEX_LEFT then
 						dd.value = self2.optValue
 						label:SetText(labelFor(self2.optValue))
-						list:SetHidden(true)
-						if dd.onSelect then
-							dd.onSelect(self2.optValue)
-						end
+						-- Hiding this option inside its own mouse-up strands ESO's mouse capture
+						-- on a now-hidden control and swallows every later click. Defer the close
+						-- + rebuild to the next frame, after this dispatch releases the capture.
+						local v = self2.optValue
+						zo_callLater(function()
+							closeDropdowns()
+							if dd.onSelect then
+								dd.onSelect(v)
+							end
+						end, 0)
 					end
 				end)
 				optControls[i] = opt
@@ -463,12 +521,22 @@ function QAT.widgets.Dropdown(parent, name, width, options, current, onSelect)
 
 	dd:SetHandler("OnMouseUp", function(_, button, upInside)
 		if upInside and button == MOUSE_BUTTON_INDEX_LEFT then
-			list:SetHidden(not list:IsHidden())
+			openDropdownList(list) -- toggles this list open/closed (single-open + eater)
 		end
 	end)
 	function dd:SetValue(v)
 		dd.value = v
 		label:SetText(labelFor(v))
+	end
+
+	-- Cascade hides to the list: when a pooled dropdown is hidden (or the panel
+	-- rebuilds), its list must not linger on the popup layer intercepting clicks.
+	local nativeSetHidden = dd.SetHidden
+	function dd:SetHidden(h)
+		nativeSetHidden(self, h)
+		if h and openList == list then
+			closeDropdowns()
+		end
 	end
 
 	dd:SetOptions(dd.options)

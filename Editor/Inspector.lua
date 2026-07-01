@@ -357,6 +357,11 @@ refreshBody = function()
 		return
 	end
 	insp.refreshing = true
+	-- Any rebuild invalidates the layout an open dropdown list is anchored to, so
+	-- close it rather than let it linger on the popup layer intercepting clicks.
+	if QAT.widgets.CloseDropdowns then
+		QAT.widgets.CloseDropdowns()
+	end
 
 	local def = insp.currentId and findDef(QAT.sv.trackers, insp.currentId)
 
