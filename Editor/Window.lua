@@ -91,7 +91,6 @@ local TAB_GAP, TAB_MIN_W = 6, 96
 
 local function selectTab(name)
 	QAT.editor.activeTab = name
-	QAT.editor.loadMode = false -- a per-phase tab is not the tracker-wide Load panel
 	for _, tabName in ipairs(TABS) do
 		QAT.editor.tabButtons[tabName]:SetSelected(tabName == name)
 	end

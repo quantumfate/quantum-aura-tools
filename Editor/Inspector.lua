@@ -1,14 +1,14 @@
--- Inspector: a tracker-scoped header (name, move, pop-out, size, Load) plus a
--- phase-scoped area below it — a shared phase-selector strip and the per-phase
--- tabs (Appearance / Behavior / Conditions). "Load" in the header swaps the body
--- to the tracker-wide Load panel and hides the phase strip + tabs, so it is never
--- mistaken for a per-phase setting. Everything renders from the bound def and
--- refreshes on "QAT_TrackerChanged".
+-- Inspector: an aura-scoped identity header (name, size, position, move, pop-out)
+-- and a breadcrumb that reflects what the tree has selected. Scope is encoded in the
+-- tree, not in a toggle: selecting a tracker (or its "Load conditions" row) shows the
+-- aura-wide Load panel; selecting a phase row shows that phase's Appearance / Behavior
+-- / Conditions tabs. Everything renders from the bound def and refreshes on
+-- "QAT_TrackerChanged".
 
 local WM = GetWindowManager()
 local PHASE_TABS = { "Appearance", "Behavior", "Conditions" }
 
--- Forward declaration so header/phase-strip callbacks can call it.
+-- Forward declaration so header/breadcrumb callbacks can call it.
 local refreshBody
 
 local function findDef(defs, id)
@@ -27,86 +27,51 @@ local function findDef(defs, id)
 end
 QAT.Editor_FindDef = findDef
 
-local function ensureSelectedPhase(def)
+local function phaseById(def, id)
 	for _, p in ipairs(def.phases or {}) do
-		if p.id == QAT.editor.selectedPhaseId then
-			return
+		if p.id == id then
+			return p
 		end
+	end
+	return nil
+end
+
+local function ensureSelectedPhase(def)
+	if phaseById(def, QAT.editor.selectedPhaseId) then
+		return
 	end
 	QAT.editor.selectedPhaseId = def.phases and def.phases[1] and def.phases[1].id
 end
 
--- Render the shared phase strip: "Phase: [chips] (+ Phase)".
-local function renderPhaseSel(def)
-	local insp = QAT.editor.inspector
-	local sel = insp.phaseSel
-	local pool = insp.phaseSelPool
-	QAT.widgets.PoolBegin(pool)
-	local function get(key, factory)
-		return QAT.widgets.PoolGet(pool, key, factory)
+-- ===== Phase mutations (shared with the tree, which owns the phase rows) =====
+
+function QAT.Editor_AddPhase(def)
+	local n = #def.phases + 1
+	local id = "phase" .. n
+	while phaseById(def, id) do
+		n = n + 1
+		id = "phase" .. n
 	end
+	table.insert(def.phases, { id = id, look = { display = "bar" }, duration = { type = "none" }, transitions = {} })
+	QAT.editor.selectedPhaseId = id
+	QAT.editor.selectedScope = "phase"
+	QAT.CanonicalizeDef(def)
+	QAT.widgets.NotifyTrackerChanged(def.id)
+end
 
-	local GAP, h = 8, 20 -- slim chips to fit the thinner phase bar
-	local cap = get("cap", function()
-		return QAT.widgets.Label(sel, "QAT_PhaseSel_Cap", "Phase:")
-	end)
-	cap:ClearAnchors()
-	cap:SetAnchor(LEFT, sel, LEFT, 12, 0)
+function QAT.Editor_SetInitialPhase(def, phaseId)
+	def.initial = phaseId
+	QAT.CanonicalizeDef(def)
+	QAT.widgets.NotifyTrackerChanged(def.id)
+end
 
-	local prev = cap
-	for i, p in ipairs(def.phases) do
-		local pid = p.id
-		local chip = get("chip" .. i, function()
-			return QAT.widgets.TextButton(sel, "QAT_PhaseSel_Chip" .. i, "", nil)
-		end)
-		chip:SetSelected(pid == QAT.editor.selectedPhaseId)
-		chip:SetText(pid) -- auto-fits width to the phase name
-		chip:SetHeight(h)
-		chip:ClearAnchors()
-		chip:SetAnchor(LEFT, prev, RIGHT, GAP, 0)
-		QAT.widgets.Tooltip(chip, "Edit phase '" .. pid .. "'.")
-		chip.onClick = function()
-			QAT.editor.selectedPhaseId = pid
-			refreshBody()
-		end
-		prev = chip
+function QAT.Editor_DeletePhase(def, phaseId)
+	if #def.phases <= 1 then
+		return -- a tracker must keep at least one phase
 	end
-
-	local addBtn = get("add", function()
-		return QAT.widgets.TextButton(sel, "QAT_PhaseSel_Add", "+ Phase", nil)
-	end)
-	addBtn:SetHeight(h)
-	addBtn:ClearAnchors()
-	addBtn:SetAnchor(LEFT, prev, RIGHT, GAP, 0)
-	QAT.widgets.Tooltip(addBtn, "Add a new phase to this tracker.")
-	addBtn.onClick = function()
-		local n = #def.phases + 1
-		table.insert(
-			def.phases,
-			{ id = "phase" .. n, look = { display = "bar" }, duration = { type = "none" }, transitions = {} }
-		)
-		QAT.editor.selectedPhaseId = "phase" .. n
-		QAT.CanonicalizeDef(def)
-		QAT.widgets.NotifyTrackerChanged(def.id)
-	end
-
-	-- Phase actions for the SELECTED phase, right-aligned so they read against the
-	-- highlighted chip ("delete the active phase").
-	local selId = QAT.editor.selectedPhaseId
-
-	local delBtn = get("delPhase", function()
-		return QAT.widgets.TextButton(sel, "QAT_PhaseSel_Del", "Delete phase", nil)
-	end)
-	delBtn:SetHeight(h)
-	delBtn:ClearAnchors()
-	delBtn:SetAnchor(RIGHT, sel, RIGHT, -12, 0)
-	QAT.widgets.Tooltip(delBtn, "Delete the selected phase '" .. tostring(selId) .. "'.")
-	local function removeSelectedPhase()
-		if #def.phases <= 1 then
-			return
-		end
+	local function remove()
 		for i, p in ipairs(def.phases) do
-			if p.id == selId then
+			if p.id == phaseId then
 				table.remove(def.phases, i)
 				break
 			end
@@ -115,47 +80,44 @@ local function renderPhaseSel(def)
 		QAT.CanonicalizeDef(def)
 		QAT.widgets.NotifyTrackerChanged(def.id)
 	end
-	delBtn.onClick = function()
-		if #def.phases <= 1 then
-			return -- a tracker must keep at least one phase
-		end
-		if QAT.Editor_ConfirmDelete then
-			QAT.Editor_ConfirmDelete("phase " .. tostring(selId), removeSelectedPhase)
-		else
-			removeSelectedPhase()
-		end
+	if QAT.Editor_ConfirmDelete then
+		QAT.Editor_ConfirmDelete("phase " .. tostring(phaseId), remove)
+	else
+		remove()
 	end
+end
 
-	local initBtn = get("initPhase", function()
-		return QAT.widgets.TextButton(sel, "QAT_PhaseSel_Init", "Set initial", nil)
-	end)
-	initBtn:SetHeight(h)
-	initBtn:ClearAnchors()
-	initBtn:SetAnchor(RIGHT, delBtn, LEFT, GAP, 0)
-	initBtn:SetSelected(selId == def.initial) -- lit when the selected phase is the initial one
-	QAT.widgets.Tooltip(initBtn, "Make the selected phase the tracker's starting phase.")
-	initBtn.onClick = function()
-		def.initial = selId
-		QAT.CanonicalizeDef(def)
-		QAT.widgets.NotifyTrackerChanged(def.id)
+-- A small bordered badge (e.g. AURA, INITIAL).
+local function makeBadge(parent, name)
+	local b = WM:CreateControl(name, parent, CT_BACKDROP)
+	b:SetCenterColor(0.16, 0.22, 0.34, 1)
+	b:SetEdgeColor(0.30, 0.40, 0.58, 1)
+	b:SetEdgeTexture("", 1, 1, 1)
+	local l = QAT.widgets.Label(b, name .. "_L", "", "$(BOLD_FONT)|11|soft-shadow-thin")
+	l:SetColor(0.62, 0.72, 0.90, 1)
+	l:SetAnchor(CENTER, b, CENTER, 0, 0)
+	b.label = l
+	function b:SetText(s)
+		l:SetText(s)
+		b:SetWidth(l:GetTextWidth() + 12)
 	end
-
-	QAT.widgets.PoolEnd(pool)
+	b:SetHeight(16)
+	return b
 end
 
 function QAT.Editor_Inspector_Build(pane)
 	local insp = QAT.editor.inspector or {}
 	QAT.editor.inspector = insp
 
-	-- ===== Header (tracker scope), two rows =====
-	-- Row 1:  Name | Size | Position (left)            Center  Pop out   Phases  Load (right)
-	-- Row 2:  the phase strip (Phase: chips +Phase ............ Set initial  Delete phase)
+	-- ===== Header (aura scope) =====
+	-- Row 1:  Name | Size | Position (left)                       Center  Pop out (right)
+	-- Row 2:  breadcrumb  Tracker > Load|phase [INITIAL]          [Set initial  Delete phase]
 	local header = QAT.widgets.Panel(pane, "QAT_Insp_Header", { 0.06, 0.075, 0.105, 1 })
 	header:SetAnchor(TOPLEFT, pane, TOPLEFT, 0, 0)
 	header:SetAnchor(TOPRIGHT, pane, TOPRIGHT, 0, 0)
 	header:SetHeight(QAT.editor.HEADER_H)
 	insp.header = header
-	local ROW1_Y, BAR_Y, BAR_H = 8, 44, 28
+	local ROW1_Y, BAR_Y = 8, 44
 
 	local function curDef()
 		return insp.currentId and findDef(QAT.sv.trackers, insp.currentId)
@@ -181,6 +143,13 @@ function QAT.Editor_Inspector_Build(pane)
 			QAT.widgets.NotifyTrackerChanged(def.id)
 		end
 	end
+
+	-- Group note: a group has no geometry of its own (positions live on its member
+	-- auras), so in place of Size/Position it explains that.
+	insp.groupNote = QAT.widgets.Label(row1, "QAT_Insp_GroupNote", "")
+	insp.groupNote:SetColor(0.5, 0.56, 0.66, 1)
+	insp.groupNote:SetAnchor(LEFT, insp.nameBox, RIGHT, 18, 0)
+	insp.groupNote:SetHidden(true)
 
 	-- Size (chained after Name). Whole-number pixels.
 	local function dimChange(field)
@@ -240,34 +209,12 @@ function QAT.Editor_Inspector_Build(pane)
 		"Position of the top-left corner from the screen's top-left (x right, y down), clamped to the screen. Drag the tracker on the HUD for fine control."
 	)
 
-	-- Row 1 right group: Center, Pop out, then the Phases/Load mode switch. Chained
-	-- right-to-left so they read Center | Pop out  ...  Phases | Load.
-	insp.loadBtn = QAT.widgets.TextButton(row1, "QAT_Insp_LoadBtn", "Load", function()
-		QAT.editor.loadMode = true
-		refreshBody()
-	end)
-	insp.loadBtn:SetHeight(22)
-	insp.loadBtn:SetMinWidth(70)
-	insp.loadBtn:SetAnchor(RIGHT, row1, RIGHT, 0, 0)
-	QAT.widgets.Tooltip(
-		insp.loadBtn,
-		"When this tracker is active: class, role, combat, zone, boss and set conditions."
-	)
-
-	insp.phasesBtn = QAT.widgets.TextButton(row1, "QAT_Insp_PhasesBtn", "Phases", function()
-		QAT.editor.loadMode = false
-		refreshBody()
-	end)
-	insp.phasesBtn:SetHeight(22)
-	insp.phasesBtn:SetMinWidth(70)
-	insp.phasesBtn:SetAnchor(RIGHT, insp.loadBtn, LEFT, -8, 0)
-	QAT.widgets.Tooltip(insp.phasesBtn, "Edit this tracker's phases — appearance, behavior and runtime conditions.")
-
+	-- Row 1 right group: Center, Pop out (chained right-to-left).
 	insp.popout = QAT.widgets.TextButton(row1, "QAT_Insp_Popout", "Pop out", function()
 		d(QAT.displayName .. ": detachable inspector is not yet available.")
 	end)
 	insp.popout:SetHeight(22)
-	insp.popout:SetAnchor(RIGHT, insp.phasesBtn, LEFT, -18, 0)
+	insp.popout:SetAnchor(RIGHT, row1, RIGHT, 0, 0)
 	QAT.widgets.Tooltip(insp.popout, "Detach this inspector into its own window. (Not yet available.)")
 
 	insp.move = QAT.widgets.TextButton(row1, "QAT_Insp_Move", "Center", function()
@@ -287,20 +234,60 @@ function QAT.Editor_Inspector_Build(pane)
 	insp.move:SetAnchor(RIGHT, insp.popout, LEFT, -8, 0)
 	QAT.widgets.Tooltip(insp.move, "Recentre this tracker on screen.")
 
-	-- Row 2: the phase "config-nav" bar — a distinct, thinner coloured band so it
-	-- reads as navigation rather than part of the identity header.
-	insp.phaseBar = QAT.widgets.Panel(header, "QAT_Insp_PhaseBar", { 0.05, 0.062, 0.088, 1 }, { 0.14, 0.17, 0.24, 1 })
-	insp.phaseBar:SetAnchor(TOPLEFT, header, TOPLEFT, 0, BAR_Y)
-	insp.phaseBar:SetAnchor(TOPRIGHT, header, TOPRIGHT, 0, BAR_Y)
-	insp.phaseBar:SetHeight(BAR_H)
+	-- Row 2: breadcrumb (left) + phase actions (right). A plain row on the header so
+	-- it reads as the current location, not a second navigation surface.
+	local crumb = WM:CreateControl("QAT_Insp_Crumb", header, CT_CONTROL)
+	crumb:SetAnchor(TOPLEFT, header, TOPLEFT, 12, BAR_Y)
+	crumb:SetAnchor(TOPRIGHT, header, TOPRIGHT, -12, BAR_Y)
+	crumb:SetHeight(22)
+	insp.crumb = crumb
 
-	local sel = WM:CreateControl("QAT_Insp_PhaseSel", insp.phaseBar, CT_CONTROL)
-	sel:SetAnchor(TOPLEFT, insp.phaseBar, TOPLEFT, 12, 0)
-	sel:SetAnchor(BOTTOMRIGHT, insp.phaseBar, BOTTOMRIGHT, -12, 0)
-	insp.phaseSel = sel
-	insp.phaseSelPool = QAT.widgets.NewPool()
+	insp.crumbRoot = QAT.widgets.Label(crumb, "QAT_Insp_CrumbRoot", "")
+	insp.crumbRoot:SetColor(0.55, 0.62, 0.74, 1)
+	insp.crumbRoot:SetAnchor(LEFT, crumb, LEFT, 0, 0)
+	insp.crumbRoot:SetMouseEnabled(true)
+	insp.crumbRoot:SetHandler("OnMouseUp", function(_, button, upInside)
+		if upInside and button == MOUSE_BUTTON_INDEX_LEFT and insp.currentId then
+			if QAT.Editor_SelectLoad then
+				QAT.Editor_SelectLoad(insp.currentId) -- click the aura name -> Load scope
+			end
+		end
+	end)
 
-	-- Body host (below the tab bar; the phase strip is in the header now).
+	insp.crumbSep = QAT.widgets.Label(crumb, "QAT_Insp_CrumbSep", "›")
+	insp.crumbSep:SetColor(0.40, 0.46, 0.56, 1)
+	insp.crumbSep:SetAnchor(LEFT, insp.crumbRoot, RIGHT, 8, 0)
+
+	insp.crumbLeaf = QAT.widgets.Label(crumb, "QAT_Insp_CrumbLeaf", "", "$(BOLD_FONT)|18|soft-shadow-thin")
+	insp.crumbLeaf:SetColor(0.92, 0.94, 0.97, 1)
+	insp.crumbLeaf:SetAnchor(LEFT, insp.crumbSep, RIGHT, 8, 0)
+
+	insp.crumbBadge = makeBadge(crumb, "QAT_Insp_CrumbBadge")
+	insp.crumbBadge:SetAnchor(LEFT, insp.crumbLeaf, RIGHT, 8, 0)
+
+	-- Phase actions (right, phase scope only).
+	insp.delPhaseBtn = QAT.widgets.TextButton(crumb, "QAT_Insp_DelPhase", "Delete phase", function()
+		local def = curDef()
+		if def then
+			QAT.Editor_DeletePhase(def, QAT.editor.selectedPhaseId)
+		end
+	end)
+	insp.delPhaseBtn:SetHeight(22)
+	insp.delPhaseBtn:SetAnchor(RIGHT, crumb, RIGHT, 0, 0)
+	QAT.widgets.Tooltip(insp.delPhaseBtn, "Delete the selected phase.")
+
+	insp.setInitBtn = QAT.widgets.TextButton(crumb, "QAT_Insp_SetInit", "Set initial", function()
+		local def = curDef()
+		if def then
+			QAT.Editor_SetInitialPhase(def, QAT.editor.selectedPhaseId)
+		end
+	end)
+	insp.setInitBtn:SetHeight(22)
+	insp.setInitBtn:SetAnchor(RIGHT, insp.delPhaseBtn, LEFT, 8, 0)
+	QAT.widgets.Tooltip(insp.setInitBtn, "Make the selected phase the tracker's starting phase.")
+
+	-- Body host (below the tab bar). The phase tab bar lives in Window.lua and is
+	-- shown only in phase scope.
 	local bodyTop = QAT.editor.HEADER_H + QAT.editor.HEADER_GAP + QAT.editor.TAB_H
 	local body = QAT.widgets.Panel(pane, "QAT_Insp_Body", { 0.045, 0.055, 0.078, 1 })
 	body:SetAnchor(TOPLEFT, pane, TOPLEFT, 0, bodyTop)
@@ -313,7 +300,7 @@ function QAT.Editor_Inspector_Build(pane)
 	placeholder:SetVerticalAlignment(TEXT_ALIGN_TOP)
 	insp.placeholder = placeholder
 
-	-- One container per per-phase tab, plus a tracker-wide Load container; the body
+	-- One container per per-phase tab, plus an aura-wide Load container; the body
 	-- shows exactly one at a time.
 	insp.tabContainers = {}
 	for _, tabName in ipairs(PHASE_TABS) do
@@ -333,6 +320,29 @@ function QAT.Editor_Inspector_Build(pane)
 end
 
 QAT.editor.tabRenderers = QAT.editor.tabRenderers or {}
+
+-- Update the breadcrumb + phase-action buttons for the current selection.
+local function renderCrumb(def)
+	local insp = QAT.editor.inspector
+	local isFolder = def.kind == "folder"
+	local scope = QAT.editor.selectedScope or "load"
+	insp.crumbRoot:SetText(def.name or def.id)
+	if scope == "phase" and not isFolder then
+		insp.crumbLeaf:SetText(QAT.editor.selectedPhaseId or "")
+		local isInitial = QAT.editor.selectedPhaseId == def.initial
+		insp.crumbBadge:SetText("INITIAL")
+		insp.crumbBadge:SetHidden(not isInitial)
+		insp.setInitBtn:SetHidden(false)
+		insp.setInitBtn:SetSelected(isInitial)
+		insp.delPhaseBtn:SetHidden(false)
+	else
+		insp.crumbLeaf:SetText("Load")
+		insp.crumbBadge:SetText(isFolder and "GROUP" or "AURA")
+		insp.crumbBadge:SetHidden(false)
+		insp.setInitBtn:SetHidden(true)
+		insp.delPhaseBtn:SetHidden(true)
+	end
+end
 
 refreshBody = function()
 	local insp = QAT.editor.inspector
@@ -358,48 +368,31 @@ refreshBody = function()
 	if not def then
 		insp.placeholder:SetHidden(false)
 		insp.placeholder:SetText("Select a tracker in the tree, or add one with + Tracker.")
-		insp.phaseSel:SetHidden(true)
+		insp.crumb:SetHidden(true)
 		if QAT.editor.tabBar then
 			QAT.editor.tabBar:SetHidden(true)
 		end
-		insp.loadBtn:SetHidden(true)
-		insp.phasesBtn:SetHidden(true)
 	else
 		insp.placeholder:SetHidden(true)
-		insp.loadBtn:SetHidden(false)
+		insp.crumb:SetHidden(false)
 
-		-- Folders have no phases, so they only ever show the Load panel.
+		-- Folders have no phases, so they are always Load scope.
 		local isFolder = def.kind == "folder"
-		local showLoad = QAT.editor.loadMode or isFolder
+		local scope = (isFolder and "load") or (QAT.editor.selectedScope or "load")
+		QAT.editor.selectedScope = scope
+		renderCrumb(def)
 
-		insp.phasesBtn:SetHidden(isFolder) -- a folder has only Load
-		insp.phasesBtn:SetSelected(not showLoad)
-		insp.loadBtn:SetSelected(showLoad)
-		if QAT.editor.tabButtons then
-			for _, n in ipairs(PHASE_TABS) do
-				QAT.editor.tabButtons[n]:SetSelected(not showLoad and QAT.editor.activeTab == n)
-			end
-		end
-		-- In Load mode the phase bar and tabs are hidden; the header Phases button
-		-- is the way back.
-		insp.phaseBar:SetHidden(showLoad)
-		insp.phaseSel:SetHidden(showLoad)
-		if QAT.editor.tabBar then
-			QAT.editor.tabBar:SetHidden(showLoad)
-		end
-
-		if showLoad then
-			local renderer = QAT.editor.tabRenderers["Load"]
-			if renderer then
-				insp.loadContainer:SetHidden(false)
-				QAT.Safe("tab Load", function()
-					renderer(insp.loadContainer, def)
-				end)
-			end
-		else
+		if scope == "phase" then
 			ensureSelectedPhase(def)
-			renderPhaseSel(def)
-
+			renderCrumb(def) -- selectedPhaseId may have changed
+			if QAT.editor.tabBar then
+				QAT.editor.tabBar:SetHidden(false)
+			end
+			if QAT.editor.tabButtons then
+				for _, n in ipairs(PHASE_TABS) do
+					QAT.editor.tabButtons[n]:SetSelected(QAT.editor.activeTab == n)
+				end
+			end
 			local tab = QAT.editor.activeTab or "Appearance"
 			local container = insp.tabContainers[tab]
 			local renderer = QAT.editor.tabRenderers[tab]
@@ -407,6 +400,17 @@ refreshBody = function()
 				container:SetHidden(false)
 				QAT.Safe("tab " .. tab, function()
 					renderer(container, def)
+				end)
+			end
+		else
+			if QAT.editor.tabBar then
+				QAT.editor.tabBar:SetHidden(true)
+			end
+			local renderer = QAT.editor.tabRenderers["Load"]
+			if renderer then
+				insp.loadContainer:SetHidden(false)
+				QAT.Safe("tab Load", function()
+					renderer(insp.loadContainer, def)
 				end)
 			end
 		end
@@ -427,16 +431,14 @@ function QAT.Editor_Inspector_Show(id)
 	end
 	insp.currentId = id
 	local def = id and findDef(QAT.sv.trackers, id)
-	QAT.editor.loadMode = false -- (re)selecting a tracker lands on a per-phase tab
 
 	insp.nameCaption:SetHidden(not def)
 	insp.nameBox:SetHidden(not def)
 	insp.move:SetHidden(not def)
 	insp.popout:SetHidden(not def)
-	insp.loadBtn:SetHidden(not def)
-	insp.phasesBtn:SetHidden(not def)
 	-- Size + position apply to a drawn tracker; folders have neither.
-	local showTracker = def ~= nil and def.kind ~= "folder"
+	local isFolder = def ~= nil and def.kind == "folder"
+	local showTracker = def ~= nil and not isFolder
 	for _, c in ipairs({
 		insp.sizeCaption,
 		insp.widthBox,
@@ -448,6 +450,10 @@ function QAT.Editor_Inspector_Show(id)
 		insp.posYBox,
 	}) do
 		c:SetHidden(not showTracker)
+	end
+	insp.groupNote:SetHidden(not isFolder)
+	if isFolder then
+		insp.groupNote:SetText("Group container · positions are set per member aura")
 	end
 
 	if def then
@@ -502,7 +508,7 @@ function QAT.Editor_Inspector_SetTab(_)
 end
 
 function QAT.Editor_Inspector_Relayout()
-	-- Header / phase strip / body all anchor to the pane; nothing extra yet.
+	-- Header / breadcrumb / body all anchor to the pane; nothing extra yet.
 end
 
 CALLBACK_MANAGER:RegisterCallback("QAT_TrackerChanged", function(id)
