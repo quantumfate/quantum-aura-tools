@@ -103,7 +103,7 @@ local function render(container, def)
 	end
 
 	-- Wrap the content in a titled card (created first, so it draws behind).
-	local cw = container:GetWidth()
+	local cw = container.qatViewportW or container:GetWidth()
 	if cw < 240 then
 		cw = 900
 	end

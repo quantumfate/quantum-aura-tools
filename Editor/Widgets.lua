@@ -231,6 +231,90 @@ function QAT.widgets.Tooltip(control, text)
 	return control
 end
 
+-- Attach a native item tooltip (shows set bonuses on hover) driven by an item link.
+-- The link is read at hover time via control.qatItemLink, so it can be rebound.
+function QAT.widgets.ItemTooltip(control, link)
+	control.qatItemLink = link
+	if not control.qatItemTipBound then
+		control.qatItemTipBound = true
+		control:SetMouseEnabled(true)
+		control:SetHandler("OnMouseEnter", function(self)
+			if self.qatItemLink and self.qatItemLink ~= "" then
+				InitializeTooltip(ItemTooltip, self, RIGHT, -8, 0, LEFT)
+				ItemTooltip:SetLink(self.qatItemLink)
+			end
+		end)
+		control:SetHandler("OnMouseExit", function()
+			ClearTooltip(ItemTooltip)
+		end)
+	end
+	return control
+end
+
+-- A small bordered "pill" chip for tags (e.g. equipment slots). Sizes to its text.
+function QAT.widgets.Chip(parent, name, text)
+	local c = QAT.widgets.Panel(parent, name, { 0.055, 0.106, 0.145, 1 }, { 0.13, 0.19, 0.24, 1 })
+	local l = QAT.widgets.Label(c, name .. "_L", "", "$(MEDIUM_FONT)|14|soft-shadow-thin")
+	l:SetColor(0.66, 0.73, 0.83, 1)
+	l:SetAnchor(LEFT, c, LEFT, 6, -1)
+	c.label = l
+	function c:SetText(t)
+		l:SetText(t or "")
+		c:SetDimensions(math.ceil(l:GetTextWidth()) + 12, 18)
+	end
+	c:SetText(text)
+	return c
+end
+
+-- A small colored badge (bar mode, INITIAL, ...): a dark bordered box with centered
+-- text tinted by rgb. Sizes to its text via :SetText.
+function QAT.widgets.Badge(parent, name, text, rgb)
+	rgb = rgb or { 0.62, 0.72, 0.90 }
+	local b = WM:CreateControl(name, parent, CT_BACKDROP)
+	b:SetCenterColor(0.10, 0.13, 0.17, 1)
+	b:SetEdgeColor(rgb[1] * 0.6, rgb[2] * 0.6, rgb[3] * 0.6, 1)
+	b:SetEdgeTexture("", 1, 1, 1)
+	b:SetHeight(16)
+	local l = QAT.widgets.Label(b, name .. "_L", "", "$(BOLD_FONT)|12|soft-shadow-thin")
+	l:SetColor(rgb[1], rgb[2], rgb[3], 1)
+	l:SetAnchor(CENTER, b, CENTER, 0, 0)
+	b.label = l
+	function b:SetText(t)
+		l:SetText(t or "")
+		b:SetWidth(math.ceil(l:GetTextWidth()) + 12)
+	end
+	function b:SetColorRGB(c)
+		l:SetColor(c[1], c[2], c[3], 1)
+		b:SetEdgeColor(c[1] * 0.6, c[2] * 0.6, c[3] * 0.6, 1)
+	end
+	b:SetText(text)
+	return b
+end
+
+-- A bordered close button ("×") that turns red on hover. onClick read at fire time.
+function QAT.widgets.CloseButton(parent, name, onClick)
+	local b = QAT.widgets.Clickable(parent, name, C.btnBg)
+	b.bg:SetEdgeColor(unpack(C.btnEdge))
+	b.onClick = onClick
+	local l = QAT.widgets.Label(b, name .. "_L", "×", "$(BOLD_FONT)|22|soft-shadow-thin")
+	l:SetAnchor(CENTER, b, CENTER, 0, -2)
+	l:SetColor(0.75, 0.80, 0.88, 1)
+	b:SetHandler("OnMouseEnter", function(self)
+		self.bg:SetCenterColor(0.42, 0.13, 0.13, 1)
+		l:SetColor(1, 0.85, 0.85, 1)
+	end)
+	b:SetHandler("OnMouseExit", function(self)
+		self.bg:SetCenterColor(unpack(C.btnBg))
+		l:SetColor(0.75, 0.80, 0.88, 1)
+	end)
+	b:SetHandler("OnMouseUp", function(self, button, upInside)
+		if upInside and button == MOUSE_BUTTON_INDEX_LEFT and self.onClick then
+			self.onClick()
+		end
+	end)
+	return b
+end
+
 -- A 1px horizontal rule for separating sections. Anchor it yourself (left/right).
 function QAT.widgets.Divider(parent, name)
 	local d = WM:CreateControl(name, parent, CT_BACKDROP)

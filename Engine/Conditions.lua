@@ -3,9 +3,10 @@
 ---
 --- All predicates match stable numeric IDs (setId / abilityId / zoneId / classId),
 --- never localized name strings, so conditions are language-independent. Set
---- conditions count the cross-bar theoretical maximum (body/jewelry pieces plus
---- the better of the two weapon bars) so a set placed on a single weapon bar does
---- not make a tracker flicker on weapon swap.
+--- conditions are gear-placement checks: they count body/jewelry pieces plus a
+--- chosen weapon bar ("any" = the better of the two, "front"/"back" = that bar),
+--- and never depend on which weapon bar is currently drawn — so a tracker does not
+--- flicker on weapon swap.
 
 QAT.conditions = {}
 
@@ -63,10 +64,11 @@ local function countSetOnWeaponBar(setId, slots)
 	return n
 end
 
---- Whether an equipped-set condition is satisfied.
----@param cond table { setId:number, pieces:number, mode:"any"|"current" }
----  mode "any" (default) counts the cross-bar maximum; "current" counts only the
----  drawn weapon bar's pieces (live bonus state).
+--- Whether an equipped-set condition is satisfied. Gear placement only — the check
+--- never depends on which weapon bar is currently drawn.
+---@param cond table { setId:number, pieces:number, mode:"any"|"front"|"back" }
+---  "any" (default) counts body/jewelry plus the better weapon bar; "front"/"back"
+---  count body/jewelry plus that specific weapon bar's pieces.
 ---@return boolean
 function QAT.conditions.SetSatisfied(cond)
 	local body = countSetInSlots(cond.setId, BODY_JEWELRY_SLOTS)
@@ -74,16 +76,172 @@ function QAT.conditions.SetSatisfied(cond)
 	local back = countSetOnWeaponBar(cond.setId, BACK_WEAPON_SLOTS)
 	local need = cond.pieces or 5
 
-	if cond.mode == "current" then
-		-- Only the drawn bar's weapons count (live bonus state).
-		local activePair = GetActiveWeaponPairInfo()
-		local weapons = (activePair == 1) and front or back
-		return (body + weapons) >= need
+	local weapons
+	if cond.mode == "front" then
+		weapons = front
+	elseif cond.mode == "back" then
+		weapons = back
+	else
+		-- "any" (default; also legacy "current"): the better of the two bars.
+		weapons = front > back and front or back
+	end
+	return (body + weapons) >= need
+end
+
+--- The client-language name of a set id via LibSets (a hard dependency), or a
+--- "#<id>" fallback so the editor still shows something for an unknown id.
+---@param setId number
+---@return string
+function QAT.conditions.SetName(setId)
+	if setId and setId > 0 and LibSets and LibSets.GetSetName then
+		local name = LibSets.GetSetName(setId)
+		if type(name) == "table" then
+			name = name[GetCVar("Language.2")] or name["en"]
+		end
+		if type(name) == "string" and name ~= "" then
+			return name
+		end
+	end
+	return setId and setId > 0 and ("#" .. setId) or ""
+end
+
+--- A representative item link for a set, via LibSets, for the native set tooltip and
+--- icon. Prefers the chest, then head, then any piece, so the icon is a stable armor
+--- tile (a weapon-only set falls back to its weapon). nil if unavailable.
+---@param setId number
+---@return string|nil
+function QAT.conditions.SetItemLink(setId)
+	if not (setId and setId > 0 and LibSets) then
+		return nil
+	end
+	local byType = LibSets.GetSetItemId
+	local itemId = byType and (byType(setId, nil, EQUIP_TYPE_CHEST) or byType(setId, nil, EQUIP_TYPE_HEAD))
+	itemId = itemId or (LibSets.GetSetFirstItemId and LibSets.GetSetFirstItemId(setId))
+	if itemId and itemId > 0 and LibSets.buildItemLink then
+		return LibSets.buildItemLink(itemId)
+	end
+	return nil
+end
+
+--- Whether a set has weapon pieces (so a bar choice is meaningful). Body/jewelry-
+--- only sets, mythics and monster sets are always active while worn, on both bars.
+---@param setId number
+---@return boolean
+function QAT.conditions.SetHasWeapons(setId)
+	if not (setId and setId > 0 and LibSets and LibSets.GetSetItemId) then
+		return false
+	end
+	return (
+		LibSets.GetSetItemId(setId, nil, EQUIP_TYPE_ONE_HAND) or LibSets.GetSetItemId(setId, nil, EQUIP_TYPE_TWO_HAND)
+	) ~= nil
+end
+
+-- Worn slots grouped for the loadout view. region drives which bar a slot's set
+-- pieces count toward; label is what the editor shows.
+local LOADOUT_SLOTS = {
+	{ slot = EQUIP_SLOT_HEAD, label = "Head", region = "body" },
+	{ slot = EQUIP_SLOT_SHOULDERS, label = "Shoulders", region = "body" },
+	{ slot = EQUIP_SLOT_CHEST, label = "Chest", region = "body" },
+	{ slot = EQUIP_SLOT_HAND, label = "Hands", region = "body" },
+	{ slot = EQUIP_SLOT_WAIST, label = "Waist", region = "body" },
+	{ slot = EQUIP_SLOT_LEGS, label = "Legs", region = "body" },
+	{ slot = EQUIP_SLOT_FEET, label = "Feet", region = "body" },
+	{ slot = EQUIP_SLOT_NECK, label = "Neck", region = "body" },
+	{ slot = EQUIP_SLOT_RING1, label = "Ring", region = "body" },
+	{ slot = EQUIP_SLOT_RING2, label = "Ring", region = "body" },
+	{ slot = EQUIP_SLOT_MAIN_HAND, label = "Front main hand", region = "front" },
+	{ slot = EQUIP_SLOT_OFF_HAND, label = "Front off hand", region = "front" },
+	{ slot = EQUIP_SLOT_BACKUP_MAIN, label = "Back main hand", region = "back" },
+	{ slot = EQUIP_SLOT_BACKUP_OFF, label = "Back off hand", region = "back" },
+}
+
+local function slotsOnlyHeadShoulder(slotIds)
+	for _, s in ipairs(slotIds) do
+		if s ~= EQUIP_SLOT_HEAD and s ~= EQUIP_SLOT_SHOULDERS then
+			return false
+		end
+	end
+	return #slotIds > 0
+end
+
+--- Scan the player's equipped gear into set entries for the editor's "current
+--- loadout" view. Each entry carries the piece count and the bar a condition
+--- should use (front/back for weapon-only sets, otherwise any), the slots the
+--- pieces sit in, and a display category (grouping only — not part of the check).
+---@return table[] entries { setId, name, icon, pieces, bar, category, slots:string[] }
+function QAT.conditions.ScanEquippedSets()
+	local byId, order = {}, {}
+	for _, info in ipairs(LOADOUT_SLOTS) do
+		local link = GetItemLink(BAG_WORN, info.slot)
+		if link and link ~= "" then
+			local hasSet, setName, _, _, maxEquipped, setId = GetItemLinkSetInfo(link, false)
+			if hasSet and setId and setId > 0 then
+				local e = byId[setId]
+				if not e then
+					e = {
+						setId = setId,
+						name = (setName ~= "" and setName) or QAT.conditions.SetName(setId),
+						icon = GetItemLinkIcon(link),
+						link = link, -- a real worn piece; drives the hover tooltip
+						maxEquipped = maxEquipped or 0,
+						body = 0,
+						front = 0,
+						back = 0,
+						slots = {},
+						slotIds = {},
+					}
+					byId[setId] = e
+					order[#order + 1] = setId
+				end
+				local weight = 1
+				if info.region == "front" or info.region == "back" then
+					weight = (GetItemLinkEquipType(link) == EQUIP_TYPE_TWO_HAND) and 2 or 1
+				end
+				e[info.region] = e[info.region] + weight
+				e.slots[#e.slots + 1] = info.label
+				e.slotIds[#e.slotIds + 1] = info.slot
+			end
+		end
 	end
 
-	-- "any" (default): can the set reach the threshold on *either* bar?
-	local best = front > back and front or back
-	return (body + best) >= need
+	local entries = {}
+	for _, setId in ipairs(order) do
+		local e = byId[setId]
+		-- The bar is decided by where the set's WEAPON pieces sit: weapons on one bar
+		-- mean the set is completed on that bar (its body/jewelry pieces count on
+		-- both). Only a set with no weapon pieces (or weapons on both bars) is "any".
+		local bar, pieces, category
+		if e.front > 0 and e.back == 0 then
+			bar, category, pieces = "front", "front", e.body + e.front
+		elseif e.back > 0 and e.front == 0 then
+			bar, category, pieces = "back", "back", e.body + e.back
+		else
+			bar = "any"
+			pieces = e.body + (e.front > e.back and e.front or e.back)
+			if e.maxEquipped == 1 then
+				category = "mythic"
+			elseif e.maxEquipped <= 2 and slotsOnlyHeadShoulder(e.slotIds) then
+				category = "monster"
+			else
+				category = "body"
+			end
+		end
+		-- Canonical chest/head icon so a set looks the same in the loadout and in a
+		-- condition row, but keep the real worn piece for the hover tooltip so it shows
+		-- your actual equipped item (trait/enchant/set count), not a generic piece.
+		local canonLink = QAT.conditions.SetItemLink(e.setId)
+		entries[#entries + 1] = {
+			setId = e.setId,
+			name = e.name,
+			icon = (canonLink and GetItemLinkIcon(canonLink)) or e.icon,
+			link = e.link,
+			pieces = pieces,
+			bar = bar,
+			category = category,
+			slots = e.slots,
+		}
+	end
+	return entries
 end
 
 -- True if any of abilityIds is slotted on either hotbar.

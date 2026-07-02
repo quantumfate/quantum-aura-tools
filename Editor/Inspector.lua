@@ -300,21 +300,29 @@ function QAT.Editor_Inspector_Build(pane)
 	placeholder:SetVerticalAlignment(TEXT_ALIGN_TOP)
 	insp.placeholder = placeholder
 
-	-- One container per per-phase tab, plus an aura-wide Load container; the body
-	-- shows exactly one at a time.
+	-- One scroll viewport per per-phase tab, plus an aura-wide Load viewport; the
+	-- body shows exactly one at a time. Each is a ZO_ScrollContainer that clips and
+	-- scrolls its content; renderers draw into its ScrollChild (the "container"),
+	-- which resizes to fit so the scrollbar/mouse-wheel track the content height.
+	local function makeViewport(name)
+		local sc = WM:CreateControlFromVirtual(name, body, "ZO_ScrollContainer")
+		sc:SetAnchor(TOPLEFT, body, TOPLEFT, 0, 0)
+		sc:SetAnchor(BOTTOMRIGHT, body, BOTTOMRIGHT, 0, 0)
+		sc:SetHidden(true)
+		local child = GetControl(sc, "ScrollChild")
+		child:SetResizeToFitDescendents(true)
+		child:SetResizeToFitPadding(0, 16)
+		return sc, child
+	end
+
+	insp.tabScrolls = {}
 	insp.tabContainers = {}
 	for _, tabName in ipairs(PHASE_TABS) do
-		local c = WM:CreateControl("QAT_Insp_Tab_" .. tabName, body, CT_CONTROL)
-		c:SetAnchor(TOPLEFT, body, TOPLEFT, 0, 0)
-		c:SetAnchor(BOTTOMRIGHT, body, BOTTOMRIGHT, 0, 0)
-		c:SetHidden(true)
-		insp.tabContainers[tabName] = c
+		local sc, child = makeViewport("QAT_Insp_Tab_" .. tabName)
+		insp.tabScrolls[tabName] = sc
+		insp.tabContainers[tabName] = child
 	end
-	local loadC = WM:CreateControl("QAT_Insp_LoadContainer", body, CT_CONTROL)
-	loadC:SetAnchor(TOPLEFT, body, TOPLEFT, 0, 0)
-	loadC:SetAnchor(BOTTOMRIGHT, body, BOTTOMRIGHT, 0, 0)
-	loadC:SetHidden(true)
-	insp.loadContainer = loadC
+	insp.loadScroll, insp.loadContainer = makeViewport("QAT_Insp_LoadContainer")
 
 	QAT.Editor_Inspector_Show(nil)
 end
@@ -365,10 +373,13 @@ refreshBody = function()
 
 	local def = insp.currentId and findDef(QAT.sv.trackers, insp.currentId)
 
-	for _, c in pairs(insp.tabContainers or {}) do
-		c:SetHidden(true)
+	for _, sc in pairs(insp.tabScrolls or {}) do
+		sc:SetHidden(true)
 	end
-	insp.loadContainer:SetHidden(true)
+	insp.loadScroll:SetHidden(true)
+	-- The viewport width renderers should lay out against (the scroll child fits its
+	-- content, so its own width can't be read for this). Leave room for the scrollbar.
+	local viewportW = insp.body:GetWidth() - 16
 
 	if not def then
 		insp.placeholder:SetHidden(false)
@@ -402,7 +413,8 @@ refreshBody = function()
 			local container = insp.tabContainers[tab]
 			local renderer = QAT.editor.tabRenderers[tab]
 			if container and renderer then
-				container:SetHidden(false)
+				insp.tabScrolls[tab]:SetHidden(false)
+				container.qatViewportW = viewportW
 				QAT.Safe("tab " .. tab, function()
 					renderer(container, def)
 				end)
@@ -413,7 +425,8 @@ refreshBody = function()
 			end
 			local renderer = QAT.editor.tabRenderers["Load"]
 			if renderer then
-				insp.loadContainer:SetHidden(false)
+				insp.loadScroll:SetHidden(false)
+				insp.loadContainer.qatViewportW = viewportW
 				QAT.Safe("tab Load", function()
 					renderer(insp.loadContainer, def)
 				end)
@@ -513,7 +526,11 @@ function QAT.Editor_Inspector_SetTab(_)
 end
 
 function QAT.Editor_Inspector_Relayout()
-	-- Header / breadcrumb / body all anchor to the pane; nothing extra yet.
+	-- Header / breadcrumb / body anchor to the pane automatically; re-render the
+	-- active tab so its fixed-width cards pick up the new viewport width.
+	if QAT.editor.inspector and QAT.editor.inspector.currentId then
+		refreshBody()
+	end
 end
 
 CALLBACK_MANAGER:RegisterCallback("QAT_TrackerChanged", function(id)
@@ -522,3 +539,28 @@ CALLBACK_MANAGER:RegisterCallback("QAT_TrackerChanged", function(id)
 		QAT.Editor_Inspector_Show(id)
 	end
 end)
+
+-- Keep the "current loadout" card live: when worn slots change (equip/unequip),
+-- re-render the Load scope. Trailing-debounced via RegisterForUpdate so a mass gear
+-- swap (e.g. Wizard's Wardrobe changing every slot at once) settles into a single
+-- rebuild ~150ms after the last change, rather than one per slot.
+local WORN_EVT = QAT.name .. "_WornChanged"
+local WORN_TICK = QAT.name .. "_WornRefresh"
+local function scheduleLoadoutRefresh()
+	local insp = QAT.editor.inspector
+	if not (QAT.editor.frame and not QAT.editor.frame:IsHidden() and insp and insp.currentId) then
+		return
+	end
+	if (QAT.editor.selectedScope or "load") ~= "load" then
+		return -- the loadout card only shows in Load scope
+	end
+	EVENT_MANAGER:UnregisterForUpdate(WORN_TICK) -- reset the timer on each change
+	EVENT_MANAGER:RegisterForUpdate(WORN_TICK, 150, function()
+		EVENT_MANAGER:UnregisterForUpdate(WORN_TICK) -- one-shot
+		if QAT.Editor_Inspector_Refresh then
+			QAT.Editor_Inspector_Refresh()
+		end
+	end)
+end
+EVENT_MANAGER:RegisterForEvent(WORN_EVT, EVENT_INVENTORY_SINGLE_SLOT_UPDATE, scheduleLoadoutRefresh)
+EVENT_MANAGER:AddFilterForEvent(WORN_EVT, EVENT_INVENTORY_SINGLE_SLOT_UPDATE, REGISTER_FILTER_BAG_ID, BAG_WORN)

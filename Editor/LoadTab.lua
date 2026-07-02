@@ -28,6 +28,25 @@ local COMBAT_OPTS = {
 	{ label = "In combat", value = "in" },
 	{ label = "Out of combat", value = "out" },
 }
+-- The per-set bar toggle: which weapon bar a set's pieces are counted on (gear
+-- placement, never the drawn bar).
+local BAR_OPTS = { { "any", "Any bar" }, { "front", "Front bar" }, { "back", "Back bar" } }
+-- Bar-mode accent colors: amber = any, teal = front, blue = back. Ties the group
+-- badge to the segmented control.
+local BAR_COLOR = {
+	any = { 0.90, 0.72, 0.30 },
+	front = { 0.35, 0.80, 0.72 },
+	back = { 0.45, 0.62, 0.90 },
+}
+local BAR_LABEL = { any = "Any bar", front = "Front bar", back = "Back bar" }
+-- Current-loadout groups, in display order. Category keys match ScanEquippedSets.
+local LOADOUT_GROUPS = {
+	{ key = "body", header = "Body & jewelry", badge = "Any bar", note = "counts on both bars" },
+	{ key = "front", header = "Front bar", badge = "Front bar", note = "front-bar weapons" },
+	{ key = "back", header = "Back bar", badge = "Back bar", note = "back-bar weapons" },
+	{ key = "mythic", header = "Mythic", badge = "Any bar", note = "one-piece unique" },
+	{ key = "monster", header = "Monster set", badge = "Any bar", note = "head / shoulder" },
+}
 
 local function commit(def)
 	QAT.widgets.NotifyTrackerChanged(def.id)
@@ -84,7 +103,7 @@ local function renderMembers(container, def, get, cw, OUT)
 	end)
 	addBtn:SetHeight(24)
 	addBtn:ClearAnchors()
-	addBtn:SetAnchor(TOPRIGHT, container, TOPRIGHT, -(OUT + card.padX), OUT + 6)
+	addBtn:SetAnchor(TOPRIGHT, card, TOPRIGHT, -card.padX, 6)
 	addBtn.onClick = function()
 		if QAT.Editor_AddTrackerToGroup then
 			QAT.Editor_AddTrackerToGroup(def.id)
@@ -168,6 +187,160 @@ local function renderMembers(container, def, get, cw, OUT)
 	return y + 22 -- start the load card a gap below the members card
 end
 
+-- The "current loadout" card: read equipped gear live and, per set, offer a
+-- one-click "add as condition" that pre-fills the piece count and the correct bar
+-- (front/back detected from the slot). Anchored at container-space y = top.
+local function renderLoadout(container, def, load, get, cw, OUT, top)
+	local card = get("locard", function()
+		return QAT.widgets.Card(container, "QAT_Load_LoCard", "Current loadout")
+	end)
+	card:SetTitle("Current loadout")
+	card:ClearAnchors()
+	card:SetAnchor(TOPLEFT, container, TOPLEFT, OUT, top)
+	local PAD = OUT + card.padX
+	local y = top + card.contentY
+
+	local sub = get("loSub", function()
+		return QAT.widgets.Label(container, "QAT_Load_LoSub", "")
+	end)
+	sub:SetText("Read from your equipped gear. Add pre-fills the piece count and the bar (front/back from the slot).")
+	sub:SetColor(0.55, 0.6, 0.7, 1)
+	sub:ClearAnchors()
+	sub:SetAnchor(TOPLEFT, container, TOPLEFT, PAD, y + 3)
+	y = y + 26
+
+	local entries = QAT.conditions.ScanEquippedSets()
+	local byCat = {}
+	for _, e in ipairs(entries) do
+		byCat[e.category] = byCat[e.category] or {}
+		table.insert(byCat[e.category], e)
+	end
+
+	local function addAsCondition(e)
+		load.sets = load.sets or {}
+		local existing
+		for _, s in ipairs(load.sets) do
+			if s.setId == e.setId then
+				existing = s
+				break
+			end
+		end
+		if existing then
+			existing.pieces, existing.mode = e.pieces, e.bar
+		else
+			table.insert(load.sets, { setId = e.setId, pieces = e.pieces, mode = e.bar })
+		end
+		commit(def)
+		render(container, def)
+	end
+
+	if #entries == 0 then
+		local empty = get("loEmpty", function()
+			return QAT.widgets.Label(container, "QAT_Load_LoEmpty", "")
+		end)
+		empty:SetText("No set pieces equipped.")
+		empty:SetColor(0.5, 0.55, 0.64, 1)
+		empty:ClearAnchors()
+		empty:SetAnchor(TOPLEFT, container, TOPLEFT, PAD, y + 2)
+		y = y + ROW_H
+	end
+
+	local rowW = cw - OUT * 2 - card.padX * 2
+	local ROWH = 64
+	local n, chipN = 0, 0 -- running indices for pooled controls
+	for _, g in ipairs(LOADOUT_GROUPS) do
+		local list = byCat[g.key]
+		if list and #list > 0 then
+			-- Group header: name + colored bar badge + muted hint.
+			local h = get("loH" .. g.key, function()
+				return QAT.widgets.Label(container, "QAT_Load_LoH" .. g.key, "", "$(BOLD_FONT)|15|soft-shadow-thin")
+			end)
+			h:SetText(g.header)
+			h:SetColor(0.68, 0.74, 0.84, 1)
+			h:ClearAnchors()
+			h:SetAnchor(TOPLEFT, container, TOPLEFT, PAD, y + 2)
+			local mode = (g.key == "front" and "front") or (g.key == "back" and "back") or "any"
+			local badge = get("loB" .. g.key, function()
+				return QAT.widgets.Badge(container, "QAT_Load_LoB" .. g.key, "", BAR_COLOR[mode])
+			end)
+			badge:SetColorRGB(BAR_COLOR[mode])
+			badge:SetText(BAR_LABEL[mode])
+			badge:ClearAnchors()
+			badge:SetAnchor(LEFT, h, RIGHT, 10, 0)
+			local note = get("loN" .. g.key, function()
+				return QAT.widgets.Label(container, "QAT_Load_LoN" .. g.key, "")
+			end)
+			note:SetText(g.note)
+			note:SetColor(0.45, 0.5, 0.6, 1)
+			note:ClearAnchors()
+			note:SetAnchor(LEFT, badge, RIGHT, 8, 0)
+			y = y + ROW_H
+
+			for _, e in ipairs(list) do
+				n = n + 1
+				-- Each set sits in its own bordered row card so the list is scannable.
+				local rowc = get("loRow" .. n, function()
+					return QAT.widgets.Panel(
+						container,
+						"QAT_Load_LoRow" .. n,
+						{ 0.039, 0.078, 0.110, 1 },
+						{ 0.114, 0.165, 0.208, 1 }
+					)
+				end)
+				rowc:SetHidden(false)
+				rowc:ClearAnchors()
+				rowc:SetAnchor(TOPLEFT, container, TOPLEFT, PAD, y)
+				rowc:SetDimensions(rowW, ROWH)
+
+				local swatch = get("loSw" .. n, function()
+					return QAT.widgets.IconWell(container, "QAT_Load_LoSw" .. n, 34)
+				end)
+				swatch:SetTexture(e.icon or "/esoui/art/icons/icon_missing.dds")
+				swatch:ClearAnchors()
+				swatch:SetAnchor(LEFT, rowc, LEFT, 12, 0)
+
+				local nm = get("loNm" .. n, function()
+					return QAT.widgets.Label(container, "QAT_Load_LoNm" .. n, "")
+				end)
+				nm:SetText(string.format("%s  |c888888#%d · %d pc|r", e.name or "?", e.setId, e.pieces))
+				nm:ClearAnchors()
+				nm:SetAnchor(TOPLEFT, rowc, TOPLEFT, 58, 13)
+				QAT.widgets.ItemTooltip(nm, e.link)
+
+				-- Slot occupancy as chips.
+				local cx = 58
+				for _, slotName in ipairs(e.slots) do
+					chipN = chipN + 1
+					local chip = get("loChip" .. chipN, function()
+						return QAT.widgets.Chip(container, "QAT_Load_LoChip" .. chipN, "")
+					end)
+					chip:SetHidden(false)
+					chip:SetText(slotName)
+					chip:ClearAnchors()
+					chip:SetAnchor(TOPLEFT, rowc, TOPLEFT, cx, 38)
+					cx = cx + chip:GetWidth() + 6
+				end
+
+				local addBtn = get("loAdd" .. n, function()
+					return QAT.widgets.TextButton(container, "QAT_Load_LoAdd" .. n, "+ Add as condition", nil)
+				end)
+				addBtn:SetHeight(ROW_H)
+				addBtn:ClearAnchors()
+				addBtn:SetAnchor(RIGHT, rowc, RIGHT, -12, 0)
+				local ent = e
+				addBtn.onClick = function()
+					addAsCondition(ent)
+				end
+
+				y = y + ROWH + 8
+			end
+			y = y + 4
+		end
+	end
+
+	card:SetDimensions(cw - OUT * 2, (y - top) + 8)
+end
+
 render = function(container, def)
 	local pool = container.pool or QAT.widgets.NewPool()
 	container.pool = pool
@@ -181,7 +354,7 @@ render = function(container, def)
 
 	-- Wrap the content in a titled card (created first so it draws behind). Groups
 	-- get a Members card stacked above the load card.
-	local cw = container:GetWidth()
+	local cw = container.qatViewportW or container:GetWidth()
 	if cw < 240 then
 		cw = 900
 	end
@@ -373,27 +546,20 @@ render = function(container, def)
 	end
 	y = y + ROW_H + GAP
 
-	-- Equipped sets (id + pieces + bar mode). One row per set.
+	-- Equipped sets: pieces + id, the resolved set name, and which bar to count
+	-- (any / front / back — gear placement, never the drawn bar). One row per set.
 	label("lSets", "Sets", y)
 	load.sets = load.sets or {}
 	y = y + ROW_H
 	for i, s in ipairs(load.sets) do
 		local x = LX
 		local idx = i
-		local setIdBox = get("setId" .. i, function()
-			return QAT.widgets.EditBox(container, "QAT_Load_SetId" .. i, 90, ROW_H)
-		end)
-		setIdBox.onChange = function(text)
-			s.setId = tonumber(text) or 0
-			commit(def)
+		if s.mode ~= "front" and s.mode ~= "back" then
+			s.mode = "any" -- normalize legacy "current"/nil so a toggle reads as selected
 		end
-		setIdBox:SetText(tostring(s.setId or 0))
-		setIdBox:ClearAnchors()
-		setIdBox:SetAnchor(TOPLEFT, container, TOPLEFT, x, y)
-		x = x + 96
 
 		local piecesBox = get("setPc" .. i, function()
-			return QAT.widgets.EditBox(container, "QAT_Load_SetPc" .. i, 50, ROW_H)
+			return QAT.widgets.EditBox(container, "QAT_Load_SetPc" .. i, 44, ROW_H)
 		end)
 		piecesBox.onChange = function(text)
 			s.pieces = tonumber(text) or 5
@@ -402,30 +568,92 @@ render = function(container, def)
 		piecesBox:SetText(tostring(s.pieces or 5))
 		piecesBox:ClearAnchors()
 		piecesBox:SetAnchor(TOPLEFT, container, TOPLEFT, x, y)
-		x = x + 56
+		x = x + 50
 
-		local modeDD = get("setMode" .. i, function()
-			return QAT.widgets.Dropdown(container, "QAT_Load_SetMode" .. i, 110, {
-				{ label = "Any bar", value = "any" },
-				{ label = "Current bar", value = "current" },
-			}, "any")
+		local pcLbl = get("setPcL" .. i, function()
+			return QAT.widgets.Label(container, "QAT_Load_SetPcL" .. i, "pc")
 		end)
-		modeDD.onSelect = function(v)
-			s.mode = v
+		pcLbl:ClearAnchors()
+		pcLbl:SetAnchor(TOPLEFT, container, TOPLEFT, x, y + 3)
+		x = x + 24
+
+		local setIdBox = get("setId" .. i, function()
+			return QAT.widgets.EditBox(container, "QAT_Load_SetId" .. i, 60, ROW_H)
+		end)
+		setIdBox.onChange = function(text)
+			s.setId = tonumber(text) or 0
 			commit(def)
 		end
-		modeDD:SetValue(s.mode or "any")
-		modeDD:ClearAnchors()
-		modeDD:SetAnchor(TOPLEFT, container, TOPLEFT, x, y)
-		x = x + 116
+		setIdBox:SetText(tostring(s.setId or 0))
+		setIdBox:ClearAnchors()
+		setIdBox:SetAnchor(TOPLEFT, container, TOPLEFT, x, y)
+		x = x + 66
+
+		local link = QAT.conditions.SetItemLink(s.setId or 0)
+		local swatch = get("setSw" .. i, function()
+			return QAT.widgets.IconWell(container, "QAT_Load_SetSw" .. i, ROW_H)
+		end)
+		swatch:SetTexture((link and GetItemLinkIcon(link)) or "/esoui/art/icons/icon_missing.dds")
+		swatch:ClearAnchors()
+		swatch:SetAnchor(TOPLEFT, container, TOPLEFT, x, y)
+		x = x + ROW_H + 6
+
+		-- The × is right-aligned to the card edge. The segmented Any/Front/Back control
+		-- appears only for sets that have weapons (body/jewelry, mythic and monster sets
+		-- are always active while worn, on both bars — no choice to make). The name
+		-- fills the flexible space left of the controls (truncate; hover shows full).
+		local hasWeapons = QAT.conditions.SetHasWeapons(s.setId or 0)
+		if not hasWeapons then
+			s.mode = "any"
+		end
+		local rightX = cw - OUT - card.padX
+		local closeX = rightX - ROW_H
+		local segX = closeX -- no toggle: the name runs up to just left of the ×
+
+		local barBtns = {}
+		if hasWeapons then
+			local segW = 0
+			for _, o in ipairs(BAR_OPTS) do
+				local b = get("setBar" .. o[1] .. i, function()
+					return QAT.widgets.TextButton(container, "QAT_Load_SetBar" .. o[1] .. i, o[2], nil)
+				end)
+				b:SetHeight(ROW_H)
+				b:SetMinWidth(62)
+				b:SetSelected((s.mode or "any") == o[1])
+				b.onClick = function()
+					s.mode = o[1]
+					commit(def)
+				end
+				barBtns[#barBtns + 1] = b
+				segW = segW + b:GetWidth()
+			end
+			segW = segW - (#barBtns - 1) -- 1px border overlaps
+			segX = closeX - 8 - segW
+		end
+
+		local nameLbl = get("setName" .. i, function()
+			return QAT.widgets.Label(container, "QAT_Load_SetName" .. i, "")
+		end)
+		nameLbl:SetText(QAT.conditions.SetName(s.setId or 0))
+		nameLbl:SetMaxLineCount(1) -- truncate long names; hover shows the full set tooltip
+		nameLbl:ClearAnchors()
+		nameLbl:SetAnchor(TOPLEFT, container, TOPLEFT, x, y + 3)
+		nameLbl:SetAnchor(TOPRIGHT, container, TOPLEFT, segX - 10, y + 3)
+		QAT.widgets.ItemTooltip(nameLbl, link)
+
+		local bx = segX
+		for _, b in ipairs(barBtns) do
+			b:ClearAnchors()
+			b:SetAnchor(TOPLEFT, container, TOPLEFT, bx, y)
+			bx = bx + b:GetWidth() - 1
+		end
 
 		local del = get("setDel" .. i, function()
-			return QAT.widgets.TextButton(container, "QAT_Load_SetDel" .. i, "X", nil)
+			return QAT.widgets.CloseButton(container, "QAT_Load_SetDel" .. i, nil)
 		end)
 		del:SetDimensions(ROW_H, ROW_H)
 		del:ClearAnchors()
-		del:SetAnchor(TOPLEFT, container, TOPLEFT, x, y)
-		QAT.widgets.Tooltip(del, "Remove this set condition.")
+		del:SetAnchor(TOPLEFT, container, TOPLEFT, closeX, y)
 		del.onClick = function()
 			table.remove(load.sets, idx)
 			commit(def)
@@ -447,6 +675,12 @@ render = function(container, def)
 	end
 
 	card:SetDimensions(cw - OUT * 2, y + ROW_H + 8 - loadTop)
+
+	-- Current-loadout card: read equipped gear live and offer one-click
+	-- "add as condition" per set. Shown for groups too (a group's sets cascade to
+	-- its members), just as for a single tracker.
+	local loadoutTop = y + ROW_H + 8 + 14
+	renderLoadout(container, def, load, get, cw, OUT, loadoutTop)
 
 	QAT.widgets.PoolEnd(pool)
 end

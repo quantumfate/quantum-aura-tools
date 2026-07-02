@@ -86,7 +86,7 @@ local function render(container, def)
 	local isVisual = kind == "bar" or kind == "icon" or kind == "text"
 	local canLabel = kind == "bar" or kind == "text"
 
-	local cw = container:GetWidth()
+	local cw = container.qatViewportW or container:GetWidth()
 	if cw < 240 then
 		cw = 900
 	end
