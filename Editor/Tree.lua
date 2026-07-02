@@ -324,15 +324,19 @@ local function ensureDot(row, name)
 	return dot
 end
 
--- Shared row shell: a pooled Clickable anchored full-width at y.
+-- Row width, tracking the scroll viewport (set each build). Rows are fixed-width
+-- and left-anchored so the scroll child can resize-to-fit vertically without a
+-- circular width dependency.
+local treeRowW = 280
+
+-- Shared row shell: a pooled Clickable at y, sized to the viewport width.
 local function baseRow(parent, name, y)
 	local row = rows[name] or QAT.widgets.Clickable(parent, name, BG_NONE)
 	rows[name] = row
 	row:SetHidden(false)
 	row:ClearAnchors()
 	row:SetAnchor(TOPLEFT, parent, TOPLEFT, 0, y)
-	row:SetAnchor(TOPRIGHT, parent, TOPRIGHT, 0, y)
-	row:SetHeight(ROW_H)
+	row:SetDimensions(treeRowW, ROW_H)
 	return row
 end
 
@@ -688,30 +692,33 @@ function QAT.Editor_Tree_Build(pane)
 		delBtn:SetAnchor(LEFT, addG, RIGHT, GAP, 0)
 		QAT.widgets.Tooltip(delBtn, "Delete the selected tracker or group.")
 
-		-- Fixed viewport filling the pane below the toolbar. It needs a real rect
-		-- (top + bottom anchored) so its child rows are hit-testable; scrolling is
-		-- done by offsetting the rows' y, not by moving this container.
-		local content = WM:CreateControl("QAT_Tree_Content", pane, CT_CONTROL)
-		content:SetAnchor(TOPLEFT, pane, TOPLEFT, 0, TOOLBAR_H)
-		content:SetAnchor(BOTTOMRIGHT, pane, BOTTOMRIGHT, 0, 0)
-		content:SetMouseEnabled(true)
-		QAT.editor.treeScroll = 0
-		content:SetHandler("OnMouseWheel", function(_, delta)
-			QAT.editor.treeScroll = zo_min(0, QAT.editor.treeScroll + delta * 30)
-			QAT.Editor_Tree_Build()
-		end)
+		-- Scroll viewport filling the pane below the toolbar: a ZO_ScrollContainer so
+		-- rows clip to the pane and scroll with a scrollbar / mouse-wheel (no manual
+		-- offsetting, which let rows draw outside the window). Rows render into its
+		-- ScrollChild, which resizes to fit their height.
+		local sc = WM:CreateControlFromVirtual("QAT_Tree_Scroll", pane, "ZO_ScrollContainer")
+		sc:SetAnchor(TOPLEFT, pane, TOPLEFT, 0, TOOLBAR_H)
+		sc:SetAnchor(BOTTOMRIGHT, pane, BOTTOMRIGHT, 0, 0)
+		local content = GetControl(sc, "ScrollChild")
+		content:SetResizeToFitDescendents(true)
+		content:SetResizeToFitPadding(0, 8)
+		QAT.editor.treeScrollC = sc
 		QAT.editor.treeContent = content
 	end
 
-	-- Hide old rows, then (re)build from the scroll offset.
+	-- Track the viewport width (leave room for the scrollbar), hide old rows, rebuild.
+	treeRowW = math.max(200, QAT.editor.treeScrollC:GetWidth() - 16)
 	for _, row in pairs(rows) do
 		row:SetHidden(true)
 	end
-	buildRows(QAT.editor.treeContent, QAT.sv.trackers, 0, QAT.editor.treeScroll or 0)
+	buildRows(QAT.editor.treeContent, QAT.sv.trackers, 0, 0)
 end
 
 function QAT.Editor_Tree_Relayout()
-	-- Rows anchor to the content/pane width automatically; nothing extra yet.
+	-- Rebuild so rows pick up the new viewport width after a pane/splitter resize.
+	if QAT.editor.treeScrollC then
+		QAT.Editor_Tree_Build()
+	end
 end
 
 -- Rebuild the tree whenever a tracker def changes elsewhere.

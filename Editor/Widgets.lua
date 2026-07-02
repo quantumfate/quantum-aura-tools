@@ -252,8 +252,9 @@ function QAT.widgets.ItemTooltip(control, link)
 end
 
 -- A small bordered "pill" chip for tags (e.g. equipment slots). Sizes to its text.
+local CHIP_EDGE = { 0.13, 0.19, 0.24, 1 }
 function QAT.widgets.Chip(parent, name, text)
-	local c = QAT.widgets.Panel(parent, name, { 0.055, 0.106, 0.145, 1 }, { 0.13, 0.19, 0.24, 1 })
+	local c = QAT.widgets.Panel(parent, name, { 0.055, 0.106, 0.145, 1 }, CHIP_EDGE)
 	local l = QAT.widgets.Label(c, name .. "_L", "", "$(MEDIUM_FONT)|14|soft-shadow-thin")
 	l:SetColor(0.66, 0.73, 0.83, 1)
 	l:SetAnchor(LEFT, c, LEFT, 6, -1)
@@ -261,6 +262,10 @@ function QAT.widgets.Chip(parent, name, text)
 	function c:SetText(t)
 		l:SetText(t or "")
 		c:SetDimensions(math.ceil(l:GetTextWidth()) + 12, 18)
+		-- Re-assert the edge: a CT_BACKDROP border can fail to redraw after a pooled
+		-- chip is resized to a new width, so some chips rendered borderless.
+		c:SetEdgeColor(unpack(CHIP_EDGE))
+		c:SetEdgeTexture("", 1, 1, 1)
 	end
 	c:SetText(text)
 	return c
