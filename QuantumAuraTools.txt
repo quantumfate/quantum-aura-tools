@@ -1,5 +1,5 @@
 ## Title: Quantum's Aura Tools
-## Author: Quantum (quantumfate)
+## Author: |cFF66CC@quantumfate|r
 ## Version: 0.1.0
 ## AddOnVersion: 100
 ## APIVersion: 101050

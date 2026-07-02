@@ -15,6 +15,7 @@
     "duplicate-set-field"
   ],
   "diagnostics.globals": [
+    "AddonCategory",
     "QAT",
     "QAT_ToggleEditor",
     "EVENT_MANAGER",

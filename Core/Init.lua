@@ -4,7 +4,7 @@
 QAT = {
 	name = "QuantumAuraTools",
 	displayName = "Quantum's Aura Tools",
-	author = "Quantum (quantumfate)",
+	author = "@quantumfate",
 	version = "0.1.0",
 	-- Internal data-schema version. Independent of the ZO_SavedVars version
 	-- (which we keep pinned at 1 so it never wipes data); migrations below own
@@ -102,7 +102,9 @@ local function OnAddOnLoaded(_, addonName)
 	QAT.Safe("Settings_Register", QAT.Settings_Register)
 	QAT.Safe("Runtime_Init", QAT.Runtime_Init)
 	QAT.Safe("Editor_Init", QAT.Editor_Init)
-
+	if AddonCategory then
+		AddonCategory.AssignAddonToCategory(addonName, AddonCategory.baseCategories.Combat)
+	end
 	QAT.log.root:Info("%s v%s loaded (schema %d)", QAT.displayName, QAT.version, QAT.sv.schemaVersion)
 end
 
