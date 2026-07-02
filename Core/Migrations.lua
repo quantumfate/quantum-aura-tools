@@ -51,6 +51,14 @@ QAT.migrations = {
 		end
 		convert(sv.trackers)
 	end,
+
+	-- schema 5 -> 6: add the effect-aggregator persistence bucket (pinned records +
+	-- ignored ability ids). The live session catch is transient and never stored.
+	[5] = function(sv)
+		sv.capture = sv.capture or { pinned = {}, ignored = {} }
+		sv.capture.pinned = sv.capture.pinned or {}
+		sv.capture.ignored = sv.capture.ignored or {}
+	end,
 }
 
 function QAT.RunMigrations(sv)

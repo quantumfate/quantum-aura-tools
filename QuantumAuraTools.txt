@@ -28,6 +28,7 @@ Display/Display.lua
 Display/Cues.lua
 Engine/Tracker.lua
 Engine/Runtime.lua
+Engine/Capture.lua
 Examples/SampleTrackers.lua
 Editor/Widgets.lua
 Editor/Dialogs.lua
@@ -38,6 +39,9 @@ Editor/AppearanceTab.lua
 Editor/BehaviorTab.lua
 Editor/ConditionsTab.lua
 Editor/LoadTab.lua
+Editor/Aggregator.lua
+Editor/AggregatorList.lua
+Editor/AggregatorInspector.lua
 Settings/Settings.lua
 Bindings.lua
 Bindings.xml

@@ -4,3 +4,7 @@
 # Drop-in ESO API type stubs for the language server (local only, except the README).
 stubs/*
 !stubs/README.md
+
+# Claude-design handoff package for the Effect Aggregator UI (local only, never push).
+UIUX Layout Refinement.zip
+handoff/

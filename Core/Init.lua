@@ -9,7 +9,7 @@ QAT = {
 	-- Internal data-schema version. Independent of the ZO_SavedVars version
 	-- (which we keep pinned at 1 so it never wipes data); migrations below own
 	-- all schema evolution. See Core/Migrations.lua.
-	schemaVersion = 5,
+	schemaVersion = 6,
 	slash = "/qat",
 }
 
@@ -26,6 +26,10 @@ QAT.defaults = {
 	},
 	trackers = {}, -- tree of tracker and folder defs
 	userLibrary = {}, -- user-captured ability ids, kept separate from the bundled library
+	capture = { -- effect-aggregator persistence (the session catch itself is transient)
+		pinned = {}, -- key -> frozen CapturedEffect record, kept across reloads
+		ignored = {}, -- abilityId -> true, permanently suppressed known-noise
+	},
 	editor = { -- editor window geometry
 		x = 200,
 		y = 200,
@@ -101,7 +105,9 @@ local function OnAddOnLoaded(_, addonName)
 	-- aborting the rest of load (critical while the UI is unverified in-game).
 	QAT.Safe("Settings_Register", QAT.Settings_Register)
 	QAT.Safe("Runtime_Init", QAT.Runtime_Init)
+	QAT.Safe("Capture_Init", QAT.Capture_Init)
 	QAT.Safe("Editor_Init", QAT.Editor_Init)
+	QAT.Safe("Aggregator_Init", QAT.Aggregator_Init)
 	if AddonCategory then
 		AddonCategory.AssignAddonToCategory(addonName, AddonCategory.baseCategories.Combat)
 	end
@@ -120,9 +126,72 @@ local function HandleSlash(args)
 		return
 	end
 	if args == "capture on" or args == "capture off" then
-		local on = (args == "capture on")
-		QAT.sv.account.backgroundCapture = on
-		d(QAT.displayName .. ": background capture " .. (on and "ENABLED" or "DISABLED"))
+		if args == "capture on" then
+			QAT.Capture_Start()
+		else
+			QAT.Capture_Stop()
+		end
+		d(QAT.displayName .. ": background capture " .. (QAT.capture.running and "ENABLED" or "DISABLED"))
+		return
+	end
+	-- /qat capture dump [all|<bucket>]
+	--   (default) hides the Self→Self passive noise, like the window's default filter
+	--   all       every row including passives
+	--   bs|sb|gs|os|xb|xx  only that relationship bucket
+	if args == "capture dump" or args:find("^capture dump ") or args == "capture status" then
+		local filter = args:match("^capture dump (%S+)$") -- nil, "all", or a bucket code
+		d(
+			string.format(
+				"%s capture: %s · %d unique rows · %d observations · zone %d",
+				QAT.displayName,
+				QAT.capture.running and "RUNNING" or "stopped",
+				#QAT.capture.list,
+				QAT.capture.observations,
+				QAT.capture.currentZoneId
+			)
+		)
+		local shown, hidden = 0, 0
+		for _, row in ipairs(QAT.capture.list) do
+			local include
+			if filter == nil then
+				include = (row.bucket ~= "ss") -- default: skip passive noise
+			elseif filter == "all" then
+				include = true
+			else
+				include = (row.bucket == filter)
+			end
+			if include then
+				d(
+					string.format(
+						"  [%s] %s (#%d) %s->%s x%d seen%d",
+						row.bucket,
+						row.name,
+						row.abilityId,
+						row.sourceRole,
+						row.targetRole,
+						row.maxStacks,
+						row.seenCount
+					)
+				)
+				shown = shown + 1
+			else
+				hidden = hidden + 1
+			end
+		end
+		if filter == nil and hidden > 0 then
+			d("  (" .. hidden .. " Self→Self passives hidden — /qat capture dump all to show)")
+		elseif shown == 0 then
+			d("  (no rows match)")
+		end
+		return
+	end
+	if args == "capture clear" then
+		QAT.Capture_Clear()
+		d(QAT.displayName .. ": catch cleared")
+		return
+	end
+	if args == "aggregator" or args == "agg" or args == "capture window" then
+		QAT.Aggregator_Toggle()
 		return
 	end
 	if args == "restore examples" or args == "examples" then
@@ -132,6 +201,9 @@ local function HandleSlash(args)
 	d(QAT.displayName .. " commands:")
 	d("  /qat                 open settings")
 	d("  /qat capture on|off  toggle passive ID capture")
+	d("  /qat capture dump    print the current catch")
+	d("  /qat capture clear   drop the current catch")
+	d("  /qat aggregator      open the effect aggregator window")
 	d("  /qat restore examples  re-add deleted example trackers")
 end
 SLASH_COMMANDS["/qat"] = HandleSlash

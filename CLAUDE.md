@@ -5,7 +5,8 @@ HyperTools (no shared code). Namespace `QAT`, SavedVars `QuantumAuraToolsSV`, sl
 `/qat`, API `101050`, MIT. Deps: LibAddonMenu-2.0, LibSets, LibMediaProvider
 (optional LibDebugLogger). Lua 5.1.
 
-Deep docs: `DESIGN.md` (architecture/plan), `EDITOR.md` (editor design). Cross-
+Deep docs: `DESIGN.md` (architecture/plan), `EDITOR.md` (editor design),
+`AGGREGATOR.md` (M5 effect-aggregator data model + Claude-design brief). Cross-
 session facts live in auto-memory (`MEMORY.md` index + files) — read those for the
 grilled specs; this file is the always-loaded quick reference.
 

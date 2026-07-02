@@ -37,8 +37,14 @@ cooldown — instead of stacking several trackers to fake states.
 
 ## Coming next
 
-Effect/ID viewers with capture, a searchable set/ability picker, and an in-addon
-raid-mechanic library.
+**The effect aggregator** — a window into ESO's live data stream that hands you the
+tools to process it. It captures the buffs, debuffs and combat events flowing past
+you, aggregates them by ability, source and target, and lets you turn any one into a
+tracker in a click. It kills the manual ability-ID hunting and the source/target
+guesswork — and in doing so teaches you the data model and how ESO actually emits
+effects in the first place.
+
+Also planned: a searchable set/ability picker and an in-addon raid-mechanic library.
 
 ## Credits & license
 
