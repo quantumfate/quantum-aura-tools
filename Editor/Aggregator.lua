@@ -24,6 +24,7 @@ local RELATIONSHIPS = {
 	{ value = "all", label = "All" },
 	{ value = "bs", label = "Boss→Self" },
 	{ value = "sb", label = "Self→Boss" },
+	{ value = "xb", label = "Other→Boss" },
 	{ value = "gs", label = "Group→Self" },
 	{ value = "ss", label = "Self→Self" },
 }
@@ -113,7 +114,7 @@ end
 
 -- Per-bucket counts (respecting the rest of the filter) for the segment labels.
 local function bucketCounts(fq)
-	local counts = { all = 0, bs = 0, sb = 0, gs = 0, ss = 0 }
+	local counts = { all = 0, bs = 0, sb = 0, xb = 0, gs = 0, ss = 0 }
 	for _, row in ipairs(QAT.capture.list) do
 		if passesNonRelationship(row, fq) then
 			if counts[row.bucket] ~= nil then
@@ -358,7 +359,7 @@ local function buildFilterBar(f)
 	timing.first:ClearAnchors()
 	timing.first:SetAnchor(LEFT, eff.buttons["debuff"], RIGHT, 12, 0)
 
-	local pinned = W.TextButton(bar, "QAT_Agg_Pinned", "★ Pinned only", function()
+	local pinned = W.TextButton(bar, "QAT_Agg_Pinned", "Pinned only", function()
 		local on = not QAT.aggregator.filter.pinnedOnly
 		QAT.aggregator.filter.pinnedOnly = on
 		QAT.aggregator.pinnedBtn:SetSelected(on)
@@ -430,7 +431,9 @@ function QAT.Aggregator_Refresh()
 
 	refreshZoneOptions()
 
-	if QAT.Aggregator_List_Render then
+	-- Freeze holds the LIST still for reading; the control bar keeps updating so the
+	-- FROZEN state is visible and capture is clearly still running.
+	if QAT.Aggregator_List_Render and not cap.frozen then
 		QAT.Aggregator_List_Render()
 	end
 
@@ -486,10 +489,10 @@ function QAT.Aggregator_Init()
 	QAT.Aggregator_Relayout()
 
 	-- Live refresh: the engine coalesces the callback, so this is already throttled.
+	-- Refresh always runs; Refresh itself holds the list when frozen (view pause),
+	-- while still updating the control bar so FROZEN + capture status stay live.
 	CALLBACK_MANAGER:RegisterCallback("QAT_CaptureChanged", function()
-		if not QAT.capture.frozen then
-			QAT.Aggregator_Refresh()
-		end
+		QAT.Aggregator_Refresh()
 	end)
 
 	QAT.log.capture:Info("aggregator window ready")

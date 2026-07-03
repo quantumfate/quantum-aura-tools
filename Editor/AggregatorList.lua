@@ -14,13 +14,19 @@ local HEADER_H = 26
 local ROW_H = 46
 
 -- Section order + copy. Boss→Self leads (the money bucket); Self→Self trails (noise).
-local BUCKET_ORDER = { "bs", "sb", "gs", "os", "ss" }
+local BUCKET_ORDER = { "bs", "sb", "xb", "gs", "os", "ss", "xx" }
 local BUCKET_META = {
 	bs = { label = "Boss → Self", hint = "incoming boss mechanics", color = { 0.851, 0.541, 0.416 } },
 	sb = { label = "Self → Boss", hint = "your debuffs on the boss", color = { 0.310, 0.690, 0.627 } },
+	xb = {
+		label = "Other → Boss",
+		hint = "on the target, not by you (its own states / dummy debuffs)",
+		color = { 0.780, 0.639, 0.400 },
+	},
 	gs = { label = "Group → Self", hint = "buffs from your group", color = { 0.435, 0.604, 0.816 } },
 	os = { label = "Other → Self", hint = "from adds / environment", color = { 0.55, 0.60, 0.68 } },
 	ss = { label = "Self → Self", hint = "your passives", color = { 0.490, 0.557, 0.627 } },
+	xx = { label = "Other", hint = "unclassified", color = { 0.5, 0.5, 0.5 } },
 }
 
 local COL_BUFF = { 0.561, 0.816, 0.478 }
@@ -86,9 +92,10 @@ local function makeRow(parent, name)
 	nameL:SetAnchor(TOPLEFT, icon, TOPRIGHT, 10, 0)
 	c.nameL = nameL
 
-	local pin = W.Label(c, name .. "_Pin", "", "$(MEDIUM_FONT)|15|soft-shadow-thin")
-	pin:SetColor(COL_PINNED[1], COL_PINNED[2], COL_PINNED[3], 1)
-	pin:SetAnchor(LEFT, nameL, RIGHT, 6, 0)
+	-- Gold pin marker: a small panel (a glyph star boxes out in the default font).
+	local pin = W.Panel(c, name .. "_Pin", { COL_PINNED[1], COL_PINNED[2], COL_PINNED[3], 1 })
+	pin:SetDimensions(8, 8)
+	pin:SetAnchor(LEFT, nameL, RIGHT, 8, -1)
 	c.pin = pin
 
 	local seenL = W.Label(c, name .. "_Seen", "", "$(MEDIUM_FONT)|14|soft-shadow-thin")
@@ -149,7 +156,7 @@ local function bindRow(c, row, y)
 
 	c.icon:SetTexture(row.icon)
 	c.nameL:SetText(row.name or ("#" .. row.abilityId))
-	c.pin:SetText(row.pinned and "★" or "")
+	c.pin:SetHidden(not row.pinned)
 	c.seenL:SetText("seen " .. (row.seenCount or 0))
 	c.idL:SetText("#" .. row.abilityId)
 

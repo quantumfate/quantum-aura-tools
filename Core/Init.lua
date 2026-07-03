@@ -190,6 +190,21 @@ local function HandleSlash(args)
 		d(QAT.displayName .. ": catch cleared")
 		return
 	end
+	if args == "capture ignored" then
+		local any = false
+		for id in pairs(QAT.sv.capture.ignored) do
+			d(string.format("  #%d — %s", id, GetAbilityName(id)))
+			any = true
+		end
+		d(QAT.displayName .. (any and ": ignored abilities (/qat capture unignore <id>)" or ": no ignored abilities"))
+		return
+	end
+	local unignoreId = args:match("^capture unignore (%d+)$")
+	if unignoreId then
+		QAT.Capture_Unignore(tonumber(unignoreId))
+		d(QAT.displayName .. ": un-ignored #" .. unignoreId .. " (recaptures on next sighting)")
+		return
+	end
 	if args == "aggregator" or args == "agg" or args == "capture window" then
 		QAT.Aggregator_Toggle()
 		return
@@ -203,6 +218,8 @@ local function HandleSlash(args)
 	d("  /qat capture on|off  toggle passive ID capture")
 	d("  /qat capture dump    print the current catch")
 	d("  /qat capture clear   drop the current catch")
+	d("  /qat capture ignored           list ignored abilities")
+	d("  /qat capture unignore <id>     un-ignore an ability")
 	d("  /qat aggregator      open the effect aggregator window")
 	d("  /qat restore examples  re-add deleted example trackers")
 end

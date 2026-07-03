@@ -18,18 +18,29 @@ local COL_PASSIVE = { 0.561, 0.635, 0.698 }
 local BUCKET_COL = {
 	bs = { 0.851, 0.541, 0.416 },
 	sb = { 0.310, 0.690, 0.627 },
+	xb = { 0.780, 0.639, 0.400 },
 	gs = { 0.435, 0.604, 0.816 },
 	os = { 0.55, 0.60, 0.68 },
 	ss = { 0.490, 0.557, 0.627 },
+	xx = { 0.5, 0.5, 0.5 },
 }
-local BUCKET_LABEL =
-	{ bs = "BOSS→SELF", sb = "SELF→BOSS", gs = "GROUP→SELF", os = "OTHER→SELF", ss = "SELF→SELF" }
+local BUCKET_LABEL = {
+	bs = "BOSS→SELF",
+	sb = "SELF→BOSS",
+	xb = "OTHER→BOSS",
+	gs = "GROUP→SELF",
+	os = "OTHER→SELF",
+	ss = "SELF→SELF",
+	xx = "OTHER",
+}
 local MEANING = {
 	bs = "An incoming boss mechanic — cast on you by the boss (or the environment). The one you usually want to track and react to.",
 	sb = "One of your own debuffs sitting on the boss. Track it to watch your uptime.",
+	xb = "An effect on your target that you didn't apply — its own buffs/states, or the debuffs a trial dummy puts on itself to simulate a raid.",
 	gs = "A buff applied to you by a group member.",
 	os = "Applied to you by an add or the environment (not the boss frame).",
 	ss = "Your own standing buff or passive (your kit, gear, food, CP).",
+	xx = "Unclassified relationship.",
 }
 
 -- Reverse enum maps so the raw table shows the real constant names ESO returns.
@@ -119,7 +130,7 @@ function QAT.Aggregator_Inspector_Build(pane)
 	I.relBadge:SetAnchor(LEFT, I.timeBadge, RIGHT, 6, 0)
 
 	-- Actions: Build Tracker (primary) then Pin / Copy id / Ignore.
-	local build = W.TextButton(body, "QAT_AggIns_Build", "➜ Build Tracker", function()
+	local build = W.TextButton(body, "QAT_AggIns_Build", "Build Tracker", function()
 		QAT.Aggregator_BuildTracker(I.row)
 	end)
 	build:SetHeight(32)
@@ -128,7 +139,7 @@ function QAT.Aggregator_Inspector_Build(pane)
 	build:SetMinWidth(INNER_W)
 	I.buildBtn = build
 
-	I.pinBtn = W.TextButton(body, "QAT_AggIns_Pin", "★ Pin", function()
+	I.pinBtn = W.TextButton(body, "QAT_AggIns_Pin", "Pin", function()
 		if not I.row then
 			return
 		end
@@ -275,7 +286,7 @@ function QAT.Aggregator_Inspector_Render(row)
 	I.relBadge:SetText(BUCKET_LABEL[row.bucket] or "?")
 	I.relBadge:SetColorRGB(BUCKET_COL[row.bucket] or BUCKET_COL.os)
 
-	I.pinBtn:SetText(row.pinned and "★ Pinned" or "★ Pin")
+	I.pinBtn:SetText(row.pinned and "Pinned" or "Pin")
 	I.pinBtn:SetSelected(row.pinned)
 
 	-- Raw data.

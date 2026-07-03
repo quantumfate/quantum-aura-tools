@@ -32,19 +32,28 @@ QAT.capture = {
 local EV_COMBAT_GAINED = QAT.name .. "_cap_cg"
 local EV_COMBAT_GAINED_DUR = QAT.name .. "_cap_cgd"
 local EV_EFFECT_PREFIX = QAT.name .. "_cap_eff_"
-local CAPTURE_UNITS = { "player", "boss1", "boss2", "boss3", "boss4", "boss5", "boss6" }
+-- reticleover watches whatever you're targeting (a trial dummy or any non-frame
+-- enemy that never gets a boss1-6 slot); name-keying merges it with boss1-6 when
+-- you happen to be targeting the actual boss.
+local CAPTURE_UNITS = { "player", "reticleover", "boss1", "boss2", "boss3", "boss4", "boss5", "boss6" }
 
 -- ---------------------------------------------------------------------------
 -- Resolution (all frozen at ingest)
 -- ---------------------------------------------------------------------------
 
--- Target tag -> coarse role. Intake is scoped to self + bosses, so anything else
--- is rejected upstream; "me" and "boss" are the only roles we store.
+-- Target tag -> coarse role. Intake is scoped to self + the enemy you're fighting
+-- (boss frame or current hostile target); friendly/neutral reticle targets and
+-- everything else are rejected upstream. "me" and "boss" are the only stored roles.
 local function targetRoleOf(tag)
 	if tag == "player" then
 		return "me"
 	end
 	if tag and tag:find("^boss%d") then
+		return "boss"
+	end
+	-- Your current target when it isn't on a boss frame (e.g. a trial dummy): count
+	-- it as the "boss" for bucketing, but only when it's an attackable enemy.
+	if tag == "reticleover" and DoesUnitExist("reticleover") and IsUnitAttackable("reticleover") then
 		return "boss"
 	end
 	return "other"
@@ -293,6 +302,10 @@ local function onCombatEvent(_, _, _, _, _, _, sourceName, sourceType, targetNam
 				break
 			end
 		end
+		-- Fall back to the current target (dummy / non-frame enemy).
+		if not targetTag and DoesUnitExist("reticleover") and GetUnitName("reticleover") == targetName then
+			targetTag = "reticleover"
+		end
 	end
 	if not targetTag then
 		return
@@ -405,6 +418,12 @@ local function registerFeeds()
 		QAT.capture.currentZoneId = currentZoneId()
 		QAT.Safe("capture seed-sweep (bosses)", QAT.Capture_SeedSweep)
 	end)
+
+	-- New reticle target = sweep it, so debuffs already on it (that never fire an
+	-- effect-changed while you watch) are captured the moment you select it.
+	EVENT_MANAGER:RegisterForEvent(QAT.name .. "_cap_ret", EVENT_RETICLE_TARGET_CHANGED, function()
+		QAT.Safe("capture seed-sweep (target)", QAT.Capture_SeedSweep)
+	end)
 end
 
 local function unregisterFeeds()
@@ -413,6 +432,7 @@ local function unregisterFeeds()
 	for _, unit in ipairs(CAPTURE_UNITS) do
 		EVENT_MANAGER:UnregisterForEvent(EV_EFFECT_PREFIX .. unit, EVENT_EFFECT_CHANGED)
 	end
+	EVENT_MANAGER:UnregisterForEvent(QAT.name .. "_cap_ret", EVENT_RETICLE_TARGET_CHANGED)
 	EVENT_MANAGER:UnregisterForEvent(QAT.name .. "_cap_boss", EVENT_BOSSES_CHANGED)
 end
 
