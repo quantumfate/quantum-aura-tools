@@ -287,6 +287,36 @@ function QAT.widgets.Chip(parent, name, text)
 	return c
 end
 
+-- A read-only "ability" chip: a small icon tile, the ability's name, and a faint
+-- #id, all resolved from an ability id (see QAT.util.AbilityInfo). Sizes to its
+-- content and hovers its name. Use anywhere the user would otherwise face a raw id.
+function QAT.widgets.AbilityChip(parent, name)
+	local c = QAT.widgets.Panel(parent, name, { 0.055, 0.106, 0.145, 1 }, CHIP_EDGE)
+	c:SetHeight(24)
+	local ic = WM:CreateControl(name .. "_Ic", c, CT_TEXTURE)
+	ic:SetDimensions(18, 18)
+	ic:SetAnchor(LEFT, c, LEFT, 4, 0)
+	local l = QAT.widgets.Label(c, name .. "_L", "", "$(MEDIUM_FONT)|15|soft-shadow-thin")
+	l:SetColor(0.80, 0.86, 0.94, 1)
+	l:SetAnchor(LEFT, ic, RIGHT, 6, -1)
+	c.icon, c.label = ic, l
+	QAT.widgets.Tooltip(c, "")
+	-- Set the chip's ability. A 0/nil id shows the "(none)" fallback dimmed.
+	function c:SetAbility(id)
+		local nm, tex = QAT.util.AbilityInfo(id)
+		ic:SetTexture(tex)
+		local idText = (id and id ~= 0) and (" |c556070#" .. id .. "|r") or ""
+		l:SetText(nm .. idText)
+		l:SetColor(0.80, 0.86, 0.94, (id and id ~= 0) and 1 or 0.5)
+		self.tooltipText = (id and id ~= 0) and nm or "No ability set"
+		self:SetWidth(4 + 18 + 6 + math.ceil(l:GetTextWidth()) + 8)
+		-- Re-assert the edge: a CT_BACKDROP border can drop after a pooled resize.
+		self:SetEdgeColor(unpack(CHIP_EDGE))
+		self:SetEdgeTexture("", 1, 1, 1)
+	end
+	return c
+end
+
 -- A small colored badge (bar mode, INITIAL, ...): a dark bordered box with centered
 -- text tinted by rgb. Sizes to its text via :SetText.
 function QAT.widgets.Badge(parent, name, text, rgb)

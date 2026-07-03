@@ -28,6 +28,12 @@ local COMBAT_OPTS = {
 	{ label = "In combat", value = "in" },
 	{ label = "Out of combat", value = "out" },
 }
+-- Vampire/Werewolf affliction (the skill line), not the werewolf transform.
+local CURSE_OPTS = {
+	{ label = "Any", value = nil },
+	{ label = "Vampirism", value = "vampire" },
+	{ label = "Werewolf", value = "werewolf" },
+}
 -- The per-set bar toggle: which weapon bar a set's pieces are counted on (gear
 -- placement, never the drawn bar).
 local BAR_OPTS = { { "any", "Any bar" }, { "front", "Front bar" }, { "back", "Back bar" } }
@@ -518,6 +524,24 @@ render = function(container, def)
 	combatDD:SetValue(combatFromLoad(load))
 	combatDD:ClearAnchors()
 	combatDD:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
+	y = y + ROW_H + GAP
+
+	-- Curse (vampire / werewolf affliction).
+	label("lCurse", "Curse", y)
+	local curseDD = get("curseDD", function()
+		return QAT.widgets.Dropdown(container, "QAT_Load_Curse", 160, CURSE_OPTS, nil)
+	end)
+	curseDD.onSelect = function(v)
+		load.curse = v
+		commit(def)
+	end
+	curseDD:SetValue(load.curse)
+	curseDD:ClearAnchors()
+	curseDD:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
+	QAT.widgets.Tooltip(
+		curseDD,
+		"Load only while afflicted with vampirism or lycanthropy (the skill line, not the werewolf transform)."
+	)
 	y = y + ROW_H + GAP
 
 	-- Skills slotted (ability ids) — removable chips + an inline "add id" box.

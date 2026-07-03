@@ -209,14 +209,7 @@ function QAT.Editor_Inspector_Build(pane)
 		"Position of the top-left corner from the screen's top-left (x right, y down), clamped to the screen. Drag the tracker on the HUD for fine control."
 	)
 
-	-- Row 1 right group: Center, Pop out (chained right-to-left).
-	insp.popout = QAT.widgets.TextButton(row1, "QAT_Insp_Popout", "Pop out", function()
-		d(QAT.displayName .. ": detachable inspector is not yet available.")
-	end)
-	insp.popout:SetHeight(22)
-	insp.popout:SetAnchor(RIGHT, row1, RIGHT, 0, 0)
-	QAT.widgets.Tooltip(insp.popout, "Detach this inspector into its own window. (Not yet available.)")
-
+	-- Row 1 right group: Center (recentre the tracker on screen).
 	insp.move = QAT.widgets.TextButton(row1, "QAT_Insp_Move", "Center", function()
 		local def = curDef()
 		if def then
@@ -231,7 +224,7 @@ function QAT.Editor_Inspector_Build(pane)
 		end
 	end)
 	insp.move:SetHeight(22)
-	insp.move:SetAnchor(RIGHT, insp.popout, LEFT, -8, 0)
+	insp.move:SetAnchor(RIGHT, row1, RIGHT, 0, 0)
 	QAT.widgets.Tooltip(insp.move, "Recentre this tracker on screen.")
 
 	-- Row 2: breadcrumb (left) + phase actions (right). A plain row on the header so
@@ -453,7 +446,6 @@ function QAT.Editor_Inspector_Show(id)
 	insp.nameCaption:SetHidden(not def)
 	insp.nameBox:SetHidden(not def)
 	insp.move:SetHidden(not def)
-	insp.popout:SetHidden(not def)
 	-- Size + position apply to a drawn tracker; folders have neither.
 	local isFolder = def ~= nil and def.kind == "folder"
 	local showTracker = def ~= nil and not isFolder

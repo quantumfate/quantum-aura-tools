@@ -232,6 +232,7 @@ local function ingest(obs)
 	local row = QAT.capture.store[key]
 
 	if row then
+		row.seeded = nil -- a live sighting: no longer a library-only placeholder
 		row.seenCount = row.seenCount + 1
 		row.lastSeen = now
 		if obs.stacks and obs.stacks > (row.maxStacks or 0) then
@@ -271,7 +272,7 @@ local function ingest(obs)
 		seenCount = 1,
 		firstSeen = now,
 		lastSeen = now,
-		pinned = false,
+		favourited = false,
 	}
 	QAT.capture.store[key] = row
 	table.insert(QAT.capture.list, row)
@@ -477,20 +478,20 @@ function QAT.Capture_SetFrozen(on)
 	notifyChanged()
 end
 
---- Drop the current aggregation (keeps pinned rows, which are re-seeded).
+--- Drop the current aggregation (keeps favourited rows, which are re-seeded).
 function QAT.Capture_Clear()
 	QAT.capture.store = {}
 	QAT.capture.list = {}
 	QAT.capture.byAbilityTarget = {}
 	QAT.capture.observations = 0
 	QAT.capture.everCaptured = false
-	QAT.Capture_SeedPinned()
+	QAT.Capture_SeedFavourites()
 	QAT.log.capture:Debug("catch cleared")
 	notifyChanged()
 end
 
 -- ---------------------------------------------------------------------------
--- Pin / ignore (persisted)
+-- Favourite / ignore (persisted)
 -- ---------------------------------------------------------------------------
 
 -- A shallow, self-describing copy safe to store in SavedVars.
@@ -515,26 +516,48 @@ local function frozenCopy(row)
 		seenCount = row.seenCount,
 		firstSeen = row.firstSeen,
 		lastSeen = row.lastSeen,
-		pinned = true,
+		icon = row.icon,
+		favourited = true,
 	}
 end
 
---- Promote a row to the persisted library (survives reloads).
-function QAT.Capture_Pin(row)
+--- Promote a row to the persisted favourites (survives reloads; floats to the top).
+function QAT.Capture_Favourite(row)
 	if not row then
 		return
 	end
-	row.pinned = true
-	QAT.sv.capture.pinned[row.key] = frozenCopy(row)
+	row.favourited = true
+	QAT.sv.capture.favourites[row.key] = frozenCopy(row)
 	notifyChanged()
 end
 
-function QAT.Capture_Unpin(row)
+function QAT.Capture_Unfavourite(row)
 	if not row then
 		return
 	end
-	row.pinned = false
-	QAT.sv.capture.pinned[row.key] = nil
+	row.favourited = false
+	QAT.sv.capture.favourites[row.key] = nil
+	-- A library-only row (re-seeded from favourites, never seen live this session) has
+	-- nothing keeping it once it's no longer a favourite, so drop it rather than leave
+	-- a dead, dataless entry. A row with live data this session stays.
+	if row.seeded then
+		QAT.capture.store[row.key] = nil
+		local list = QAT.capture.list
+		for i = #list, 1, -1 do
+			if list[i] == row then
+				table.remove(list, i)
+			end
+		end
+		local ati = atIndex(row.abilityId, row.targetName)
+		local bucket = QAT.capture.byAbilityTarget[ati]
+		if bucket then
+			for i = #bucket, 1, -1 do
+				if bucket[i] == row then
+					table.remove(bucket, i)
+				end
+			end
+		end
+	end
 	notifyChanged()
 end
 
@@ -565,13 +588,20 @@ function QAT.Capture_Unignore(abilityId)
 	end
 end
 
--- Load persisted pinned rows back into the live store so they show before/without
+-- Load persisted favourited rows back into the live store so they show before/without
 -- capture (the standing library).
-function QAT.Capture_SeedPinned()
-	for key, saved in pairs(QAT.sv.capture.pinned or {}) do
+function QAT.Capture_SeedFavourites()
+	for key, saved in pairs(QAT.sv.capture.favourites or {}) do
 		if not QAT.capture.store[key] and not QAT.sv.capture.ignored[saved.abilityId] then
 			local row = QAT.util.DeepCopy(saved)
-			row.pinned = true
+			row.favourited = true
+			row.seeded = true -- library placeholder until a live sighting arrives
+			-- Recompute from the id so the icon (and name) are always valid, even for
+			-- favourites saved before icons were persisted.
+			row.icon = GetAbilityIcon(saved.abilityId)
+			if not saved.name or saved.name == "" then
+				row.name = GetAbilityName(saved.abilityId)
+			end
 			QAT.capture.store[key] = row
 			table.insert(QAT.capture.list, row)
 			local ati = atIndex(row.abilityId, row.targetName)
@@ -587,10 +617,10 @@ end
 
 function QAT.Capture_Init()
 	QAT.capture.currentZoneId = currentZoneId()
-	QAT.Capture_SeedPinned()
+	QAT.Capture_SeedFavourites()
 	-- Capture is decoupled from the window: if it was left on, resume on load.
 	if QAT.sv.account.backgroundCapture then
 		QAT.Capture_Start()
 	end
-	QAT.log.capture:Info("capture engine ready (%d pinned)", NonContiguousCount(QAT.sv.capture.pinned))
+	QAT.log.capture:Info("capture engine ready (%d favourited)", NonContiguousCount(QAT.sv.capture.favourites))
 end

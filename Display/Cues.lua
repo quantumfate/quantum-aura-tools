@@ -29,6 +29,13 @@ function QAT.FireCues(cues)
 		return
 	end
 
+	-- Suppressed while the runtime rebuilds: re-entering the live phase to restore
+	-- state is not a real transition, so its on-enter cue must not replay. Editor
+	-- previews (Test / sound pick) call in outside a rebuild and are unaffected.
+	if QAT.runtime and QAT.runtime.suppressCues then
+		return
+	end
+
 	if cues.sound then
 		-- Accept either a SOUNDS key ("NEW_NOTIFICATION") or a raw sound id.
 		-- pcall: an invalid/removed sound name should never break a transition.

@@ -33,7 +33,9 @@ local COL_BUFF = { 0.561, 0.816, 0.478 }
 local COL_DEBUFF = { 0.878, 0.525, 0.435 }
 local COL_TIMED = { 0.541, 0.714, 0.839 }
 local COL_PASSIVE = { 0.561, 0.635, 0.698 }
-local COL_PINNED = { 0.851, 0.722, 0.290 }
+local COL_FAV = { 0.921, 0.784, 0.353 } -- gold favourite star
+local STAR_TEX = "EsoUI/Art/Collections/Favorite_StarOnly.dds"
+local SELECT_INSET = 26 -- left space reserved for the row checkbox in select mode
 
 local SORTS = {
 	lastSeen = function(a, b)
@@ -84,6 +86,17 @@ local function makeRow(parent, name)
 	accent:SetAnchor(TOPLEFT, c, TOPLEFT, 0, 0)
 	c.accent = accent
 
+	-- Checkbox (only shown in multi-select mode): a bordered box with a filled inner
+	-- square when ticked (font-proof — a glyph check boxes out). The whole row toggles
+	-- it, so this is a passive visual.
+	local check = W.Panel(c, name .. "_Chk", { 0.09, 0.13, 0.18, 1 }, { 0.30, 0.42, 0.58, 1 })
+	check:SetDimensions(18, 18)
+	check:SetAnchor(LEFT, c, LEFT, 8, 0)
+	local checkMark = W.Panel(check, name .. "_ChkM", { 0.475, 0.69, 0.925, 1 })
+	checkMark:SetDimensions(10, 10)
+	checkMark:SetAnchor(CENTER, check, CENTER, 0, 0)
+	c.check, c.checkMark = check, checkMark
+
 	local icon = W.IconWell(c, name .. "_Icon", 34)
 	icon:SetAnchor(TOPLEFT, c, TOPLEFT, 8, 6)
 	c.icon = icon
@@ -92,11 +105,13 @@ local function makeRow(parent, name)
 	nameL:SetAnchor(TOPLEFT, icon, TOPRIGHT, 10, 0)
 	c.nameL = nameL
 
-	-- Gold pin marker: a small panel (a glyph star boxes out in the default font).
-	local pin = W.Panel(c, name .. "_Pin", { COL_PINNED[1], COL_PINNED[2], COL_PINNED[3], 1 })
-	pin:SetDimensions(8, 8)
-	pin:SetAnchor(LEFT, nameL, RIGHT, 8, -1)
-	c.pin = pin
+	-- Gold favourite star (real texture; a glyph star boxes out in the default font).
+	local star = WM:CreateControl(name .. "_Star", c, CT_TEXTURE)
+	star:SetTexture(STAR_TEX)
+	star:SetColor(COL_FAV[1], COL_FAV[2], COL_FAV[3], 1)
+	star:SetDimensions(14, 14)
+	star:SetAnchor(LEFT, nameL, RIGHT, 8, 0)
+	c.star = star
 
 	local seenL = W.Label(c, name .. "_Seen", "", "$(MEDIUM_FONT)|14|soft-shadow-thin")
 	seenL:SetColor(0.6, 0.68, 0.78, 1)
@@ -127,17 +142,24 @@ local function makeRow(parent, name)
 	c.lastL = lastL
 
 	c:SetHandler("OnMouseEnter", function(self)
-		if QAT.aggregator.selectedKey ~= self.rowKey then
+		if not self.active then
 			self.bg:SetCenterColor(0.06, 0.11, 0.15, 1)
 		end
 	end)
 	c:SetHandler("OnMouseExit", function(self)
-		if QAT.aggregator.selectedKey ~= self.rowKey then
+		if not self.active then
 			self.bg:SetCenterColor(0.039, 0.078, 0.11, 1)
 		end
 	end)
 	c:SetHandler("OnMouseUp", function(self, button, upInside)
-		if upInside and button == MOUSE_BUTTON_INDEX_LEFT then
+		if not (upInside and button == MOUSE_BUTTON_INDEX_LEFT) then
+			return
+		end
+		-- In multi-select the whole row toggles its selection; otherwise it opens the
+		-- single-row detail as before.
+		if QAT.aggregator.selecting then
+			QAT.Aggregator_ToggleSelected(self.rowKey)
+		else
 			QAT.aggregator.selectedKey = self.rowKey
 			QAT.Aggregator_List_Render()
 			if QAT.Aggregator_Inspector_Render then
@@ -149,14 +171,22 @@ local function makeRow(parent, name)
 end
 
 local function bindRow(c, row, y)
+	local a = QAT.aggregator
+	local selecting = a.selecting
 	c.rowKey = row.key
 	c:SetWidth(rowW)
 	c:ClearAnchors()
-	c:SetAnchor(TOPLEFT, QAT.aggregator.listContent, TOPLEFT, 0, y)
+	c:SetAnchor(TOPLEFT, a.listContent, TOPLEFT, 0, y)
+
+	-- Reserve room for the checkbox and shift the icon (everything else hangs off it).
+	local inset = selecting and SELECT_INSET or 0
+	c.check:SetHidden(not selecting)
+	c.icon:ClearAnchors()
+	c.icon:SetAnchor(TOPLEFT, c, TOPLEFT, 8 + inset, 6)
 
 	c.icon:SetTexture(row.icon)
 	c.nameL:SetText(row.name or ("#" .. row.abilityId))
-	c.pin:SetHidden(not row.pinned)
+	c.star:SetHidden(not row.favourited)
 	c.seenL:SetText("seen " .. (row.seenCount or 0))
 	c.idL:SetText("#" .. row.abilityId)
 
@@ -177,12 +207,19 @@ local function bindRow(c, row, y)
 	c.stacksL:SetText((row.maxStacks or 0) > 0 and ("×" .. row.maxStacks) or "")
 	c.lastL:SetText(ago(row.lastSeen))
 
-	local selected = (QAT.aggregator.selectedKey == row.key)
-	c.accent:SetHidden(not selected)
-	c.bg:SetCenterColor(selected and 0.12 or 0.039, selected and 0.20 or 0.078, selected and 0.30 or 0.11, 1)
-	if selected then
-		QAT.aggregator.selectedRow = row
+	-- "Active" = ticked in select mode, or the inspected row otherwise. Drives the
+	-- accent bar, the row highlight, and (in select mode) the check mark.
+	local active
+	if selecting then
+		active = a.selectedSet[row.key] and true or false
+		c.checkMark:SetHidden(not active)
+	else
+		active = (a.selectedKey == row.key)
+		QAT.aggregator.selectedRow = active and row or QAT.aggregator.selectedRow
 	end
+	c.active = active
+	c.accent:SetHidden(not active)
+	c.bg:SetCenterColor(active and 0.12 or 0.039, active and 0.20 or 0.078, active and 0.30 or 0.11, 1)
 end
 
 -- ---------------------------------------------------------------------------
@@ -250,20 +287,42 @@ function QAT.Aggregator_List_Build(pane)
 	headerPool = W.NewPool()
 	rowPool = W.NewPool()
 
-	-- Toolbar: visible count + hidden-passives note + sort segment.
+	-- Sort band: a darker control strip separating the row list from the filter bar
+	-- above. Holds the multi-select toggle (left), the count, and the sort segment.
+	local band = W.Panel(pane, "QAT_AggList_Band", { 0.031, 0.055, 0.075, 1 })
+	band:SetAnchor(TOPLEFT, pane, TOPLEFT, 0, 0)
+	band:SetAnchor(TOPRIGHT, pane, TOPRIGHT, 0, 0)
+	band:SetHeight(TOOLBAR_H + 8)
+	local bandRule = W.Divider(pane, "QAT_AggList_BandRule")
+	bandRule:SetAnchor(BOTTOMLEFT, band, BOTTOMLEFT, 0, 0)
+	bandRule:SetAnchor(BOTTOMRIGHT, band, BOTTOMRIGHT, 0, 0)
+
 	local tb = WM:CreateControl("QAT_AggList_Toolbar", pane, CT_CONTROL)
 	tb:SetAnchor(TOPLEFT, pane, TOPLEFT, 10, 4)
 	tb:SetAnchor(TOPRIGHT, pane, TOPRIGHT, -10, 4)
 	tb:SetHeight(TOOLBAR_H)
 	QAT.aggregator.listToolbar = tb
 
+	-- Multi-select toggle: turns on row checkboxes and swaps the inspector for the
+	-- Tracker builder. Label flips to "Selecting" while on.
+	local selectBtn = W.TextButton(tb, "QAT_AggList_Select", "Select multiple", function()
+		QAT.Aggregator_SetSelecting(not QAT.aggregator.selecting)
+	end)
+	selectBtn:SetHeight(24)
+	selectBtn:SetAnchor(LEFT, tb, LEFT, 0, 0)
+	QAT.widgets.Tooltip(
+		selectBtn,
+		"Tick two or more effects, then Build Tracker makes one aura that switches between them."
+	)
+	QAT.aggregator.selectBtn = selectBtn
+
 	local count = W.Label(tb, "QAT_AggList_Count", "", "$(MEDIUM_FONT)|14|soft-shadow-thin")
 	count:SetColor(0.55, 0.62, 0.72, 1)
-	count:SetAnchor(LEFT, tb, LEFT, 0, 0)
+	count:SetAnchor(LEFT, selectBtn, RIGHT, 12, 0)
 	QAT.aggregator.listCountLabel = count
 
 	-- Sort segment (right).
-	local sortOpts = { { v = "lastSeen", l = "Last seen" }, { v = "seen", l = "Seen×" }, { v = "name", l = "Name" } }
+	local sortOpts = { { v = "lastSeen", l = "Last seen" }, { v = "seen", l = "× Seen" }, { v = "name", l = "Name" } }
 	local prev
 	QAT.aggregator.sortButtons = {}
 	for _, o in ipairs(sortOpts) do
@@ -322,7 +381,16 @@ function QAT.Aggregator_List_Render()
 		end
 	end
 
-	local cmp = SORTS[fq.sort] or SORTS.lastSeen
+	-- Favourites float to the top of every section regardless of the active sort;
+	-- within each of the two bands the chosen sort applies.
+	local base = SORTS[fq.sort] or SORTS.lastSeen
+	local cmp = function(a, b)
+		local fa, fb = a.favourited and true or false, b.favourited and true or false
+		if fa ~= fb then
+			return fa
+		end
+		return base(a, b)
+	end
 	for _, g in pairs(groups) do
 		table.sort(g, cmp)
 	end

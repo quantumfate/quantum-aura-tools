@@ -8,3 +8,12 @@ function QAT_ToggleEditor()
 		d(QAT.displayName .. ": editor unavailable.")
 	end
 end
+
+--- Show or hide the effect aggregator window.
+function QAT_ToggleAggregator()
+	if QAT.Aggregator_Toggle then
+		QAT.Aggregator_Toggle()
+	else
+		d(QAT.displayName .. ": aggregator unavailable.")
+	end
+end

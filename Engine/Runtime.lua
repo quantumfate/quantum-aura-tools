@@ -80,18 +80,26 @@ end
 -- permanent/passive buffs untrackable. We enumerate current buffs and feed matching
 -- ones in as synthetic "gained" events.
 function QAT.Runtime_ScanBuffs()
+	-- Record which tracked effects are live on each unit while seeding "gained", so a
+	-- phase held up by an effect that vanished without a "faded" event can be ended.
+	local present = {}
 	for unit in pairs(unitsOfInterest()) do
+		present[unit] = {}
 		if DoesUnitExist(unit) then
 			for i = 1, GetNumBuffs(unit) do
 				local _, started, ending, _, stackCount, _, _, _, _, _, abilityId = GetUnitBuffInfo(unit, i)
 				local listeners = abilityId and QAT.runtime.byAbilityId[abilityId]
 				if listeners then
+					present[unit][abilityId] = true
 					for _, tracker in ipairs(listeners) do
 						tracker:OnEffect(unit, abilityId, EFFECT_RESULT_GAINED, started, ending, stackCount)
 					end
 				end
 			end
 		end
+	end
+	for _, tracker in ipairs(QAT.runtime.list) do
+		tracker:ReconcilePresence(present)
 	end
 end
 
@@ -234,6 +242,11 @@ end
 -- controls are reused by name (see Display.Create), so this neither leaks nor
 -- collides; it only swaps the in-memory Tracker objects and event filters.
 local function rebuildAll()
+	-- Suppress on-enter cues for the duration of the rebuild: Start()/ScanBuffs()
+	-- below re-enter each tracker's live phase to restore state, which must not
+	-- replay sounds/flashes. Real transitions fire later via events.
+	QAT.runtime.suppressCues = true
+
 	-- Hide every current phase control so removed trackers/phases don't linger.
 	for _, tracker in ipairs(QAT.runtime.list) do
 		for _, phase in pairs(tracker.phases) do
@@ -256,6 +269,7 @@ local function rebuildAll()
 		tracker:Start()
 	end
 	QAT.Runtime_ScanBuffs()
+	QAT.runtime.suppressCues = false
 	QAT.log.runtime:Debug("runtime rebuilt: %d tracker(s)", #QAT.runtime.list)
 end
 

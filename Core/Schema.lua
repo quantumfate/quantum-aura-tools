@@ -232,16 +232,29 @@ function QAT.CanonicalizeDef(def)
 		def.runtime = nil
 	end
 
+	-- The set of existing phase ids, so dangling transition targets (e.g. a phase
+	-- deleted in the editor) can be pruned below rather than crashing the runtime.
+	local phaseIds = {}
+	for _, phase in ipairs(def.phases) do
+		phaseIds[phase.id] = true
+	end
+
 	-- Normalize every phase: look defaults, duration/trigger units default to the
-	-- tracker unit, transitions and runtime are present and normalized.
+	-- tracker unit, transitions and runtime are present and normalized. Transitions
+	-- whose target phase no longer exists are dropped.
 	for _, phase in ipairs(def.phases) do
 		phase.look = canonicalLook(phase.look)
 		phase.duration = phase.duration or { type = "none" }
 		phase.duration.unit = phase.duration.unit or def.unit
 		phase.transitions = phase.transitions or {}
+		local kept = {}
 		for _, tr in ipairs(phase.transitions) do
-			tr.when = canonicalWhen(tr.when, def.unit)
+			if phaseIds[tr.to] then
+				tr.when = canonicalWhen(tr.when, def.unit)
+				kept[#kept + 1] = tr
+			end
 		end
+		phase.transitions = kept
 		phase.runtime = migrateRuntime(phase.runtime)
 	end
 
@@ -274,4 +287,100 @@ function QAT.CanonicalizeTree(defs)
 			QAT.CanonicalizeDef(def)
 		end
 	end
+end
+
+--- Build a canonical "mutually-exclusive effects" tracker: one phase per effect
+--- (shown while that effect is on the unit) plus a fallback phase, wired into a
+--- full mesh so any effect is reachable from any state. Exactly one of the effects
+--- is expected to be live at a time (e.g. vampire stages, a charge -> ready proc).
+--- When the active effect fades the engine advances to whichever sibling effect is
+--- now live (via Tracker:TakeLiveTransition), or falls back when none is.
+---@param opts table { name?, unit?, fallbackName?, x?, y?, suffix?, manual?, effects = { { id, name?, unit? }, ... } }
+---  manual = true builds the phases (one per effect + fallback) with NO transitions,
+---  for the user to wire switching themselves. Each effect may carry its own unit
+---  (e.g. a self debuff on the boss watches "reticleover", not "player").
+---@return table|nil def canonical tracker def, or nil if fewer than two effects
+function QAT.BuildMutexTrackerDef(opts)
+	local effects = opts.effects or {}
+	if #effects < 2 then
+		return nil -- a mutex group needs at least two states to switch between
+	end
+	local unit = opts.unit or "player"
+
+	-- Readable, unique slug ids from names so transitions/initial reference phases
+	-- by a stable key (never a localized display string at match time).
+	local used = {}
+	local function slug(text, fallback)
+		local s = tostring(text or ""):lower():gsub("[^%w]+", "_"):gsub("^_+", ""):gsub("_+$", "")
+		if s == "" then
+			s = fallback
+		end
+		local base, n = s, 2
+		while used[s] do
+			s, n = base .. "_" .. n, n + 1
+		end
+		used[s] = true
+		return s
+	end
+
+	local fallbackName = opts.fallbackName or "Inactive"
+	local fallbackId = slug(fallbackName, "fallback")
+
+	-- Resolve each effect to its phase id + display name + unit up front so the mesh
+	-- below can cross-reference every sibling (and watch it on the right unit).
+	local stages = {}
+	for i, e in ipairs(effects) do
+		local nm = e.name
+		if not nm or nm == "" then
+			nm = QAT.util and QAT.util.AbilityInfo(e.id) or ("#" .. tostring(e.id))
+		end
+		stages[i] = { id = e.id, name = nm, phaseId = slug(nm, "stage_" .. i), unit = e.unit or unit }
+	end
+
+	-- Every phase can jump to every OTHER stage when that stage's effect is gained
+	-- (watched on that stage's own unit). Manual mode skips the mesh entirely.
+	local function meshExcept(selfPhaseId)
+		if opts.manual then
+			return {}
+		end
+		local trs = {}
+		for _, s in ipairs(stages) do
+			if s.phaseId ~= selfPhaseId then
+				trs[#trs + 1] = {
+					when = { kind = "effect", result = "gained", abilityIds = { s.id }, unit = s.unit },
+					to = s.phaseId,
+				}
+			end
+		end
+		return trs
+	end
+
+	local phases = {
+		{
+			id = fallbackId,
+			look = { display = "bar", name = fallbackName, showTime = false },
+			duration = { type = "none" },
+			transitions = meshExcept(fallbackId),
+		},
+	}
+	for _, s in ipairs(stages) do
+		phases[#phases + 1] = {
+			id = s.phaseId,
+			look = { display = "bar", name = s.name },
+			duration = { type = "effect", abilityIds = { s.id }, unit = s.unit },
+			transitions = meshExcept(s.phaseId),
+		}
+	end
+
+	return QAT.CanonicalizeDef({
+		id = "tracker_mutex_" .. GetTimeStamp() .. "_" .. (opts.suffix or 0),
+		kind = "tracker",
+		name = opts.name or (stages[1].name .. " …"),
+		unit = unit,
+		initial = fallbackId,
+		phases = phases,
+		x = opts.x,
+		y = opts.y,
+		enabled = true,
+	})
 end

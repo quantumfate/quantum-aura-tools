@@ -87,6 +87,66 @@ local function commit(def)
 	QAT.widgets.NotifyTrackerChanged(def.id)
 end
 
+-- Plain-language helpers for the read-only "How this phase works" card, which
+-- narrates a phase without exposing ability ids or the state-machine jargon.
+local function onUnit(unit)
+	if unit == "reticleover" then
+		return "on your target"
+	elseif unit and unit ~= "player" then
+		return "on the boss"
+	end
+	return "on you"
+end
+local function fromUnit(unit)
+	if unit == "reticleover" then
+		return "from your target"
+	elseif unit and unit ~= "player" then
+		return "from the boss"
+	end
+	return "from you"
+end
+local function stacksPhrase(op, v)
+	v = v or 0
+	if op == ">=" or op == ">" then
+		return "reaches " .. v .. " stacks"
+	elseif op == "<=" or op == "<" then
+		return "drops below " .. v .. " stacks"
+	elseif op == "==" then
+		return "hits exactly " .. v .. " stacks"
+	end
+	return "stacks " .. (op or ">=") .. " " .. v
+end
+local function remainingPhrase(op, v)
+	v = v or 0
+	if op == "<" or op == "<=" then
+		return "under " .. v .. "s remain"
+	elseif op == ">" or op == ">=" then
+		return "over " .. v .. "s left"
+	end
+	return "time left " .. (op or "<=") .. " " .. v .. "s"
+end
+-- The phase's own id (the string shown in the tree), not its display label — so the
+-- card names phases the way the user navigates them.
+local function phaseName(def, id)
+	if not id then
+		return "(hidden)"
+	end
+	return tostring(id)
+end
+local SLATE = { 0.55, 0.62, 0.72 }
+-- A phase's own bar color, so a target badge reads with the color the user set.
+local function phaseColor(def, id)
+	for _, p in ipairs(def.phases or {}) do
+		if p.id == id then
+			local c = p.look and p.look.colors and p.look.colors.bar
+			if c then
+				return { c[1], c[2], c[3] }
+			end
+		end
+	end
+	return SLATE
+end
+
 local function render(container, def)
 	local pool = container.pool or QAT.widgets.NewPool()
 	container.pool = pool
@@ -350,6 +410,213 @@ local function render(container, def)
 	y = y + ROW_H + GAP
 
 	card:SetDimensions(cw - OUT * 2, y - OUT + 8)
+
+	-- Read-only "How this phase works" card: narrates the phase as a state map —
+	-- what shows it, each outgoing branch, and the natural fall-through — with ability
+	-- ids rendered as icon+name chips (the "state-flow" layout). Purely descriptive:
+	-- it reads the same fields edited above and never writes.
+	do
+		local W = QAT.widgets
+		local ci, bi, li = 0, 0, 0
+		local function chip()
+			ci = ci + 1
+			local c = get("expC" .. ci, function()
+				return W.AbilityChip(container, "QAT_Beh_ExpC" .. ci)
+			end)
+			c:SetHidden(false)
+			return c
+		end
+		local function badge()
+			bi = bi + 1
+			local b = get("expB" .. bi, function()
+				return W.Badge(container, "QAT_Beh_ExpB" .. bi, "", SLATE)
+			end)
+			b:SetHidden(false)
+			return b
+		end
+		local BODY = "$(MEDIUM_FONT)|16|soft-shadow-thin"
+		local function text(font)
+			li = li + 1
+			local l = get("expL" .. li, function()
+				return W.Label(container, "QAT_Beh_ExpL" .. li, "", BODY)
+			end)
+			l:SetHidden(false)
+			l:SetFont(font or BODY) -- font can differ per use; a pooled label is re-fonted
+			return l
+		end
+
+		local INK = { 0.74, 0.80, 0.88, 1 }
+		local MUTED = { 0.55, 0.6, 0.68, 1 }
+		-- Lay a sequence of text / ability-chip / phase-badge segments left to right.
+		local function inlineRow(x0, yy, segs)
+			local x = x0
+			for _, s in ipairs(segs) do
+				if s.t then
+					local l = text(s.font)
+					l:SetText(s.t)
+					l:SetColor(unpack(s.color or INK))
+					l:ClearAnchors()
+					l:SetAnchor(TOPLEFT, container, TOPLEFT, x, yy + (s.dy or 5))
+					x = x + math.ceil(l:GetTextWidth()) + (s.pad or 5)
+				elseif s.chip ~= nil then
+					local c = chip()
+					c:SetAbility(s.chip)
+					c:ClearAnchors()
+					c:SetAnchor(TOPLEFT, container, TOPLEFT, x, yy)
+					x = x + c:GetWidth() + 6
+				elseif s.badge then
+					local b = badge()
+					b:SetColorRGB(s.color or SLATE)
+					b:SetText(s.badge)
+					b:ClearAnchors()
+					b:SetAnchor(TOPLEFT, container, TOPLEFT, x, yy + 4)
+					x = x + b:GetWidth() + 6
+				end
+			end
+			return x
+		end
+
+		local expTop = y + 22
+		local expCard = get("expCard", function()
+			return W.Card(container, "QAT_Beh_ExpCard", "How this phase works")
+		end)
+		expCard:SetTitle("How this phase works")
+		expCard:ClearAnchors()
+		expCard:SetAnchor(TOPLEFT, container, TOPLEFT, OUT, expTop)
+		local P2 = OUT + expCard.padX
+		local innerW = cw - OUT * 2 - expCard.padX * 2
+		local y2 = expTop + expCard.contentY
+
+		local nt = #phase.transitions
+		local cnt = text("$(MEDIUM_FONT)|14|soft-shadow-thin")
+		cnt:SetText(nt .. " transition" .. (nt == 1 and "" or "s"))
+		cnt:SetColor(0.5, 0.56, 0.64, 1)
+		cnt:ClearAnchors()
+		cnt:SetAnchor(TOPRIGHT, expCard, TOPRIGHT, -expCard.padX, 8)
+
+		-- THIS PHASE box: the current phase and what puts the tracker in it.
+		local panel = get("expThis", function()
+			return W.Panel(container, "QAT_Beh_ExpThis", { 0.06, 0.09, 0.13, 1 }, { 0.12, 0.17, 0.22, 1 })
+		end)
+		panel:SetHidden(false)
+		panel:ClearAnchors()
+		panel:SetAnchor(TOPLEFT, container, TOPLEFT, P2, y2)
+		panel:SetDimensions(innerW, 74)
+
+		local hdr = text("$(BOLD_FONT)|12|soft-shadow-thin")
+		hdr:SetText("THIS PHASE")
+		hdr:SetColor(0.5, 0.56, 0.64, 1)
+		hdr:ClearAnchors()
+		hdr:SetAnchor(TOPLEFT, container, TOPLEFT, P2 + 12, y2 + 8)
+		local pb = badge()
+		pb:SetColorRGB(phaseColor(def, phase.id))
+		pb:SetText(phaseName(def, phase.id))
+		pb:ClearAnchors()
+		pb:SetAnchor(TOPLEFT, container, TOPLEFT, P2 + 12, y2 + 25)
+
+		local d = phase.duration
+		local durSegs
+		if d.type == "effect" then
+			durSegs = { { t = "Shown while", color = MUTED } }
+			local ids = d.abilityIds or {}
+			if #ids == 0 then
+				durSegs[#durSegs + 1] = { t = "its effect", color = INK }
+			else
+				if #ids > 1 then
+					durSegs[#durSegs + 1] = { t = "any of", color = MUTED }
+				end
+				for _, id in ipairs(ids) do
+					durSegs[#durSegs + 1] = { chip = id }
+				end
+			end
+			durSegs[#durSegs + 1] = { t = "is " .. onUnit(d.unit) .. ".", color = MUTED }
+		elseif d.type == "fixed" then
+			durSegs = { { t = "Shown for " .. (d.seconds or 0) .. " seconds.", color = INK } }
+		else
+			durSegs = { { t = "Static — shown while this phase is active.", color = MUTED } }
+		end
+		inlineRow(P2 + 12, y2 + 44, durSegs)
+		y2 = y2 + 74 + 12
+
+		-- Each outgoing branch: "when <trigger> -> <target phase>".
+		for _, tr in ipairs(phase.transitions) do
+			local w = tr.when
+			local segs = { { t = "when", color = MUTED } }
+			if w.kind == "effect" then
+				local ids = w.abilityIds or {}
+				if #ids == 0 then
+					segs[#segs + 1] = { t = "its effect", color = INK }
+				end
+				for _, id in ipairs(ids) do
+					segs[#segs + 1] = { chip = id }
+				end
+				segs[#segs + 1] = {
+					t = (w.result == "faded") and ("drops " .. fromUnit(w.unit)) or ("appears " .. onUnit(w.unit)),
+					color = MUTED,
+				}
+			elseif w.kind == "stacks" then
+				segs[#segs + 1] = { t = stacksPhrase(w.op, w.value), color = MUTED }
+			elseif w.kind == "remaining" then
+				segs[#segs + 1] = { t = remainingPhrase(w.op, w.value), color = MUTED }
+			else
+				segs[#segs + 1] = { t = "the timer runs out", color = MUTED }
+			end
+			segs[#segs + 1] = { t = "→", color = MUTED, pad = 6 }
+			segs[#segs + 1] = { badge = phaseName(def, tr.to), color = phaseColor(def, tr.to) }
+			inlineRow(P2 + 6, y2, segs)
+			y2 = y2 + 28
+		end
+
+		-- The natural fall-through the engine takes when nothing above matches, unless
+		-- the user already wrote it as an explicit transition.
+		local hasExpire, hasFadedDur = false, false
+		for _, tr in ipairs(phase.transitions) do
+			if tr.when.kind == "expire" then
+				hasExpire = true
+			elseif tr.when.kind == "effect" and tr.when.result == "faded" then
+				for _, id in ipairs(tr.when.abilityIds or {}) do
+					for _, did in ipairs(d.abilityIds or {}) do
+						if id == did then
+							hasFadedDur = true
+						end
+					end
+				end
+			end
+		end
+		local fbName, fbColor = phaseName(def, def.initial), phaseColor(def, def.initial)
+		local fbSegs
+		if d.type == "fixed" and not hasExpire then
+			fbSegs = {
+				{ t = "Fallback — when the timer runs out", color = MUTED },
+				{ t = "→", color = MUTED, pad = 6 },
+				{ badge = fbName, color = fbColor },
+			}
+		elseif d.type == "effect" and not hasFadedDur then
+			fbSegs = { { t = "Fallback — if", color = MUTED } }
+			for _, id in ipairs(d.abilityIds or {}) do
+				fbSegs[#fbSegs + 1] = { chip = id }
+			end
+			fbSegs[#fbSegs + 1] = { t = "drops", color = MUTED }
+			fbSegs[#fbSegs + 1] = { t = "→", color = MUTED, pad = 6 }
+			fbSegs[#fbSegs + 1] = { badge = fbName, color = fbColor }
+		elseif d.type == "none" and nt == 0 then
+			fbSegs = { { t = "No outgoing transitions — this phase only ends on its own.", color = MUTED } }
+		end
+		if fbSegs then
+			local div = get("expDiv", function()
+				return W.Divider(container, "QAT_Beh_ExpDiv")
+			end)
+			div:SetHidden(false)
+			div:ClearAnchors()
+			div:SetAnchor(TOPLEFT, container, TOPLEFT, P2, y2 + 2)
+			div:SetWidth(innerW)
+			y2 = y2 + 10
+			inlineRow(P2 + 6, y2, fbSegs)
+			y2 = y2 + 28
+		end
+
+		expCard:SetDimensions(cw - OUT * 2, (y2 - expTop) + 10)
+	end
 
 	QAT.widgets.PoolEnd(pool)
 end

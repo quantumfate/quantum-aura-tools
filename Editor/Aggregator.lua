@@ -50,7 +50,7 @@ local function defaultFilter()
 		timing = "any", -- any | timed | passive
 		seenMin = 0,
 		hasStacks = false,
-		pinnedOnly = false,
+		favouritesOnly = false,
 		zoneId = nil, -- nil = all zones
 		sort = "lastSeen", -- lastSeen | seen | name
 	}
@@ -63,7 +63,7 @@ end
 -- Does a row pass everything EXCEPT the relationship segment? (Counts per bucket are
 -- computed with the rest of the filter applied, so the segment labels stay honest.)
 local function passesNonRelationship(row, fq)
-	if fq.pinnedOnly and not row.pinned then
+	if fq.favouritesOnly and not row.favourited then
 		return false
 	end
 	if fq.zoneId and row.zoneId ~= fq.zoneId then
@@ -290,12 +290,116 @@ local function segmented(parent, name, options, current, onSelect)
 	return group
 end
 
+-- ---------------------------------------------------------------------------
+-- Ignored-abilities popup (a small list with an X to un-ignore each)
+-- ---------------------------------------------------------------------------
+
+local IGN_POPW = 320
+local ignoredPool
+
+local function makeIgnoredRow(parent, name)
+	local p = W.Panel(parent, name, { 0.06, 0.09, 0.13, 1 }, { 0.12, 0.17, 0.22, 1 })
+	p:SetHeight(26)
+	local icon = WM:CreateControl(name .. "_Ic", p, CT_TEXTURE)
+	icon:SetDimensions(18, 18)
+	icon:SetAnchor(LEFT, p, LEFT, 6, 0)
+	local nm = W.Label(p, name .. "_Nm", "", "$(MEDIUM_FONT)|15|soft-shadow-thin")
+	nm:SetAnchor(LEFT, icon, RIGHT, 8, 0)
+	local del = W.CloseButton(p, name .. "_X", nil)
+	del:SetDimensions(22, 22)
+	del:SetAnchor(RIGHT, p, RIGHT, -3, 0)
+	function p:Bind(id, onRemove)
+		local n, ic = QAT.util.AbilityInfo(id)
+		icon:SetTexture(ic)
+		nm:SetText(n .. "  |c556070#" .. id .. "|r")
+		del.onClick = onRemove
+		self:SetHidden(false)
+	end
+	return p
+end
+
+local function refreshIgnoredPopup()
+	local p = QAT.aggregator.ignoredPopup
+	if not p or p:IsHidden() then
+		return
+	end
+	ignoredPool = ignoredPool or W.NewPool()
+	W.PoolBegin(ignoredPool)
+	local ids = {}
+	for id in pairs(QAT.sv.capture.ignored or {}) do
+		ids[#ids + 1] = id
+	end
+	table.sort(ids)
+	local y = 32
+	if #ids == 0 then
+		local e = W.PoolGet(ignoredPool, "empty", function()
+			return W.Label(p, "QAT_Agg_IgEmpty", "", "$(MEDIUM_FONT)|15|soft-shadow-thin")
+		end)
+		e:SetHidden(false)
+		e:SetColor(0.5, 0.55, 0.62, 1)
+		e:SetText("No ignored abilities.")
+		e:ClearAnchors()
+		e:SetAnchor(TOPLEFT, p, TOPLEFT, 12, y)
+		y = y + 28
+	else
+		for i, id in ipairs(ids) do
+			local row = W.PoolGet(ignoredPool, "row" .. i, function()
+				return makeIgnoredRow(p, "QAT_Agg_IgRow" .. i)
+			end)
+			row:ClearAnchors()
+			row:SetAnchor(TOPLEFT, p, TOPLEFT, 8, y)
+			row:SetWidth(IGN_POPW - 16)
+			row:Bind(id, function()
+				QAT.Capture_Unignore(id)
+				refreshIgnoredPopup()
+				if QAT.Aggregator_List_Render then
+					QAT.Aggregator_List_Render()
+				end
+			end)
+			y = y + 30
+		end
+	end
+	W.PoolEnd(ignoredPool)
+	p:SetHeight(y + 8)
+end
+
+local function buildIgnoredPopup(f)
+	local p = W.Panel(f, "QAT_Agg_Ignored", { 0.055, 0.075, 0.10, 0.985 }, { 0.18, 0.24, 0.32, 1 })
+	p:SetWidth(IGN_POPW)
+	p:SetHidden(true)
+	p:SetDrawTier(DT_HIGH) -- float above the list/inspector
+	local title = W.Label(p, "QAT_Agg_IgTitle", "Ignored abilities", "$(BOLD_FONT)|15|soft-shadow-thin")
+	title:SetColor(0.72, 0.79, 0.88, 1)
+	title:SetAnchor(TOPLEFT, p, TOPLEFT, 12, 9)
+	QAT.aggregator.ignoredPopup = p
+end
+
+-- Toggle the ignored-abilities popup (anchored under its filter-bar button).
+function QAT.Aggregator_ToggleIgnored()
+	local p = QAT.aggregator.ignoredPopup
+	if not p then
+		return
+	end
+	local show = p:IsHidden()
+	p:SetHidden(not show)
+	if show then
+		p:ClearAnchors()
+		p:SetAnchor(TOPRIGHT, QAT.aggregator.ignoredBtn, BOTTOMRIGHT, 0, 6)
+		refreshIgnoredPopup()
+	end
+end
+
 local function buildFilterBar(f)
 	local bar = W.Panel(f, "QAT_Agg_Filter", { 0.045, 0.055, 0.078, 1 })
 	bar:SetAnchor(TOPLEFT, f, TOPLEFT, 0, TITLE_H + CTRL_H)
 	bar:SetAnchor(TOPRIGHT, f, TOPRIGHT, 0, TITLE_H + CTRL_H)
 	bar:SetHeight(FILTER_H)
 	QAT.aggregator.filterBar = bar
+
+	-- Separate the filter bar from the capture chrome above it with a hairline rule.
+	local topRule = W.Divider(bar, "QAT_Agg_FilterRule")
+	topRule:SetAnchor(TOPLEFT, bar, TOPLEFT, 0, 0)
+	topRule:SetAnchor(TOPRIGHT, bar, TOPRIGHT, 0, 0)
 
 	-- Row 1: relationship segmented + reveal-passives toggle.
 	local rel = segmented(bar, "QAT_Agg_Rel", RELATIONSHIPS, QAT.aggregator.filter.relationship, function(v)
@@ -315,6 +419,14 @@ local function buildFilterBar(f)
 	reveal:SetHeight(26)
 	reveal:SetAnchor(TOPRIGHT, bar, TOPRIGHT, -10, 8)
 	QAT.aggregator.revealBtn = reveal
+
+	local ignoredBtn = W.TextButton(bar, "QAT_Agg_IgnoredBtn", "Ignored", function()
+		QAT.Aggregator_ToggleIgnored()
+	end)
+	ignoredBtn:SetHeight(26)
+	ignoredBtn:SetAnchor(RIGHT, reveal, LEFT, -8, 0)
+	QAT.widgets.Tooltip(ignoredBtn, "Abilities you've ignored — click the × on one to un-ignore it.")
+	QAT.aggregator.ignoredBtn = ignoredBtn
 
 	-- Row 2: search · buffs/debuffs · timed/passive · seen>= · has-stacks · pinned.
 	local row2Y = 44
@@ -359,15 +471,22 @@ local function buildFilterBar(f)
 	timing.first:ClearAnchors()
 	timing.first:SetAnchor(LEFT, eff.buttons["debuff"], RIGHT, 12, 0)
 
-	local pinned = W.TextButton(bar, "QAT_Agg_Pinned", "Pinned only", function()
-		local on = not QAT.aggregator.filter.pinnedOnly
-		QAT.aggregator.filter.pinnedOnly = on
-		QAT.aggregator.pinnedBtn:SetSelected(on)
+	local fav = W.TextButton(bar, "QAT_Agg_Fav", "Favourites only", function()
+		local on = not QAT.aggregator.filter.favouritesOnly
+		QAT.aggregator.filter.favouritesOnly = on
+		QAT.aggregator.favBtn:SetSelected(on)
 		QAT.Aggregator_Refresh()
 	end)
-	pinned:SetHeight(26)
-	pinned:SetAnchor(TOPRIGHT, bar, TOPRIGHT, -10, row2Y)
-	QAT.aggregator.pinnedBtn = pinned
+	fav:SetHeight(26)
+	fav:SetAnchor(TOPRIGHT, bar, TOPRIGHT, -10, row2Y)
+	QAT.widgets.Tooltip(fav, "Show only favourited effects. Favourites always float to the top of each section.")
+	QAT.aggregator.favBtn = fav
+	-- Gold star as a texture (the ★ glyph boxes out in the default font).
+	local favStar = WM:CreateControl("QAT_Agg_FavStar", bar, CT_TEXTURE)
+	favStar:SetTexture("EsoUI/Art/Collections/Favorite_StarOnly.dds")
+	favStar:SetColor(0.921, 0.784, 0.353, 1)
+	favStar:SetDimensions(14, 14)
+	favStar:SetAnchor(RIGHT, fav, LEFT, -4, 0)
 end
 
 -- ---------------------------------------------------------------------------
@@ -437,8 +556,13 @@ function QAT.Aggregator_Refresh()
 		QAT.Aggregator_List_Render()
 	end
 
-	-- Keep the inspector in sync with the (possibly live-updating) selected row.
-	if QAT.Aggregator_Inspector_Render then
+	-- Keep the inspector in sync: the Tracker builder while selecting, otherwise the
+	-- single-row detail (following the live-updating selected row).
+	if a.selecting then
+		if QAT.Aggregator_Inspector_RenderBuilder then
+			QAT.Aggregator_Inspector_RenderBuilder()
+		end
+	elseif QAT.Aggregator_Inspector_Render then
 		local sel = a.selectedKey and QAT.capture.store[a.selectedKey]
 		QAT.Aggregator_Inspector_Render(sel or nil)
 	end
@@ -453,6 +577,14 @@ function QAT.Aggregator_Init()
 	QAT.sv.capture.window = QAT.sv.capture.window or { x = 240, y = 140, width = 1120, height = 620 }
 	local g = QAT.sv.capture.window
 	QAT.aggregator.filter = defaultFilter()
+
+	-- Build-selection state (session only; distinct from favourites). `selecting`
+	-- turns on row checkboxes and swaps the inspector for the Tracker builder;
+	-- `selected` is the ordered list of chosen row keys, `selectedSet` its lookup.
+	QAT.aggregator.selecting = false
+	QAT.aggregator.selected = {}
+	QAT.aggregator.selectedSet = {}
+	QAT.aggregator.builderManual = false -- switch tracker: auto-mesh (false) vs wire-your-own
 
 	local f = WM:CreateTopLevelWindow("QAT_Aggregator")
 	f:SetDimensions(g.width, g.height)
@@ -475,6 +607,7 @@ function QAT.Aggregator_Init()
 	buildTitleBar(f)
 	buildControlBar(f)
 	buildFilterBar(f)
+	buildIgnoredPopup(f)
 
 	-- Body panes (list | inspector). Renderers are layered on in later steps.
 	QAT.aggregator.listPane = W.Panel(f, "QAT_Agg_ListPane", { 0.04, 0.05, 0.07, 1 })
@@ -551,6 +684,144 @@ function QAT.Aggregator_BuildTracker(row)
 			row.abilityId
 		)
 	)
+end
+
+-- ---------------------------------------------------------------------------
+-- Build selection (multi-select -> one tracker)
+-- ---------------------------------------------------------------------------
+
+-- Toggle whether a row (by key) is in the build selection, preserving pick order.
+function QAT.Aggregator_ToggleSelected(key)
+	local a = QAT.aggregator
+	if not key then
+		return
+	end
+	if a.selectedSet[key] then
+		a.selectedSet[key] = nil
+		for i, k in ipairs(a.selected) do
+			if k == key then
+				table.remove(a.selected, i)
+				break
+			end
+		end
+	else
+		a.selectedSet[key] = true
+		a.selected[#a.selected + 1] = key
+	end
+	if QAT.Aggregator_List_Render then
+		QAT.Aggregator_List_Render()
+	end
+	if QAT.Aggregator_Inspector_RenderBuilder then
+		QAT.Aggregator_Inspector_RenderBuilder()
+	end
+end
+
+-- Remove a row from the selection (the builder's Selected-list × button).
+function QAT.Aggregator_RemoveSelected(key)
+	if QAT.aggregator.selectedSet[key] then
+		QAT.Aggregator_ToggleSelected(key)
+	end
+end
+
+-- Move a selected row up (-1) or down (+1) in the order (= stage order). Clamped.
+function QAT.Aggregator_MoveSelected(key, dir)
+	local sel = QAT.aggregator.selected
+	for i, k in ipairs(sel) do
+		if k == key then
+			local j = i + dir
+			if j >= 1 and j <= #sel then
+				sel[i], sel[j] = sel[j], sel[i]
+				if QAT.Aggregator_Inspector_RenderBuilder then
+					QAT.Aggregator_Inspector_RenderBuilder()
+				end
+			end
+			return
+		end
+	end
+end
+
+-- Enter/leave multi-select mode. Leaving clears the selection and returns the
+-- inspector to the single-row detail.
+function QAT.Aggregator_SetSelecting(on)
+	local a = QAT.aggregator
+	a.selecting = on and true or false
+	if not a.selecting then
+		a.selected, a.selectedSet = {}, {}
+	end
+	if a.selectBtn then
+		a.selectBtn:SetText(a.selecting and "Selecting" or "Select multiple")
+		a.selectBtn:SetSelected(a.selecting)
+	end
+	if QAT.Aggregator_List_Render then
+		QAT.Aggregator_List_Render()
+	end
+	if a.selecting then
+		if QAT.Aggregator_Inspector_RenderBuilder then
+			QAT.Aggregator_Inspector_RenderBuilder()
+		end
+	elseif QAT.Aggregator_Inspector_Render then
+		local sel = a.selectedKey and QAT.capture.store[a.selectedKey]
+		QAT.Aggregator_Inspector_Render(sel or nil)
+	end
+end
+
+-- The build action's single source of truth: 1 effect -> a simple tracker, 2+ ->
+-- one switch tracker (shows whichever of the chosen effects is active). Selection
+-- order is stage order. Exits select mode and opens the Editor on the result.
+function QAT.Aggregator_BuildFromSelection()
+	local a = QAT.aggregator
+	local rows = {}
+	for _, key in ipairs(a.selected or {}) do
+		local r = QAT.capture.store[key]
+		if r then
+			rows[#rows + 1] = r
+		end
+	end
+	if #rows == 0 then
+		return
+	end
+	if #rows == 1 then
+		QAT.Aggregator_BuildTracker(rows[1])
+		QAT.Aggregator_SetSelecting(false)
+		return
+	end
+
+	local effects = {}
+	for _, r in ipairs(rows) do
+		-- Watch each effect on the unit it actually lives on: a self→self buff on the
+		-- player, anything else (a debuff you put on the boss, a boss mechanic) on the
+		-- reticle target.
+		effects[#effects + 1] = {
+			id = r.abilityId,
+			name = r.name,
+			unit = (r.targetRole == "me") and "player" or "reticleover",
+		}
+	end
+	buildCounter = buildCounter + 1
+	local def = QAT.BuildMutexTrackerDef({
+		name = "Stages",
+		effects = effects,
+		manual = a.builderManual,
+		x = math.floor(GuiRoot:GetWidth() / 2 - 110),
+		y = math.floor(GuiRoot:GetHeight() / 2 - 20),
+		suffix = buildCounter,
+	})
+	if not def then
+		return
+	end
+	table.insert(QAT.sv.trackers, def)
+	QAT.log.capture:Info("build-switch: '%s' from %d selected effect(s)", def.id, #effects)
+	if QAT.widgets.NotifyTrackerChanged then
+		QAT.widgets.NotifyTrackerChanged()
+	end
+	if QAT.editor and QAT.editor.frame and QAT.editor.frame:IsHidden() and QAT.Editor_Toggle then
+		QAT.Editor_Toggle()
+	end
+	if QAT.Editor_SelectNode then
+		QAT.Editor_SelectNode(def.id)
+	end
+	d(string.format("%s: built a switch tracker from %d effects — opened in the Editor.", QAT.displayName, #effects))
+	QAT.Aggregator_SetSelecting(false)
 end
 
 function QAT.Aggregator_Toggle()

@@ -290,6 +290,16 @@ local function evaluateOne(load)
 		return false
 	end
 
+	if load.curse then
+		-- Affliction check (Vampire/Werewolf skill line), not the werewolf transform.
+		-- Matches the stable CURSE_TYPE_* enum, never a localized name.
+		local want = (load.curse == "vampire" and CURSE_TYPE_VAMPIRE)
+			or (load.curse == "werewolf" and CURSE_TYPE_WEREWOLF)
+		if (GetPlayerCurseType and GetPlayerCurseType() or CURSE_TYPE_NONE) ~= want then
+			return false
+		end
+	end
+
 	if load.zoneIds and #load.zoneIds > 0 then
 		local zone = GetZoneId(GetUnitZoneIndex("player"))
 		local ok = false

@@ -85,6 +85,90 @@ local function ago(ts)
 	end
 end
 
+-- Fill a raw-field value map { [field] = valueLabel } from a captured row. Shared
+-- by the single-row detail and the builder's per-tab raw view.
+local function fillRaw(rr, row)
+	local isDebuff = row.effectType == BUFF_EFFECT_TYPE_DEBUFF
+	rr["abilityId"]:SetText(tostring(row.abilityId))
+	rr["effectType"]:SetText(EFFECT_TYPE_NAME[row.effectType] or "—")
+	rr["sourceName"]:SetText((row.sourceName and row.sourceName ~= "") and row.sourceName or "—")
+	rr["sourceType"]:SetText(UNIT_TYPE_NAME[row.sourceType] or "—")
+	rr["targetName"]:SetText((row.targetName and row.targetName ~= "") and row.targetName or "—")
+	rr["targetUnitTag"]:SetText('"' .. (row.targetTag or "?") .. '"')
+	rr["castByPlayer"]:SetText(row.castByPlayer == nil and "—" or tostring(row.castByPlayer))
+	rr["isBuff/debuff"]:SetText(isDebuff and "debuff" or "buff")
+	rr["timed"]:SetText(row.timed and "true (has duration)" or "false (passive)")
+	rr["buffSlot"]:SetText(row.buffSlot and tostring(row.buffSlot) or "—")
+end
+
+-- One row of the builder's ordered Selected list: number, icon, name, id, reorder
+-- (up/down), remove. Order here is the stage order in the built switch tracker.
+local ARROW_UP = "EsoUI/Art/Miscellaneous/list_sortUp.dds"
+local ARROW_DOWN = "EsoUI/Art/Miscellaneous/list_sortDown.dds"
+local function makeSelRow(parent, name)
+	local p = W.Panel(parent, name, { 0.05, 0.08, 0.11, 1 }, { 0.11, 0.16, 0.21, 1 })
+	p:SetHeight(34)
+	local num = W.Badge(p, name .. "_N", "1", { 0.55, 0.62, 0.72 })
+	num:SetAnchor(LEFT, p, LEFT, 8, 0)
+	local icon = WM:CreateControl(name .. "_Ic", p, CT_TEXTURE)
+	icon:SetDimensions(22, 22)
+	icon:SetAnchor(LEFT, num, RIGHT, 8, 0)
+	local nm = W.Label(p, name .. "_Nm", "", "$(MEDIUM_FONT)|16|soft-shadow-thin")
+	nm:SetAnchor(LEFT, icon, RIGHT, 8, -1)
+	local del = W.CloseButton(p, name .. "_X", nil)
+	del:SetDimensions(24, 24)
+	del:SetAnchor(RIGHT, p, RIGHT, -4, 0)
+	local down = W.IconButton(p, name .. "_Dn", ARROW_DOWN, 16, nil)
+	down:SetAnchor(RIGHT, del, LEFT, -6, 0)
+	local up = W.IconButton(p, name .. "_Up", ARROW_UP, 16, nil)
+	up:SetAnchor(RIGHT, down, LEFT, -4, 0)
+	local idl = W.Label(p, name .. "_Id", "", "$(MEDIUM_FONT)|13|soft-shadow-thin")
+	idl:SetColor(0.5, 0.58, 0.68, 1)
+	idl:SetAnchor(RIGHT, up, LEFT, -10, 0)
+	function p:Bind(n, row, cb)
+		num:SetText(tostring(n))
+		icon:SetTexture(row.icon)
+		nm:SetText(row.name or ("#" .. row.abilityId))
+		idl:SetText("#" .. row.abilityId)
+		del.onClick = cb.onRemove
+		up.onClick, down.onClick = cb.onUp, cb.onDown
+		up:SetHidden(cb.onUp == nil) -- hidden at the top of the list
+		down:SetHidden(cb.onDown == nil) -- hidden at the bottom
+		self:SetHidden(false)
+	end
+	return p
+end
+
+-- A raw-data tab for one selected effect (icon + name), highlighted when active.
+local function makeTab(parent, name)
+	local c = W.Clickable(parent, name, { 0.06, 0.10, 0.14, 1 })
+	c.bg:SetEdgeColor(0.13, 0.19, 0.24, 1)
+	c.bg:SetEdgeTexture("", 1, 1, 1)
+	c:SetHeight(24)
+	local ic = WM:CreateControl(name .. "_Ic", c, CT_TEXTURE)
+	ic:SetDimensions(16, 16)
+	ic:SetAnchor(LEFT, c, LEFT, 5, 0)
+	local l = W.Label(c, name .. "_L", "", "$(MEDIUM_FONT)|14|soft-shadow-thin")
+	l:SetAnchor(LEFT, ic, RIGHT, 5, -1)
+	c:SetHandler("OnMouseUp", function(self, b, inside)
+		if inside and b == MOUSE_BUTTON_INDEX_LEFT and self.onClick then
+			self.onClick()
+		end
+	end)
+	function c:Bind(row, active, onClick)
+		ic:SetTexture(row.icon)
+		l:SetText(row.name or ("#" .. row.abilityId))
+		l:SetColor(active and 0.95 or 0.7, active and 0.97 or 0.77, active and 1 or 0.86, 1)
+		self.bg:SetCenterColor(active and 0.12 or 0.06, active and 0.20 or 0.10, active and 0.30 or 0.14, 1)
+		self.bg:SetEdgeColor(0.13, 0.19, 0.24, 1)
+		self.bg:SetEdgeTexture("", 1, 1, 1)
+		self.onClick = onClick
+		self:SetWidth(5 + 16 + 5 + math.ceil(l:GetTextWidth()) + 10)
+		self:SetHidden(false)
+	end
+	return c
+end
+
 -- ---------------------------------------------------------------------------
 -- Build (once)
 -- ---------------------------------------------------------------------------
@@ -139,20 +223,26 @@ function QAT.Aggregator_Inspector_Build(pane)
 	build:SetMinWidth(INNER_W)
 	I.buildBtn = build
 
-	I.pinBtn = W.TextButton(body, "QAT_AggIns_Pin", "Pin", function()
+	I.favBtn = W.TextButton(body, "QAT_AggIns_Fav", "Favourite", function()
 		if not I.row then
 			return
 		end
-		if I.row.pinned then
-			QAT.Capture_Unpin(I.row)
+		local key = I.row.key
+		if I.row.favourited then
+			QAT.Capture_Unfavourite(I.row)
 		else
-			QAT.Capture_Pin(I.row)
+			QAT.Capture_Favourite(I.row)
 		end
-		QAT.Aggregator_Inspector_Render(I.row)
+		-- Unfavouriting a library-only row drops it: fall back to the placeholder.
+		local stillThere = QAT.capture.store[key]
+		if not stillThere then
+			QAT.aggregator.selectedKey = nil
+		end
+		QAT.Aggregator_Inspector_Render(stillThere or nil)
 		QAT.Aggregator_List_Render()
 	end)
-	I.pinBtn:SetHeight(28)
-	I.pinBtn:SetAnchor(TOPLEFT, build, BOTTOMLEFT, 0, 8)
+	I.favBtn:SetHeight(28)
+	I.favBtn:SetAnchor(TOPLEFT, build, BOTTOMLEFT, 0, 8)
 
 	I.copyBtn = W.TextButton(body, "QAT_AggIns_Copy", "Copy id", function()
 		if I.row then
@@ -164,7 +254,7 @@ function QAT.Aggregator_Inspector_Build(pane)
 		end
 	end)
 	I.copyBtn:SetHeight(28)
-	I.copyBtn:SetAnchor(LEFT, I.pinBtn, RIGHT, 8, 0)
+	I.copyBtn:SetAnchor(LEFT, I.favBtn, RIGHT, 8, 0)
 
 	I.ignoreBtn = W.TextButton(body, "QAT_AggIns_Ignore", "Ignore", function()
 		if I.row then
@@ -179,7 +269,7 @@ function QAT.Aggregator_Inspector_Build(pane)
 
 	-- RAW DATA card.
 	local raw = W.Card(body, "QAT_AggIns_Raw", "Raw data")
-	raw:SetAnchor(TOPLEFT, I.pinBtn, BOTTOMLEFT, 0, 16)
+	raw:SetAnchor(TOPLEFT, I.favBtn, BOTTOMLEFT, 0, 16)
 	raw:SetWidth(INNER_W)
 	I.rawCard = raw
 	I.rawRows = {}
@@ -231,6 +321,87 @@ function QAT.Aggregator_Inspector_Build(pane)
 	nt:SetVerticalAlignment(TEXT_ALIGN_TOP)
 	I.noteText = nt
 
+	-- --------------------------------------------------------------------------
+	-- Builder-mode skeleton (multi-select): swaps in over the single-row detail.
+	-- Header + Done, the Build Tracker button, a "what this builds" info card, the
+	-- ordered Selected list (pooled), and per-effect raw-data tabs (pooled) driving
+	-- a reused set of raw-field rows.
+	-- --------------------------------------------------------------------------
+	I.builderPool = W.NewPool()
+	I.tabPool = W.NewPool()
+
+	I.bTitle = W.Label(body, "QAT_AggIns_BTitle", "Tracker builder", "$(BOLD_FONT)|20|soft-shadow-thin")
+	I.bTitle:SetAnchor(TOPLEFT, body, TOPLEFT, PAD, PAD)
+	I.bSub = W.Label(body, "QAT_AggIns_BSub", "", "$(MEDIUM_FONT)|15|soft-shadow-thin")
+	I.bSub:SetColor(0.55, 0.62, 0.72, 1)
+	I.bSub:SetAnchor(TOPLEFT, body, TOPLEFT, PAD, PAD + 26)
+	I.bDone = W.TextButton(body, "QAT_AggIns_BDone", "Done", function()
+		QAT.Aggregator_SetSelecting(false)
+	end)
+	I.bDone:SetHeight(26)
+	I.bDone:SetAnchor(TOPRIGHT, body, TOPLEFT, PAD + INNER_W, PAD)
+
+	-- The single source of truth for creating the tracker; same anchor family as the
+	-- single-mode Build button so it reads as "the" action.
+	I.bBuild = W.TextButton(body, "QAT_AggIns_BBuild", "Build Tracker", function()
+		QAT.Aggregator_BuildFromSelection()
+	end)
+	I.bBuild:SetSelected(true)
+	I.bBuild:SetHeight(32)
+	I.bBuild:SetMinWidth(INNER_W)
+	I.bBuild:SetAnchor(TOPLEFT, body, TOPLEFT, PAD, PAD + 58)
+	I.bBuildNote = W.Label(body, "QAT_AggIns_BBNote", "", "$(MEDIUM_FONT)|14|soft-shadow-thin")
+	I.bBuildNote:SetColor(0.5, 0.58, 0.68, 1)
+	I.bBuildNote:SetAnchor(TOPLEFT, body, TOPLEFT, PAD, PAD + 96)
+
+	I.bInfo = W.Card(body, "QAT_AggIns_BInfo", "Builds a simple tracker")
+	I.bInfo:SetWidth(INNER_W)
+	I.bInfo:SetAnchor(TOPLEFT, body, TOPLEFT, PAD, PAD + 122)
+	I.bInfoText = W.Label(I.bInfo, "QAT_AggIns_BInfoT", "", "$(MEDIUM_FONT)|15|soft-shadow-thin")
+	I.bInfoText:SetColor(0.68, 0.75, 0.83, 1)
+	I.bInfoText:SetAnchor(TOPLEFT, I.bInfo, TOPLEFT, PAD, I.bInfo.contentY)
+	I.bInfoText:SetWidth(INNER_W - PAD * 2)
+	I.bInfoText:SetVerticalAlignment(TEXT_ALIGN_TOP)
+
+	-- Opt out of auto-switching: build the phases only and wire transitions yourself.
+	-- Only meaningful for a switch tracker (2+), so shown/hidden per render.
+	I.bManualChk = W.Checkbox(body, "QAT_AggIns_BManual", false, function(v)
+		QAT.aggregator.builderManual = v
+		QAT.Aggregator_Inspector_RenderBuilder()
+	end)
+	I.bManualLbl =
+		W.Label(body, "QAT_AggIns_BManualL", "Wire the switching myself", "$(MEDIUM_FONT)|15|soft-shadow-thin")
+	I.bManualLbl:SetColor(0.68, 0.75, 0.83, 1)
+	QAT.widgets.Tooltip(
+		I.bManualLbl,
+		"Build one phase per effect plus a fallback, with no transitions — you add the switching rules yourself in the editor."
+	)
+
+	I.bSelHdr = W.Label(body, "QAT_AggIns_BSelHdr", "SELECTED", "$(BOLD_FONT)|13|soft-shadow-thin")
+	I.bSelHdr:SetColor(0.5, 0.57, 0.66, 1)
+	I.bRawHdr = W.Label(body, "QAT_AggIns_BRawHdr", "RAW DATA", "$(BOLD_FONT)|13|soft-shadow-thin")
+	I.bRawHdr:SetColor(0.5, 0.57, 0.66, 1)
+
+	-- Raw-field rows reused for whichever tab is active; positioned each render.
+	I.bRawRows = {}
+	I.bRawByField = {}
+	for i, field in ipairs(RAW_FIELDS) do
+		local lab = W.Label(body, "QAT_AggIns_BRL" .. i, field, "$(MEDIUM_FONT)|14|soft-shadow-thin")
+		lab:SetColor(0.5, 0.57, 0.66, 1)
+		local val = W.Label(body, "QAT_AggIns_BRV" .. i, "", "$(MEDIUM_FONT)|14|soft-shadow-thin")
+		val:SetColor(0.82, 0.87, 0.93, 1)
+		val:SetHorizontalAlignment(TEXT_ALIGN_RIGHT)
+		I.bRawRows[i] = { lab = lab, val = val }
+		I.bRawByField[field] = val
+	end
+
+	I.builder =
+		{ I.bTitle, I.bSub, I.bDone, I.bBuild, I.bBuildNote, I.bInfo, I.bManualChk, I.bManualLbl, I.bSelHdr, I.bRawHdr }
+	for _, r in ipairs(I.bRawRows) do
+		I.builder[#I.builder + 1] = r.lab
+		I.builder[#I.builder + 1] = r.val
+	end
+
 	-- The detail controls are grouped so render can show/hide them wholesale.
 	I.detail = {
 		I.icon,
@@ -240,7 +411,7 @@ function QAT.Aggregator_Inspector_Build(pane)
 		I.timeBadge,
 		I.relBadge,
 		build,
-		I.pinBtn,
+		I.favBtn,
 		I.copyBtn,
 		I.ignoreBtn,
 		raw,
@@ -259,6 +430,18 @@ local function setDetailShown(shown)
 	I.placeholder:SetHidden(shown)
 	for _, c in ipairs(I.detail) do
 		c:SetHidden(not shown)
+	end
+	-- Single mode owns the pane: hide the builder chrome and its pooled controls.
+	for _, c in ipairs(I.builder or {}) do
+		c:SetHidden(true)
+	end
+	if I.builderPool then
+		W.PoolBegin(I.builderPool)
+		W.PoolEnd(I.builderPool)
+	end
+	if I.tabPool then
+		W.PoolBegin(I.tabPool)
+		W.PoolEnd(I.tabPool)
 	end
 end
 
@@ -286,21 +469,11 @@ function QAT.Aggregator_Inspector_Render(row)
 	I.relBadge:SetText(BUCKET_LABEL[row.bucket] or "?")
 	I.relBadge:SetColorRGB(BUCKET_COL[row.bucket] or BUCKET_COL.os)
 
-	I.pinBtn:SetText(row.pinned and "Pinned" or "Pin")
-	I.pinBtn:SetSelected(row.pinned)
+	I.favBtn:SetText(row.favourited and "Favourited" or "Favourite")
+	I.favBtn:SetSelected(row.favourited)
 
 	-- Raw data.
-	local rr = I.rawRows
-	rr["abilityId"]:SetText(tostring(row.abilityId))
-	rr["effectType"]:SetText(EFFECT_TYPE_NAME[row.effectType] or "—")
-	rr["sourceName"]:SetText((row.sourceName and row.sourceName ~= "") and row.sourceName or "—")
-	rr["sourceType"]:SetText(UNIT_TYPE_NAME[row.sourceType] or "—")
-	rr["targetName"]:SetText((row.targetName and row.targetName ~= "") and row.targetName or "—")
-	rr["targetUnitTag"]:SetText('"' .. (row.targetTag or "?") .. '"')
-	rr["castByPlayer"]:SetText(row.castByPlayer == nil and "—" or tostring(row.castByPlayer))
-	rr["isBuff/debuff"]:SetText(isDebuff and "debuff" or "buff")
-	rr["timed"]:SetText(row.timed and "true (has duration)" or "false (passive)")
-	rr["buffSlot"]:SetText(row.buffSlot and tostring(row.buffSlot) or "—")
+	fillRaw(I.rawRows, row)
 
 	I.obsSeen:SetText(tostring(row.seenCount or 0))
 	I.obsStacks:SetText(tostring(row.maxStacks or 0))
@@ -308,4 +481,187 @@ function QAT.Aggregator_Inspector_Render(row)
 	I.obsLast:SetText(ago(row.lastSeen))
 
 	I.noteText:SetText(MEANING[row.bucket] or "")
+end
+
+-- ---------------------------------------------------------------------------
+-- Builder render (multi-select) — the Tracker builder pane
+-- ---------------------------------------------------------------------------
+
+function QAT.Aggregator_Inspector_RenderBuilder()
+	local I = QAT.aggregator.insp
+	if not I then
+		return
+	end
+	local a = QAT.aggregator
+
+	-- Builder owns the pane: hide the single-row detail + placeholder, show builder.
+	I.placeholder:SetHidden(true)
+	for _, c in ipairs(I.detail) do
+		c:SetHidden(true)
+	end
+	for _, c in ipairs(I.builder) do
+		c:SetHidden(false)
+	end
+
+	-- Resolve the selection (in pick order) to live rows; drop any that vanished.
+	local rows = {}
+	for _, key in ipairs(a.selected or {}) do
+		local r = QAT.capture.store[key]
+		if r then
+			rows[#rows + 1] = r
+		end
+	end
+	local n = #rows
+	local switch = n >= 2
+
+	I.bSub:SetText(n .. " effect" .. (n == 1 and "" or "s") .. " selected")
+
+	-- Build button note + info card copy communicate intent without jargon.
+	if n == 0 then
+		I.bBuildNote:SetText("select effects to build")
+		I.bInfo:SetTitle("Nothing selected yet")
+		I.bInfoText:SetText(
+			"Tick effects in the list on the left. One becomes a simple tracker; two or more that are never active at the same time become a switch tracker."
+		)
+	elseif switch and a.builderManual then
+		I.bBuildNote:SetText("phases only, from " .. n)
+		I.bInfo:SetTitle("Builds phases only")
+		I.bInfoText:SetText(
+			"One phase per effect plus a fallback, with no transitions — you wire the switching yourself in the editor."
+		)
+	elseif switch then
+		I.bBuildNote:SetText("one switch tracker from " .. n)
+		I.bInfo:SetTitle("Builds a switch tracker")
+		I.bInfoText:SetText(
+			"One aura that shows whichever of these "
+				.. n
+				.. " effects is active right now, switching as they come and go — like the four vampire stages."
+		)
+	else
+		I.bBuildNote:SetText("a simple tracker")
+		I.bInfo:SetTitle("Builds a simple tracker")
+		I.bInfoText:SetText(
+			"One aura for this single effect. Add another effect that is never active at the same time to turn it into a switch tracker."
+		)
+	end
+	local th = I.bInfoText:GetTextHeight() or 40
+	I.bInfo:SetHeight(I.bInfo.contentY + math.max(28, th) + 12)
+	I.bBuild:SetMouseEnabled(n > 0)
+
+	-- Flowing section below the fixed header/build/info block.
+	local y = (PAD + 122) + I.bInfo:GetHeight() + 14
+
+	-- Manual opt-out (switch trackers only): build phases without the auto-mesh.
+	I.bManualChk:SetChecked(a.builderManual)
+	if switch then
+		I.bManualChk:SetHidden(false)
+		I.bManualLbl:SetHidden(false)
+		I.bManualChk:ClearAnchors()
+		I.bManualChk:SetAnchor(TOPLEFT, I.body, TOPLEFT, PAD, y)
+		I.bManualLbl:ClearAnchors()
+		I.bManualLbl:SetAnchor(LEFT, I.bManualChk, RIGHT, 8, 0)
+		y = y + 30
+	else
+		I.bManualChk:SetHidden(true)
+		I.bManualLbl:SetHidden(true)
+	end
+
+	I.bSelHdr:ClearAnchors()
+	I.bSelHdr:SetAnchor(TOPLEFT, I.body, TOPLEFT, PAD, y)
+	y = y + 22
+
+	W.PoolBegin(I.builderPool)
+	if n == 0 then
+		local e = W.PoolGet(I.builderPool, "selEmpty", function()
+			return W.Label(I.body, "QAT_AggIns_BSelEmpty", "", "$(MEDIUM_FONT)|14|soft-shadow-thin")
+		end)
+		e:SetHidden(false)
+		e:SetColor(0.5, 0.55, 0.62, 1)
+		e:SetText("No effects ticked yet.")
+		e:ClearAnchors()
+		e:SetAnchor(TOPLEFT, I.body, TOPLEFT, PAD, y + 2)
+		y = y + 30
+	else
+		for i, r in ipairs(rows) do
+			local key = r.key
+			local sr = W.PoolGet(I.builderPool, "sel" .. i, function()
+				return makeSelRow(I.body, "QAT_AggIns_BSel" .. i)
+			end)
+			sr:ClearAnchors()
+			sr:SetAnchor(TOPLEFT, I.body, TOPLEFT, PAD, y)
+			sr:SetWidth(INNER_W)
+			sr:Bind(i, r, {
+				onRemove = function()
+					QAT.Aggregator_RemoveSelected(key)
+				end,
+				onUp = (i > 1) and function()
+					QAT.Aggregator_MoveSelected(key, -1)
+				end or nil,
+				onDown = (i < n) and function()
+					QAT.Aggregator_MoveSelected(key, 1)
+				end or nil,
+			})
+			y = y + 34 + 4
+		end
+	end
+	W.PoolEnd(I.builderPool)
+
+	-- Raw-data tabs + fields for the active tab (only when something is selected).
+	if n == 0 then
+		I.bRawHdr:SetHidden(true)
+		for _, rr in ipairs(I.bRawRows) do
+			rr.lab:SetHidden(true)
+			rr.val:SetHidden(true)
+		end
+		W.PoolBegin(I.tabPool)
+		W.PoolEnd(I.tabPool)
+		return
+	end
+
+	if not (I.activeTab and a.selectedSet[I.activeTab]) then
+		I.activeTab = rows[1].key
+	end
+
+	y = y + 10
+	I.bRawHdr:SetHidden(false)
+	I.bRawHdr:ClearAnchors()
+	I.bRawHdr:SetAnchor(TOPLEFT, I.body, TOPLEFT, PAD, y)
+	y = y + 22
+
+	W.PoolBegin(I.tabPool)
+	local tx, ty = PAD, y
+	for i, r in ipairs(rows) do
+		local key = r.key
+		local tab = W.PoolGet(I.tabPool, "tab" .. i, function()
+			return makeTab(I.body, "QAT_AggIns_BTab" .. i)
+		end)
+		tab:Bind(r, key == I.activeTab, function()
+			I.activeTab = key
+			QAT.Aggregator_Inspector_RenderBuilder()
+		end)
+		local w = tab:GetWidth()
+		if tx > PAD and tx + w > PAD + INNER_W then
+			tx, ty = PAD, ty + 28
+		end
+		tab:ClearAnchors()
+		tab:SetAnchor(TOPLEFT, I.body, TOPLEFT, tx, ty)
+		tx = tx + w + 6
+	end
+	W.PoolEnd(I.tabPool)
+	y = ty + 32
+
+	local active = QAT.capture.store[I.activeTab]
+	if active then
+		fillRaw(I.bRawByField, active)
+		for _, rr in ipairs(I.bRawRows) do
+			rr.lab:SetHidden(false)
+			rr.val:SetHidden(false)
+			rr.lab:ClearAnchors()
+			rr.lab:SetAnchor(TOPLEFT, I.body, TOPLEFT, PAD, y)
+			rr.val:ClearAnchors()
+			rr.val:SetAnchor(TOPLEFT, I.body, TOPLEFT, PAD + 160, y)
+			rr.val:SetAnchor(TOPRIGHT, I.body, TOPLEFT, PAD + INNER_W, y)
+			y = y + 22
+		end
+	end
 end

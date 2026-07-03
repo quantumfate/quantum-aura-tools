@@ -19,6 +19,12 @@
 QAT.Tracker = {}
 QAT.Tracker.__index = QAT.Tracker
 
+-- When a follows-effect phase's effect fades with no sibling yet live, hold the
+-- phase this long before falling back to idle. A switch to a sibling effect (e.g.
+-- Off Balance -> its immunity) usually lands a frame or two later; without the
+-- hold the fallback phase flickers through the gap. Imperceptible on a real drop.
+local FALLBACK_GRACE = 0.25 -- seconds
+
 -- Runtime-condition action -> the display element it recolors.
 local ACTION_ELEMENT = {
 	setBackgroundColor = "background",
@@ -35,6 +41,22 @@ local function contains(arr, v)
 		end
 	end
 	return false
+end
+
+-- Live timing (begin/end/stacks) for a specific ability on a unit, or nil if the
+-- buff isn't currently present. Used to look ahead at a transition target whose
+-- trigger effect may already be up.
+local function buffTiming(unit, abilityId)
+	if not (unit and DoesUnitExist(unit)) then
+		return nil
+	end
+	for i = 1, GetNumBuffs(unit) do
+		local _, started, ending, _, stackCount, _, _, _, _, _, id = GetUnitBuffInfo(unit, i)
+		if id == abilityId then
+			return started, ending, stackCount
+		end
+	end
+	return nil
 end
 
 --- Build runtime phase tables (each with its display control) from a canonical
@@ -157,13 +179,17 @@ function QAT.Tracker:Enter(phaseId, timing)
 		self.phases[self.current].control:SetState(false)
 	end
 	QAT.log.engine:Debug("tracker '%s': %s -> %s", self.id, tostring(self.current), tostring(phaseId or "hidden"))
+	self.pendingEnd = nil -- entering any phase cancels a pending fall-back
 	self.current = phaseId
-	if not phaseId then
+	local phase = phaseId and self.phases[phaseId]
+	if not phase then
+		-- No target, or a transition pointed at a phase that no longer exists (deleted
+		-- mid-session before the def was re-canonicalized): hide rather than crash.
+		self.current = nil
 		self.expiresAt, self.duration, self.stacks = nil, nil, 0
 		return
 	end
 
-	local phase = self.phases[phaseId]
 	local now = GetFrameTimeSeconds()
 	timing = timing or {}
 	self.stacks = timing.stacks or 0
@@ -171,6 +197,26 @@ function QAT.Tracker:Enter(phaseId, timing)
 
 	QAT.FireCues(phase.cues)
 	self:Render(now)
+end
+
+-- Take the first outgoing effect-gained transition whose trigger effect is already
+-- present on its unit. Returns true if one was taken. Lets a phase advance on the
+-- strength of a buff that is already up, independent of event ordering.
+function QAT.Tracker:TakeLiveTransition()
+	local cur = self.phases[self.current]
+	for _, tr in ipairs(cur.transitions) do
+		local w = tr.when
+		if w.kind == "effect" and w.result == "gained" then
+			for _, id in ipairs(w.abilityIds or {}) do
+				local started, ending, stacks = buffTiming(w.unit, id)
+				if started then
+					self:Enter(tr.to, { beginTime = started, endTime = ending, stacks = stacks })
+					return true
+				end
+			end
+		end
+	end
+	return false
 end
 
 -- Go to the current phase's expire target, or the initial phase if it has none.
@@ -208,9 +254,23 @@ function QAT.Tracker:OnEffect(unitTag, abilityId, result, beginTime, endTime, st
 	local d = cur.duration
 	if d.type == "effect" and d.unit == unitTag and contains(d.abilityIds, abilityId) then
 		if rstr == "faded" then
-			self:EndPhase()
+			-- The effect keeping this phase alive ended. Before falling back to the
+			-- initial phase, check whether we actually advanced: if an outgoing
+			-- effect-gained transition's trigger buff is already live (a stage-up where
+			-- the fade of the old stage and the gain of the new arrive in the same
+			-- frame, in either order), take that transition instead of resetting.
+			if not self:TakeLiveTransition() then
+				-- Nothing live yet: hold the phase (shown static) for a short grace
+				-- window. A sibling effect gained within it wins via the transition
+				-- path above; otherwise Tick falls back once the window elapses.
+				local now = GetFrameTimeSeconds()
+				self.expiresAt, self.duration = nil, nil
+				self.pendingEnd = now + FALLBACK_GRACE
+				self:Render(now)
+			end
 		else
 			local now = GetFrameTimeSeconds()
+			self.pendingEnd = nil -- the effect is back; cancel any pending fall-back
 			self:applyTiming(d, { beginTime = beginTime, endTime = endTime }, now)
 			self.stacks = stackCount or 0
 			self:Render(now)
@@ -218,6 +278,29 @@ function QAT.Tracker:OnEffect(unitTag, abilityId, result, beginTime, endTime, st
 		return true
 	end
 	return false
+end
+
+-- Reconcile the current phase against a freshly-enumerated set of live effects.
+-- EVENT_EFFECT_CHANGED only fires on change, and a "faded" can be missed across a
+-- /reloadui, zone change or armory swap (which silently drop buffs). The seed sweep
+-- feeds re-appeared effects as "gained"; this closes the opposite gap: if the phase
+-- is held up by a duration effect that is no longer present on its unit, end it.
+---@param presentByUnit table unit tag -> { [abilityId] = true } of live effects
+function QAT.Tracker:ReconcilePresence(presentByUnit)
+	if not self.loaded or not self.current then
+		return
+	end
+	local d = self.phases[self.current].duration
+	if d.type ~= "effect" then
+		return -- fixed/none phases aren't kept alive by a tracked effect
+	end
+	local present = presentByUnit[d.unit]
+	for _, id in ipairs(d.abilityIds or {}) do
+		if present and present[id] then
+			return -- still up; nothing to reconcile
+		end
+	end
+	self:EndPhase()
 end
 
 -- Per-phase reactive conditions: ephemeral element recolors plus the Show-Proc
@@ -300,6 +383,15 @@ end
 -- Render tick: advance the state machine, then animate a counting-down phase.
 function QAT.Tracker:Tick(now)
 	if not self.current then
+		return
+	end
+	-- Holding a faded phase during its grace window: fall back only once it elapses,
+	-- and skip the normal auto-transition/render (the effect is already gone).
+	if self.pendingEnd then
+		if now >= self.pendingEnd then
+			self.pendingEnd = nil
+			self:EndPhase()
+		end
 		return
 	end
 	if self:CheckAutoTransitions(now) then

@@ -37,6 +37,27 @@ function QAT.util.PhaseIcon(phase)
 	return nil
 end
 
+-- Resolve an ability id to a display name and icon for the editor. Ids are
+-- meaningless to users, so anywhere one is shown it should be paired with these.
+-- Falls back gracefully: a 0/nil id reads as "(none)", an unknown id keeps its
+-- number so a mistyped id is still identifiable.
+---@param id number|nil ability id
+---@return string name, string icon
+function QAT.util.AbilityInfo(id)
+	if not id or id == 0 then
+		return "(none)", "/esoui/art/icons/icon_missing.dds"
+	end
+	local name = GetAbilityName(id)
+	if not name or name == "" then
+		name = "#" .. id
+	end
+	local icon = GetAbilityIcon(id)
+	if not icon or icon == "" then
+		icon = "/esoui/art/icons/icon_missing.dds"
+	end
+	return name, icon
+end
+
 -- Build a lookup set { [value] = true } from an array.
 function QAT.util.ToSet(arr)
 	local set = {}

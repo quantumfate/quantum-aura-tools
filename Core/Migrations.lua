@@ -59,6 +59,20 @@ QAT.migrations = {
 		sv.capture.pinned = sv.capture.pinned or {}
 		sv.capture.ignored = sv.capture.ignored or {}
 	end,
+
+	-- schema 6 -> 7: "pin" becomes "favourite" (a pure display concept, distinct from
+	-- the new build-selection). Rename the persisted bucket, preserving saved records.
+	[6] = function(sv)
+		sv.capture = sv.capture or {}
+		sv.capture.favourites = sv.capture.favourites or sv.capture.pinned or {}
+		sv.capture.pinned = nil
+		for _, rec in pairs(sv.capture.favourites) do
+			if type(rec) == "table" then
+				rec.favourited = rec.favourited or rec.pinned or true
+				rec.pinned = nil
+			end
+		end
+	end,
 }
 
 function QAT.RunMigrations(sv)
