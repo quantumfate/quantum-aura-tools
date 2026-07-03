@@ -1,0 +1,14 @@
+# Dev/tooling files that stay in the repository but are stripped from the packaged
+# release zip (`git archive`). End users only need the add-on itself + README/LICENSE.
+/.gitattributes  export-ignore
+/.gitignore      export-ignore
+/.luarc.json     export-ignore
+/.styluaignore   export-ignore
+/stylua.toml     export-ignore
+/justfile        export-ignore
+/DESIGN.md       export-ignore
+/EDITOR.md       export-ignore
+/AGGREGATOR.md   export-ignore
+/CLAUDE.md       export-ignore
+stubs/           export-ignore
+tools/           export-ignore
