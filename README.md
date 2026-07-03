@@ -22,9 +22,33 @@ cooldown — instead of stacking several trackers to fake states.
   (any / front / back).
 - **Current-loadout reader** — see the sets you're wearing and add any as a
   condition in one click; updates live as you swap gear.
+- **Effect Aggregator** — a live window into the buffs, debuffs and combat events
+  flowing past you (see below).
 - **Visual editor** — a resizable two-pane window; drag a tracker on the HUD to
-  position it, drag in the tree to group it.
+  position it, drag in the tree to group it. Per-phase display fonts and a global UI
+  font come from your installed LibMediaProvider fonts.
 - Settings registered in the native Addons menu (LibAddonMenu).
+
+## The Effect Aggregator
+
+A window into ESO's live data stream that hands you the tools to process it. Turn on
+capture, fight (a boss, a trial dummy, anything), and it records every buff and
+debuff it sees — **aggregated** by ability, deduped, and grouped by relationship:
+what the boss put on **you** (the mechanics you care about), what **you** put on the
+target, your own passives, and more. Each row shows the ability, its id, buff/debuff
+and timed/passive tags, stacks, and how often it's been seen.
+
+It kills the manual ability-ID hunting and the source/target guesswork — and while
+you use it, its inspector shows the **raw data ESO actually returns** for each
+effect, so you learn the data model as you go. One click on **Build Tracker** turns
+any effect into a pre-filled tracker and drops you into the editor to refine it.
+
+- Open it with `/qat aggregator` (or `/qat agg`).
+- Capture runs in the background and is **off by default** — toggle it on while
+  you're hunting, then off again.
+- **Pin** effects to keep them across reloads; **Ignore** known noise to hide it.
+- **Freeze view** holds the list still for reading while capture keeps running.
+- English client only for now.
 
 ## Usage
 
@@ -37,14 +61,8 @@ cooldown — instead of stacking several trackers to fake states.
 
 ## Coming next
 
-**The effect aggregator** — a window into ESO's live data stream that hands you the
-tools to process it. It captures the buffs, debuffs and combat events flowing past
-you, aggregates them by ability, source and target, and lets you turn any one into a
-tracker in a click. It kills the manual ability-ID hunting and the source/target
-guesswork — and in doing so teaches you the data model and how ESO actually emits
-effects in the first place.
-
-Also planned: a searchable set/ability picker and an in-addon raid-mechanic library.
+A searchable set/ability picker, targeting a boss by name (the engine resolves the
+live boss slot for you), and an in-addon raid-mechanic library.
 
 ## Credits & license
 

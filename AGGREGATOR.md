@@ -79,8 +79,47 @@ shorthand `{ abilityIds={id}, name, icon, unit, display, duration }` and lets
 ## Deferred
 
 Boss identity + non-EN locales ride on a future localization / name-catalog; **EN
-only** for now. Whether the key uses raw `targetUnitTag` vs a role-bucket is still
-open, tied to that catalog work.
+only** for now. A **named-boss abstraction** (target a boss by name; engine resolves
+the live `bossN` slot; dropdown fed by harvested names) is planned for the load-
+condition picker — see the memory backlog.
+
+---
+
+## Implementation (as built)
+
+- **Files:** `Engine/Capture.lua` (engine/data), `Editor/Aggregator.lua`
+  (window shell + control bar + filter bar + `Aggregator_BuildTracker`),
+  `Editor/AggregatorList.lua` (grouped list), `Editor/AggregatorInspector.lua`
+  (teaching panel). Persistence under `sv.capture` = `{ pinned, ignored, window }`
+  (migration 5→6). Sub-logger `QAT.log.capture`.
+- **Feeds (fused):** `EVENT_COMBAT_EVENT` filtered to effect-gained results (the
+  `sourceName`/relationship spine) + unit-filtered `EVENT_EFFECT_CHANGED` on
+  `player`, `reticleover`, `boss1-6` (duration/stacks/effectType/passives) + a
+  `GetUnitBuffInfo` **seed-sweep** on capture-start, `EVENT_BOSSES_CHANGED`, and
+  `EVENT_RETICLE_TARGET_CHANGED` (catches effects already on a freshly-selected
+  target — the HyperTools poll replacement).
+- **Intake:** target ∈ `player` (me) / `boss1-6` / `reticleover` (counted as `boss`
+  only when `IsUnitAttackable`, so a trial dummy / non-frame enemy is captured but
+  friendly reticle targets are not). Group-member targets are a later expansion.
+- **Identity:** name-keyed — `abilityId + sourceName + targetName + zoneId` (never
+  the shuffling slot tag). `sourceRole` frozen at ingest by the resolver above;
+  `targetRole` from the tag. **Relationship buckets:** `bs` Boss→Self (money),
+  `sb` Self→Boss, `xb` Other→Boss (target's own states / dummy self-debuffs),
+  `gs` Group→Self, `os` Other→Self, `ss` Self→Self (passive noise), `xx` fallback.
+- **Filtering:** relationship segments (All · Boss→Self · Self→Boss · Other→Boss ·
+  Group→Self · Self→Self, live counts) + Reveal-self-passives (default hides `ss`),
+  search (name/id), Buffs/Debuffs, Timed/Passive, Pinned-only, zone selector; sort
+  Last-seen / Seen× / Name (no auto-resort under the user).
+- **Capture control:** On/Off toggle (default OFF, background, decoupled from the
+  window), `LIVE`/`FROZEN`/`STOPPED` tag, status line, **Freeze view** (holds the
+  list for reading while capture keeps running), Clear catch. Live refresh updates
+  rows in place; the change callback is throttled and skips the list while frozen.
+- **Actions:** **Build Tracker** (thin seed → flat shorthand → `CanonicalizeDef` →
+  opens the Editor on it), **Pin** (persisted library, survives reload), **Copy id**
+  (prints to chat — ESO exposes no clipboard-write to add-ons), **Ignore**
+  (persisted suppression; manage via `/qat capture ignored|unignore <id>`).
+- **Slash:** `/qat aggregator` (`agg`) opens the window; `/qat capture
+  on|off|dump|clear|ignored|unignore <id>` drive the engine from chat.
 
 ---
 

@@ -105,18 +105,21 @@ matches stable IDs (setId/abilityId/zoneId/classId), never localized names.
 
 ## Status & next
 
-Engine M0–M3 done. **M4 editor done** incl. this era's work: scope-in-tree nav,
-expandable groups, HUD drag-to-move, ZO_ScrollContainer scroll, and set load
-conditions + live current-loadout picker.
+Engine M0–M3 done. **M4 editor done** (scope-in-tree nav, expandable groups, HUD
+drag-to-move, ZO_ScrollContainer scroll, set load conditions + live current-loadout
+picker).
 
-**Next: M5 — effect/ID viewers + capture.** A `CapturedEffect` **aggregator**
-(abilityId · name · icon · effectType · source+target type+name · duration · stacks ·
-seen-count) fed by two feeds — an effect-scan (`GetUnitBuffInfo` across
-player/boss1-6/group/reticleover) and a combat-event stream — **relationship-grouped**
-(Boss→Self, etc.) into a per-boss authoring workbench. Background capture default OFF
-(one-time dismissible popup). One-click **build-tracker** pre-fills a tracker and
-replaces the placeholder ability ids in `Examples/SampleTrackers`. Viewers come
-before the raid library (they're the harvest tool). Full spec: [[qat-rewrite-plan]].
+**M5 Effect Aggregator done.** `Engine/Capture.lua` + `Editor/Aggregator*.lua`:
+two fused feeds (combat effect-gained + unit-filtered `EVENT_EFFECT_CHANGED` on
+player/reticleover/boss1-6 + seed-sweep), name-keyed dedup (`abilityId + sourceName
++ targetName + zoneId`), relationship buckets (Boss→Self is the money bucket),
+filter/list/teaching-inspector window, one-click build-tracker, pin/ignore persisted
+(`sv.capture`, schema 6). Background capture default OFF. `/qat aggregator`. Full
+spec + as-built notes: `AGGREGATOR.md` and [[m5-aggregator-design]]. Also landed
+alongside: load-condition chips, per-phase + global LibMediaProvider fonts, audio-cue
+sound picker (see `EDITOR.md` "Authoring UX").
 
-Backlog: searchable set/ability picker, categorize sets via
-`LibSets.GetSetInfo.setType`, raid library (M6), polish/ESOUI release (M7).
+**Next: M6 raid library** + named-boss load condition (target a boss by name; engine
+resolves the live slot; dropdown fed by aggregator-harvested names). Backlog:
+searchable set/ability picker, categorize sets via `LibSets.GetSetInfo.setType`,
+localization engine + boss/name catalog, polish/ESOUI release (M7).

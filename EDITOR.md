@@ -165,3 +165,23 @@ bar-packs; off by default.
 4. Pickers (ability/set/color/media).
 5. Move mode (ghosts, arming, clamping, per-tracker/group).
 6. Detach (pop-out), drag-drop, multi-select, alignment guides.
+
+## Authoring UX (added post-M4, alongside the aggregator)
+
+- **Load conditions as removable chips** (`Editor/LoadTab.lua`): Zones, Bosses and
+  Skill-ids render as wrapping `×`-to-remove chips instead of a comma string that
+  overflowed the buttons. Zones/Bosses keep **+ current** / **clear**; Skill-ids has
+  an inline **add-id** box (type an id, Enter → chip; dedupes). Zones key on stable
+  `zoneId`; bosses on localized name (EN-now; a name catalog stabilizes this later).
+  "+ current" dedupes.
+- **Per-phase font family** (Appearance → **Font** card): a family dropdown from
+  LibMediaProvider stored on `phase.look.font`; `Display` resolves it via
+  `QAT.util.FontFace` and applies it to that phase's readouts (name/timer/stacks).
+- **Audio-cue sound dropdown**: an Audio phase picks its cue from a curated,
+  self-validating list of `SOUNDS.*` keys (invalid keys dropped, custom preserved),
+  previews on pick.
+- **Global UI font** (settings panel, `requiresReload`): `sv.account.uiFont`; the
+  widget kit rewrites every kit label/editbox face via `QAT.widgets.ApplyUIFace`, so
+  both custom windows adopt it. HUD trackers keep their own per-phase fonts.
+- **Checkbox widget**: fills solid blue when checked (legible state), 20px, visible
+  border — applies everywhere the kit's `Checkbox` is used.
