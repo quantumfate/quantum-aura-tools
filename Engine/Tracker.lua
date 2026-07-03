@@ -59,6 +59,7 @@ local function Normalize(def)
 			decimals = look.decimals,
 			showStacks = look.showStacks,
 			showTime = look.showTime,
+			font = look.font,
 			fontSizes = look.fontSizes,
 			colors = look.colors,
 			borderThickness = look.borderThickness,

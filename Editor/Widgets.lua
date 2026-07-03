@@ -5,6 +5,20 @@ QAT.widgets = {}
 local WM = GetWindowManager()
 local FONT = "$(MEDIUM_FONT)|18|soft-shadow-thin"
 
+-- Optional global UI font (LibMediaProvider, chosen in the settings panel). When set,
+-- its face replaces the face token in every kit-built label's font string, so all
+-- window chrome adopts it. HUD tracker readouts are untouched — they don't use this
+-- kit and carry their own per-phase font. Applied at label creation, so a change
+-- takes effect on /reloadui.
+local function applyFace(fontString)
+	local face = QAT.sv and QAT.util and QAT.util.FontFace(QAT.sv.account.uiFont)
+	if not face then
+		return fontString
+	end
+	return face .. (fontString:match("|.*$") or "|18|soft-shadow-thin")
+end
+QAT.widgets.ApplyUIFace = applyFace
+
 -- Shared palette so inputs, dropdowns and buttons read as one toolkit and stand
 -- apart from the panel background.
 -- A dark-navy, minimal palette with a blue accent. Shared so the whole editor
@@ -63,7 +77,7 @@ end
 
 function QAT.widgets.Label(parent, name, text, font)
 	local l = WM:CreateControl(name, parent, CT_LABEL)
-	l:SetFont(font or FONT)
+	l:SetFont(applyFace(font or FONT))
 	l:SetColor(0.9, 0.92, 0.95, 1)
 	l:SetVerticalAlignment(TEXT_ALIGN_CENTER)
 	l:SetText(text or "")
@@ -139,17 +153,19 @@ end
 -- A checkbox (CT_CONTROL base + backdrop visual). The toggle callback is read from
 -- box.onToggle at fire time (rebindable per render, so a pooled box can be reused).
 function QAT.widgets.Checkbox(parent, name, checked, onToggle)
-	local box = QAT.widgets.Clickable(parent, name, { 0.10, 0.11, 0.13, 1 })
-	box.bg:SetEdgeColor(0, 0, 0, 1)
-	box:SetDimensions(18, 18)
+	local box = QAT.widgets.Clickable(parent, name, checked and C.selBg or C.fieldBg)
+	box.bg:SetEdgeColor(unpack(C.fieldEdge)) -- visible border so an empty box still reads
+	box:SetDimensions(20, 20)
 	box.onToggle = onToggle
-	local tick = QAT.widgets.Label(box, name .. "_Tick", checked and "x" or "")
-	tick:SetAnchor(CENTER)
+	-- Filled blue when checked (not a tiny "x") so the state is legible at a glance.
+	local tick = QAT.widgets.Label(box, name .. "_Tick", checked and "x" or "", "$(BOLD_FONT)|18|soft-shadow-thin")
+	tick:SetAnchor(CENTER, box, CENTER, 0, -1)
 	tick:SetHorizontalAlignment(TEXT_ALIGN_CENTER)
 	box.checked = checked
 	function box:SetChecked(v)
 		self.checked = v
 		tick:SetText(v and "x" or "")
+		self.bg:SetCenterColor(unpack(v and C.selBg or C.fieldBg))
 	end
 	box:SetHandler("OnMouseUp", function(self, button, upInside)
 		if upInside and button == MOUSE_BUTTON_INDEX_LEFT then
@@ -435,6 +451,7 @@ function QAT.widgets.EditBox(parent, name, width, height, initial, onChange)
 	local edit = CreateControlFromVirtual(name .. "_Edit", frame, "ZO_DefaultEditForBackdrop")
 	edit:SetAnchor(TOPLEFT, frame, TOPLEFT, 6, 0)
 	edit:SetAnchor(BOTTOMRIGHT, frame, BOTTOMRIGHT, -6, 0)
+	edit:SetFont(applyFace("$(MEDIUM_FONT)|18|soft-shadow-thin"))
 	edit:SetText(initial or "")
 	edit:SetHandler("OnEnter", function(self)
 		self:LoseFocus()

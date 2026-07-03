@@ -24,6 +24,58 @@ end
 local FONT_OPTS = numOpts({ 10, 12, 14, 16, 18, 20, 22, 24, 28, 32, 36, 40, 48 })
 local BORDER_OPTS = numOpts({ 1, 2, 4, 8, 16 }) -- backdrop edge must be a power of two
 local DECIMAL_OPTS = numOpts({ 0, 1, 2 })
+
+-- Common ESO cue sounds for audio phases. Keys are SOUNDS.* names; only those the
+-- running client actually defines are offered (validated when options are built),
+-- and a hand-authored value that isn't in the list is preserved.
+local CUE_SOUNDS = {
+	{ label = "Notification", key = "NEW_NOTIFICATION" },
+	{ label = "Alert / Error", key = "GENERAL_ALERT_ERROR" },
+	{ label = "Duel Start", key = "DUEL_START" },
+	{ label = "Duel Invite", key = "DUEL_INVITE_RECEIVED" },
+	{ label = "Quest Complete", key = "QUEST_COMPLETED" },
+	{ label = "Objective Complete", key = "OBJECTIVE_COMPLETED" },
+	{ label = "Achievement", key = "ACHIEVEMENT_AWARDED" },
+	{ label = "Level Up", key = "LEVEL_UP" },
+	{ label = "Champion Point", key = "CHAMPION_POINTS_COMMITTED" },
+	{ label = "Enlightened", key = "ENLIGHTENED_STATE_GAINED" },
+	{ label = "Countdown Tick", key = "BATTLEGROUND_COUNTDOWN_TICK" },
+	{ label = "Countdown Finish", key = "BATTLEGROUND_COUNTDOWN_FINISH" },
+	{ label = "Group Join", key = "GROUP_JOIN" },
+	{ label = "Group Leave", key = "GROUP_LEAVE" },
+	{ label = "Accept", key = "DIALOG_ACCEPT" },
+	{ label = "Decline", key = "DIALOG_DECLINE" },
+	{ label = "Negative", key = "NEGATIVE_CLICK" },
+	{ label = "Trial Complete", key = "RAID_TRIAL_COMPLETED" },
+	{ label = "Trial Failed", key = "RAID_TRIAL_FAILED" },
+	{ label = "Justice KOS", key = "JUSTICE_NOW_KOS" },
+}
+-- Font family options from LibMediaProvider; "(default)" plus a preserved custom.
+local function fontFamilyOptions(current)
+	local opts, have = { { label = "(default)", value = nil } }, {}
+	for _, name in ipairs(QAT.util.FontList()) do
+		opts[#opts + 1] = { label = name, value = name }
+		have[name] = true
+	end
+	if current and current ~= "" and not have[current] then
+		opts[#opts + 1] = { label = tostring(current), value = current }
+	end
+	return opts
+end
+
+local function soundOptions(current)
+	local opts, have = { { label = "(none)", value = nil } }, {}
+	for _, s in ipairs(CUE_SOUNDS) do
+		if SOUNDS and SOUNDS[s.key] and SOUNDS[s.key] ~= "" then
+			opts[#opts + 1] = { label = s.label, value = s.key }
+			have[s.key] = true
+		end
+	end
+	if current and current ~= "" and not have[current] then
+		opts[#opts + 1] = { label = tostring(current) .. " (custom)", value = current }
+	end
+	return opts
+end
 local DEFAULT_COLORS = {
 	background = { 0, 0, 0, 0.55 },
 	bar = { 0.20, 0.80, 0.35, 1 },
@@ -174,7 +226,9 @@ local function render(container, def)
 			commit(def) -- re-renders this tab via the TrackerChanged callback
 		end
 		iconBox:SetDimensions(sFieldW - ROW_H - 8, ROW_H)
-		iconBox:SetText(look.icon or "")
+		-- Show the resolved icon path (the ability's own icon when none is set
+		-- explicitly), so the field matches what the preview well displays.
+		iconBox:SetText(look.icon or QAT.util.PhaseIcon(phase) or "")
 		iconBox:ClearAnchors()
 		iconBox:SetAnchor(TOPLEFT, src, TOPLEFT, sLX, vy(sy, ROW_H))
 		local prev = get("iconPreview", function()
@@ -201,24 +255,26 @@ local function render(container, def)
 	elseif kind == "audio" then
 		phase.cues = phase.cues or {}
 		rowLabel(src, "Snd", "Sound", sy)
-		local soundBox = get("soundBox", function()
-			return QAT.widgets.EditBox(src, "QAT_App_Sound", 100, ROW_H)
+		local soundDD = get("soundDD", function()
+			return QAT.widgets.Dropdown(src, "QAT_App_Sound", sFieldW - 60, {}, nil, nil)
 		end)
-		soundBox.onChange = function(text)
-			text = zo_strtrim(text or "")
-			phase.cues.sound = (text ~= "" and text) or nil
+		soundDD:SetOptions(soundOptions(phase.cues.sound))
+		soundDD:SetValue(phase.cues.sound)
+		soundDD.onSelect = function(v)
+			phase.cues.sound = v
 			commit(def)
+			if v then
+				QAT.FireCues({ sound = v }) -- preview the pick
+			end
 		end
-		soundBox:SetDimensions(sFieldW - 60, ROW_H)
-		soundBox:SetText(phase.cues.sound or "")
-		soundBox:ClearAnchors()
-		soundBox:SetAnchor(TOPLEFT, src, TOPLEFT, sLX, vy(sy, ROW_H))
+		soundDD:ClearAnchors()
+		soundDD:SetAnchor(TOPLEFT, src, TOPLEFT, sLX, vy(sy, DD_H))
 		local testBtn = get("soundTest", function()
 			return QAT.widgets.TextButton(src, "QAT_App_SoundTest", "Test", nil)
 		end)
 		testBtn:SetHeight(ROW_H)
 		testBtn:ClearAnchors()
-		testBtn:SetAnchor(LEFT, soundBox, RIGHT, 8, 0)
+		testBtn:SetAnchor(LEFT, soundDD, RIGHT, 8, 0)
 		testBtn.onClick = function()
 			QAT.FireCues({ sound = phase.cues.sound })
 		end
@@ -308,7 +364,7 @@ local function render(container, def)
 		commit(def)
 	end
 	timeChk:ClearAnchors()
-	timeChk:SetAnchor(TOPLEFT, tt, TOPLEFT, ttLX, vy(ty, 18))
+	timeChk:SetAnchor(TOPLEFT, tt, TOPLEFT, ttLX + 12, vy(ty, 20))
 	ty = ty + RH
 
 	if kind ~= "text" then
@@ -322,7 +378,7 @@ local function render(container, def)
 			commit(def)
 		end
 		stacksChk:ClearAnchors()
-		stacksChk:SetAnchor(TOPLEFT, tt, TOPLEFT, ttLX, vy(ty, 18))
+		stacksChk:SetAnchor(TOPLEFT, tt, TOPLEFT, ttLX + 12, vy(ty, 20))
 		ty = ty + RH
 	end
 
@@ -340,8 +396,8 @@ local function render(container, def)
 	ty = ty + RH
 	tt:SetDimensions(topW, ty + 8)
 
-	-- ===== FONT SIZE (bottom-right) =====
-	local font = cardOf("cFont", "Font size")
+	-- ===== FONT (bottom-right) =====
+	local font = cardOf("cFont", "Font")
 	font:ClearAnchors()
 	font:SetAnchor(TOPLEFT, container, TOPLEFT, OUT + topW + CGAP, y2)
 	local fLX = font.padX + LW
@@ -352,6 +408,21 @@ local function render(container, def)
 		fkeys = { "label", "time" }
 	end
 	local fy = font.contentY
+
+	-- Font family (applies to every readout of this phase).
+	rowLabel(font, "FFam", "Family", fy)
+	local famDD = get("ffam", function()
+		return QAT.widgets.Dropdown(font, "QAT_App_FFam", topW - fLX - font.padX, {}, nil, nil)
+	end)
+	famDD:SetOptions(fontFamilyOptions(look.font))
+	famDD:SetValue(look.font)
+	famDD.onSelect = function(v)
+		phase.look.font = v
+		commit(def)
+	end
+	famDD:ClearAnchors()
+	famDD:SetAnchor(TOPLEFT, font, TOPLEFT, fLX, vy(fy, DD_H))
+	fy = fy + RH
 	for _, key in ipairs(fkeys) do
 		local fk = key
 		rowLabel(font, "F" .. fk, FONT_LABEL[fk], fy)

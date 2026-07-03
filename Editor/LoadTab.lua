@@ -404,6 +404,80 @@ render = function(container, def)
 		return l
 	end
 
+	-- A removable "pill" chip: label + an × that fires its onRemove at click time.
+	local function makeRemovableChip(name)
+		local c = QAT.widgets.Panel(container, name, { 0.055, 0.106, 0.145, 1 }, { 0.13, 0.19, 0.24, 1 })
+		c:SetHeight(22)
+		local l = QAT.widgets.Label(c, name .. "_L", "", "$(MEDIUM_FONT)|14|soft-shadow-thin")
+		l:SetColor(0.72, 0.79, 0.88, 1)
+		l:SetAnchor(LEFT, c, LEFT, 8, -1)
+		local xb = QAT.widgets.Clickable(c, name .. "_X", { 0, 0, 0, 0 })
+		xb:SetDimensions(18, 22)
+		xb:SetAnchor(RIGHT, c, RIGHT, -2, 0)
+		local xl = QAT.widgets.Label(xb, name .. "_XL", "×", "$(MEDIUM_FONT)|16|soft-shadow-thin")
+		xl:SetColor(0.62, 0.68, 0.76, 1)
+		xl:SetAnchor(CENTER, xb, CENTER, 0, -1)
+		xb:SetHandler("OnMouseEnter", function()
+			xl:SetColor(1, 0.6, 0.6, 1)
+		end)
+		xb:SetHandler("OnMouseExit", function()
+			xl:SetColor(0.62, 0.68, 0.76, 1)
+		end)
+		xb:SetHandler("OnMouseUp", function(_, b, inside)
+			if inside and b == MOUSE_BUTTON_INDEX_LEFT and c.onRemove then
+				c.onRemove()
+			end
+		end)
+		function c:SetContent(text, onRemove)
+			l:SetText(text)
+			self.onRemove = onRemove
+			self:SetWidth(math.ceil(l:GetTextWidth()) + 8 + 20)
+			-- Re-assert the border: a CT_BACKDROP edge can fail to redraw after a pooled
+			-- chip is resized to a new width.
+			self:SetEdgeColor(0.13, 0.19, 0.24, 1)
+			self:SetEdgeTexture("", 1, 1, 1)
+		end
+		return c
+	end
+
+	-- Lay out removable chips (wrapping) from x0 at row yTop, within [x0, rightLimit].
+	-- entries = { { text=, onRemove= }, ... }. Returns endX, endY (just past the last
+	-- chip, for an inline trailing control) and yBelow (below the last chip row).
+	local CHIP_H, CHIP_PITCH, CHIP_GAP = 22, 27, 6
+	local function chipList(prefix, entries, x0, yTop, rightLimit, emptyText)
+		if #entries == 0 then
+			local e = get(prefix .. "Empty", function()
+				return QAT.widgets.Label(container, "QAT_Load_" .. prefix .. "Empty", "")
+			end)
+			e:SetText(emptyText or "(any)")
+			e:SetColor(0.5, 0.55, 0.62, 1)
+			e:ClearAnchors()
+			e:SetAnchor(TOPLEFT, container, TOPLEFT, x0, yTop + 3)
+			return x0, yTop, yTop + CHIP_H
+		end
+		local cx, cy = x0, yTop
+		for i, en in ipairs(entries) do
+			local chip = get(prefix .. "Chip" .. i, function()
+				return makeRemovableChip("QAT_Load_" .. prefix .. "Chip" .. i)
+			end)
+			chip:SetContent(en.text, en.onRemove)
+			local w = chip:GetWidth()
+			if cx > x0 and cx + w > rightLimit then
+				cx, cy = x0, cy + CHIP_PITCH
+			end
+			chip:ClearAnchors()
+			chip:SetAnchor(TOPLEFT, container, TOPLEFT, cx, cy)
+			cx = cx + w + CHIP_GAP
+		end
+		return cx, cy, cy + CHIP_H
+	end
+
+	-- Right edge of the card's content area, and where the +current/clear buttons sit.
+	local RIGHTEDGE = cw - OUT - card.padX - 6
+	local BTN_ADD_W, BTN_CLR_W = 92, 52
+	local BTNX = RIGHTEDGE - BTN_CLR_W - 8 - BTN_ADD_W
+	local CHIP_RIGHT = BTNX - 12
+
 	-- Class.
 	label("lClass", "Class", y)
 	local classDD = get("classDD", function()
@@ -446,47 +520,80 @@ render = function(container, def)
 	combatDD:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
 	y = y + ROW_H + GAP
 
-	-- Skills slotted (ability ids).
+	-- Skills slotted (ability ids) — removable chips + an inline "add id" box.
 	label("lSkills", "Skill ids", y)
-	local skillBox = get("skillBox", function()
-		return QAT.widgets.EditBox(container, "QAT_Load_Skills", 220, ROW_H)
-	end)
-	skillBox.onChange = function(text)
-		local ids = {}
-		for t in tostring(text):gmatch("%d+") do
-			table.insert(ids, tonumber(t))
-		end
-		load.skills = ids
-		commit(def)
+	load.skills = load.skills or {}
+	local skillEntries = {}
+	for i, id in ipairs(load.skills) do
+		local idx = i
+		table.insert(skillEntries, {
+			text = tostring(id),
+			onRemove = function()
+				table.remove(load.skills, idx)
+				commit(def)
+				render(container, def)
+			end,
+		})
 	end
-	skillBox:SetText(table.concat(load.skills or {}, ", "))
-	skillBox:ClearAnchors()
-	skillBox:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
-	y = y + ROW_H + GAP
+	local sX, sY = chipList("skill", skillEntries, LX, y, RIGHTEDGE, "")
+	local addSkill = get("addSkill", function()
+		return QAT.widgets.EditBox(container, "QAT_Load_AddSkill", 92, ROW_H)
+	end)
+	if sX > LX and sX + 92 > RIGHTEDGE then -- wrap the add box onto the next row
+		sX, sY = LX, sY + CHIP_PITCH
+	end
+	addSkill:SetDimensions(92, ROW_H)
+	addSkill:SetText("")
+	addSkill.onChange = function(text)
+		local id = tonumber(tostring(text):match("%d+"))
+		if id then
+			for _, e in ipairs(load.skills) do
+				if e == id then
+					return
+				end
+			end
+			table.insert(load.skills, id)
+			commit(def)
+			render(container, def)
+		end
+	end
+	addSkill:ClearAnchors()
+	addSkill:SetAnchor(TOPLEFT, container, TOPLEFT, sX, sY - 2)
+	QAT.widgets.Tooltip(addSkill, "Type an ability id and press Enter to add it.")
+	y = sY + ROW_H + GAP
 
-	-- Zones.
+	-- Zones (stable zoneId) — removable chips + current/clear.
 	label("lZones", "Zones", y)
 	load.zoneIds = load.zoneIds or {}
-	local zonesText = {}
-	for _, z in ipairs(load.zoneIds) do
-		table.insert(zonesText, (GetZoneNameById(z) or "?") .. " (" .. z .. ")")
+	local zoneEntries = {}
+	for i, z in ipairs(load.zoneIds) do
+		local idx = i
+		table.insert(zoneEntries, {
+			text = (GetZoneNameById(z) or "?") .. " · " .. z,
+			onRemove = function()
+				table.remove(load.zoneIds, idx)
+				commit(def)
+				render(container, def)
+			end,
+		})
 	end
-	local zonesLabel = get("zonesVal", function()
-		return QAT.widgets.Label(container, "QAT_Load_ZonesVal", "")
-	end)
-	zonesLabel:SetText(#zonesText > 0 and table.concat(zonesText, ", ") or "(any)")
-	zonesLabel:ClearAnchors()
-	zonesLabel:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y + 3)
+	local _, _, zBelow = chipList("zone", zoneEntries, LX, y, CHIP_RIGHT, "(any)")
 	local addZone = get("addZone", function()
 		return QAT.widgets.TextButton(container, "QAT_Load_AddZone", "+ current", nil)
 	end)
 	addZone:SetHeight(ROW_H)
+	addZone:SetMinWidth(BTN_ADD_W)
 	addZone:ClearAnchors()
-	addZone:SetAnchor(TOPLEFT, container, TOPLEFT, LX + 240, y)
+	addZone:SetAnchor(TOPLEFT, container, TOPLEFT, BTNX, y)
 	QAT.widgets.Tooltip(addZone, "Add the zone you are currently in.")
 	addZone.onClick = function()
 		local z = GetZoneId(GetUnitZoneIndex("player"))
 		if z and z > 0 then
+			for _, e in ipairs(load.zoneIds) do
+				if e == z then
+					return
+				end
+			end
 			table.insert(load.zoneIds, z)
 			commit(def)
 			render(container, def)
@@ -496,6 +603,7 @@ render = function(container, def)
 		return QAT.widgets.TextButton(container, "QAT_Load_ClearZone", "clear", nil)
 	end)
 	clearZone:SetHeight(ROW_H)
+	clearZone:SetMinWidth(BTN_CLR_W)
 	clearZone:ClearAnchors()
 	clearZone:SetAnchor(LEFT, addZone, RIGHT, 8, 0)
 	QAT.widgets.Tooltip(clearZone, "Clear the zone list (load in any zone).")
@@ -504,29 +612,45 @@ render = function(container, def)
 		commit(def)
 		render(container, def)
 	end
-	y = y + ROW_H + GAP
+	y = math.max(zBelow, y + ROW_H) + GAP
 
-	-- Bosses.
+	-- Bosses (localized name) — removable chips + current/clear.
 	label("lBosses", "Bosses", y)
 	load.bosses = load.bosses or {}
-	local bossesLabel = get("bossesVal", function()
-		return QAT.widgets.Label(container, "QAT_Load_BossesVal", "")
-	end)
-	bossesLabel:SetText(#load.bosses > 0 and table.concat(load.bosses, ", ") or "(any)")
-	bossesLabel:ClearAnchors()
-	bossesLabel:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y + 3)
+	local bossEntries = {}
+	for i, nm in ipairs(load.bosses) do
+		local idx = i
+		table.insert(bossEntries, {
+			text = nm,
+			onRemove = function()
+				table.remove(load.bosses, idx)
+				commit(def)
+				render(container, def)
+			end,
+		})
+	end
+	local _, _, bBelow = chipList("boss", bossEntries, LX, y, CHIP_RIGHT, "(any)")
 	local addBoss = get("addBoss", function()
 		return QAT.widgets.TextButton(container, "QAT_Load_AddBoss", "+ current", nil)
 	end)
 	addBoss:SetHeight(ROW_H)
+	addBoss:SetMinWidth(BTN_ADD_W)
 	addBoss:ClearAnchors()
-	addBoss:SetAnchor(TOPLEFT, container, TOPLEFT, LX + 240, y)
+	addBoss:SetAnchor(TOPLEFT, container, TOPLEFT, BTNX, y)
 	QAT.widgets.Tooltip(addBoss, "Add the boss(es) currently engaged.")
 	addBoss.onClick = function()
+		local seen = {}
+		for _, e in ipairs(load.bosses) do
+			seen[e] = true
+		end
 		for i = 1, 6 do
 			local tag = "boss" .. i
 			if DoesUnitExist(tag) then
-				table.insert(load.bosses, GetUnitName(tag))
+				local nm = GetUnitName(tag)
+				if nm and nm ~= "" and not seen[nm] then
+					seen[nm] = true
+					table.insert(load.bosses, nm)
+				end
 			end
 		end
 		commit(def)
@@ -536,6 +660,7 @@ render = function(container, def)
 		return QAT.widgets.TextButton(container, "QAT_Load_ClearBoss", "clear", nil)
 	end)
 	clearBoss:SetHeight(ROW_H)
+	clearBoss:SetMinWidth(BTN_CLR_W)
 	clearBoss:ClearAnchors()
 	clearBoss:SetAnchor(LEFT, addBoss, RIGHT, 8, 0)
 	QAT.widgets.Tooltip(clearBoss, "Clear the boss list (load against any boss).")
@@ -544,7 +669,7 @@ render = function(container, def)
 		commit(def)
 		render(container, def)
 	end
-	y = y + ROW_H + GAP
+	y = math.max(bBelow, y + ROW_H) + GAP
 
 	-- Equipped sets: pieces + id, the resolved set name, and which bar to count
 	-- (any / front / back — gear placement, never the drawn bar). One row per set.

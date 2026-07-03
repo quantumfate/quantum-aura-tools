@@ -25,12 +25,13 @@ local DEFAULTS = {
 	y = -200,
 }
 
--- Per-readout label fonts: a shared face/style with an author-settable size.
+-- Per-readout label fonts: an author-settable face (via LibMediaProvider) and size,
+-- with a shared style. `face` is a resolved font path or the default $(BOLD_FONT).
 local FONT_FACE, FONT_STYLE = "$(BOLD_FONT)", "soft-shadow-thick"
 local DEFAULT_FONT_SIZE = { label = 20, time = 20, stacks = 16 }
-local function fontFor(sizes, key)
+local function fontFor(sizes, key, face)
 	local size = (sizes and sizes[key]) or DEFAULT_FONT_SIZE[key]
-	return FONT_FACE .. "|" .. size .. "|" .. FONT_STYLE
+	return (face or FONT_FACE) .. "|" .. size .. "|" .. FONT_STYLE
 end
 
 -- Per-element fallback colors, used when the phase's look leaves one unset.
@@ -180,9 +181,10 @@ function QAT.display.Create(def)
 	local stacksLabel = reuse(name .. "_Stacks", function()
 		return WM:CreateControl(name .. "_Stacks", tlw, CT_LABEL)
 	end)
-	nameLabel:SetFont(fontFor(fontSizes, "label"))
-	timeLabel:SetFont(fontFor(fontSizes, "time"))
-	stacksLabel:SetFont(fontFor(fontSizes, "stacks"))
+	local face = QAT.util.FontFace(def.font)
+	nameLabel:SetFont(fontFor(fontSizes, "label", face))
+	timeLabel:SetFont(fontFor(fontSizes, "time", face))
+	stacksLabel:SetFont(fontFor(fontSizes, "stacks", face))
 	for _, l in ipairs({ nameLabel, timeLabel, stacksLabel }) do
 		l:SetVerticalAlignment(TEXT_ALIGN_CENTER)
 		l:SetHorizontalAlignment(TEXT_ALIGN_CENTER)

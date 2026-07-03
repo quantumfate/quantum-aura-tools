@@ -43,6 +43,27 @@ function QAT.Settings_Register()
 			default = QAT.defaults.account.enabled,
 		},
 		{
+			type = "dropdown",
+			name = "UI font",
+			tooltip = "Font family for the editor and aggregator windows "
+				.. "(from LibMediaProvider). Tracker HUD readouts keep their own per-phase fonts.",
+			choices = (function()
+				local c = { "Default" }
+				for _, f in ipairs(QAT.util.FontList()) do
+					c[#c + 1] = f
+				end
+				return c
+			end)(),
+			getFunc = function()
+				return account.uiFont or "Default"
+			end,
+			setFunc = function(v)
+				account.uiFont = (v ~= "Default") and v or nil
+			end,
+			default = "Default",
+			requiresReload = true,
+		},
+		{
 			type = "header",
 			name = "ID Capture",
 		},

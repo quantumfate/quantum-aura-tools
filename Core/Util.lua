@@ -46,6 +46,49 @@ function QAT.util.ToSet(arr)
 	return set
 end
 
+-- LibMediaProvider access (optional dep). Fonts registered by the user's media
+-- addons become selectable per phase; everything degrades gracefully if the lib or
+-- a font is missing.
+local function getLMP()
+	if LibMediaProvider then
+		return LibMediaProvider
+	end
+	if LibStub then
+		local ok, lib = pcall(LibStub, "LibMediaProvider-1.0", true)
+		if ok then
+			return lib
+		end
+	end
+	return nil
+end
+
+--- The list of registered font family names (sorted by the lib), or {} if none.
+function QAT.util.FontList()
+	local lmp = getLMP()
+	if lmp and lmp.List then
+		local ok, list = pcall(lmp.List, lmp, "font")
+		if ok and list then
+			return list
+		end
+	end
+	return {}
+end
+
+--- Resolve a font family name to a usable font face path, or nil for the default.
+function QAT.util.FontFace(name)
+	if not name or name == "" then
+		return nil
+	end
+	local lmp = getLMP()
+	if lmp and lmp.Fetch then
+		local ok, path = pcall(lmp.Fetch, lmp, "font", name)
+		if ok and path and path ~= "" then
+			return path
+		end
+	end
+	return nil
+end
+
 -- Collect the distinct ability ids referenced by a list of tracker defs
 -- (folders recurse into children). Returns { [abilityId] = { def, def, ... } }.
 function QAT.util.IndexByAbilityId(defs, index)

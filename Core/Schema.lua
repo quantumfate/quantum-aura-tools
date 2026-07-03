@@ -71,6 +71,7 @@ local function canonicalLook(src)
 		decimals = src.decimals,
 		showStacks = src.showStacks or false,
 		showTime = src.showTime ~= false, -- default on; the time number is the common readout
+		font = src.font, -- optional LibMediaProvider font family name (nil = default face)
 		fontSizes = { label = f.label, time = f.time, stacks = f.stacks },
 		colors = colors,
 		borderThickness = src.borderThickness, -- nil = default 1px
