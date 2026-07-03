@@ -2,73 +2,69 @@
 
 A phase-based aura, uptime and raid-mechanic tracker for **The Elder Scrolls Online**.
 
-Build one tracker that **changes its look as its state changes** — ready → active →
-cooldown — instead of stacking several trackers to fake states.
+One tracker changes its look as its state changes — ready → active → cooldown —
+instead of stacking several to fake states.
 
-> ⚠️ Alpha (v0.1.0), under active development. Expect rough edges.
+> ⚠️ Beta (v0.2.0-beta1). The saved-data format may still change between builds.
 
 ## Features
 
-- **Phase-based trackers** — one tracker moves through phases driven by a buff being
-  gained or faded, stack/time thresholds, or a timer ending; each phase has its own
-  look.
-- **Per-phase display** — Bar, Icon, Text, an Audio cue, or hidden — with a
-  countdown, stack count, and per-element colours and font sizes.
-- Tracks **buffs, debuffs, procs and cooldowns**, including passive/permanent buffs.
-- **Groups** (folders) to organise trackers and share load conditions.
-- **Load conditions** decide when a tracker is active: class, role, combat state,
-  slotted skills, zone, boss, and equipped **sets** — matched by stable IDs, so they
-  work in any client language. Set conditions can require a specific bar
-  (any / front / back).
-- **Current-loadout reader** — see the sets you're wearing and add any as a
-  condition in one click; updates live as you swap gear.
-- **Effect Aggregator** — a live window into the buffs, debuffs and combat events
-  flowing past you (see below).
-- **Visual editor** — a resizable two-pane window; drag a tracker on the HUD to
-  position it, drag in the tree to group it. Per-phase display fonts and a global UI
-  font come from your installed LibMediaProvider fonts.
-- Settings registered in the native Addons menu (LibAddonMenu).
+- **Phase-based trackers.** A tracker is a small state machine. Phases advance on a
+  buff gained/faded, a stack or time-left threshold, or a timer ending.
+- **Per-phase display.** Bar, Icon, Text, an audio/flash cue, or hidden. Countdown,
+  stacks, per-element colours, and per-phase fonts.
+- **Switch trackers.** Pick several mutually-exclusive effects (e.g. the four
+  vampire stages); build one aura that shows whichever is active. Stage order is
+  editable, or opt out and wire the transitions yourself.
+- **"How this phase works" card.** Plain-language summary of what a phase tracks and
+  where it goes next — no ability IDs to read.
+- **Load conditions.** Gate a tracker by class, role, combat state, slotted skills,
+  zone, boss, **curse** (vampirism / werewolf), or equipped **sets** (any / front /
+  back bar). All matched by stable ID, so they work in any client language.
+- **Current-loadout reader.** See the sets you wear; add any as a condition in one
+  click. Updates live as you swap gear.
+- **Groups.** Folders that organise trackers and share load conditions.
+- **Tracks** buffs, debuffs, procs, cooldowns, and passive/permanent buffs.
 
-## The Effect Aggregator
+## Effect Aggregator
 
-A window into ESO's live data stream that hands you the tools to process it. Turn on
-capture, fight (a boss, a trial dummy, anything), and it records every buff and
-debuff it sees — **aggregated** by ability, deduped, and grouped by relationship:
-what the boss put on **you** (the mechanics you care about), what **you** put on the
-target, your own passives, and more. Each row shows the ability, its id, buff/debuff
-and timed/passive tags, stacks, and how often it's been seen.
+A live window over ESO's buff/debuff/combat stream — no more manual ability-ID
+hunting.
 
-It kills the manual ability-ID hunting and the source/target guesswork — and while
-you use it, its inspector shows the **raw data ESO actually returns** for each
-effect, so you learn the data model as you go. One click on **Build Tracker** turns
-any effect into a pre-filled tracker and drops you into the editor to refine it.
+- Records every effect it sees, deduped and grouped by relationship: what the boss
+  put on **you**, what **you** put on the target, your passives, and more.
+- The inspector shows the **raw data ESO returns** for each effect, so you learn the
+  model as you go.
+- **Build Tracker** turns one effect (or several, as a switch tracker) into a
+  pre-filled tracker in the editor.
+- **Favourite** effects to keep them across reloads and float them to the top;
+  **Ignore** noise to hide it.
+- **Freeze view** holds the list still while capture keeps running.
+- Capture is background and **off by default**. English client only for now.
 
-- Open it with `/qat aggregator` (or `/qat agg`).
-- Capture runs in the background and is **off by default** — toggle it on while
-  you're hunting, then off again.
-- **Pin** effects to keep them across reloads; **Ignore** known noise to hide it.
-- **Freeze view** holds the list still for reading while capture keeps running.
-- English client only for now.
+## Commands & keybinds
 
-## Usage
+- `/qat` — settings
+- `/qat capture on` / `off` — passive ID capture
+- `/qat aggregator` (`agg`) — open the aggregator
+- `/qat restore examples` — re-add deleted example trackers
 
-- Bind **"Toggle Tracker Editor"** under Controls → Keybindings to open the editor.
-- `/qat` opens the settings panel.
+Bind **Toggle Tracker Editor** and **Toggle Effect Aggregator** under
+Controls → Keybindings.
 
 ## Requirements
 
 **LibAddonMenu-2.0**, **LibSets**, **LibMediaProvider** (optional: LibDebugLogger).
+API 101050.
 
 ## Coming next
 
 A searchable set/ability picker, targeting a boss by name (the engine resolves the
-live boss slot for you), and an in-addon raid-mechanic library.
+live slot), and an in-addon raid-mechanic library.
 
 ## Credits & license
 
-An independent, clean-room rewrite of
+Independent, clean-room rewrite of
 [HyperTools](https://www.esoui.com/downloads/info3057-HyperTools.html) — thanks to
 **Hyperioxes** and **Shadowwolf136** for the original. [MIT](LICENSE) licensed.
 Not affiliated with ZeniMax Media Inc.
-
-Contributing / architecture: see [DESIGN.md](DESIGN.md) and [EDITOR.md](EDITOR.md).
