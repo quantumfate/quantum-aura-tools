@@ -625,6 +625,11 @@ function QAT.Aggregator_Refresh()
 		QAT.Aggregator_List_Render()
 	end
 
+	-- Keep the ignored popup live while it's open (ignoring/un-ignoring updates it).
+	if a.ignoredPopup and not a.ignoredPopup:IsHidden() then
+		refreshIgnoredPopup()
+	end
+
 	-- Keep the inspector in sync: the Tracker builder while selecting, otherwise the
 	-- single-row detail (following the live-updating selected row).
 	if a.selecting then
