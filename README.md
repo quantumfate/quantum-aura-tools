@@ -5,14 +5,26 @@ A phase-based aura, uptime and raid-mechanic tracker for **The Elder Scrolls Onl
 One tracker changes its look as its state changes — ready → active → cooldown —
 instead of stacking several to fake states.
 
-> ⚠️ Beta (v0.2.0-beta1). The saved-data format may still change between builds.
+> ⚠️ Beta (v0.2.0-beta2). The saved-data format may still change between builds.
 
 ## Features
 
 - **Phase-based trackers.** A tracker is a small state machine. Phases advance on a
   buff gained/faded, a stack or time-left threshold, or a timer ending.
-- **Per-phase display.** Bar, Icon, Text, an audio/flash cue, or hidden. Countdown,
-  stacks, per-element colours, and per-phase fonts.
+- **Per-phase display.** Several draw kinds — countdown, stacks, per-element colours
+  and per-phase fonts across all of them:
+  - **Bar** with an optional square icon (it never hides behind the icon),
+    configurable height (thin / half / full) and vertical anchor.
+  - **Icon**, **Text**, an audio/flash cue, or hidden.
+  - **Border** — a frame whose perimeter drains as the timer runs out; transparent
+    background so it can overlay another phase.
+  - **Gradient sweep** — a translucent fill that reveals the icon as time runs down,
+    in the direction you pick.
+  - A **low-time** recolour + pulse for bars and borders.
+- **Parallel layers.** Stack several state machines in one tracker so it can show,
+  say, a duration icon *and* a cooldown frame at once. Each layer is its own node in
+  the tree with a settings card (stack order, x/y offset, visibility); drag a phase
+  between layers.
 - **Switch trackers.** Pick several mutually-exclusive effects (e.g. the four
   vampire stages); build one aura that shows whichever is active. Stage order is
   editable, or opt out and wire the transitions yourself.
@@ -21,8 +33,11 @@ instead of stacking several to fake states.
 - **Load conditions.** Gate a tracker by class, role, combat state, slotted skills,
   zone, boss, **curse** (vampirism / werewolf), or equipped **sets** (any / front /
   back bar). All matched by stable ID, so they work in any client language.
-- **Current-loadout reader.** See the sets you wear; add any as a condition in one
-  click. Updates live as you swap gear.
+- **Current-loadout reader.** See the sets you wear, the abilities on your bars, and
+  the grimoires you can scribe; add any as a condition in one click. Updates live as
+  you swap gear or skills.
+- **Scribing-aware.** Add a scribed grimoire's cast id from the live bar/grimoire
+  lists; the aggregator's **Focus Scribing** surfaces scribed effects (see below).
 - **Groups.** Folders that organise trackers and share load conditions.
 - **Tracks** buffs, debuffs, procs, cooldowns, and passive/permanent buffs.
 
@@ -38,7 +53,9 @@ hunting.
 - **Build Tracker** turns one effect (or several, as a switch tracker) into a
   pre-filled tracker in the editor.
 - **Favourite** effects to keep them across reloads and float them to the top;
-  **Ignore** noise to hide it.
+  **Ignore** noise to hide it (the ignored list un-ignores in one click).
+- **Focus Scribing** floats effects from your scribable grimoires up within each
+  favourite band, and tags each with the grimoire it comes from.
 - **Freeze view** holds the list still while capture keeps running.
 - Capture is background and **off by default**. English client only for now.
 
