@@ -66,6 +66,25 @@ local function buffTiming(unit, abilityId)
 	return nil
 end
 
+-- Horizontal offset a layer's control takes within the tracker's box for a given
+-- 9-point alignment. A square (icon/border/gradient) layer is `height` wide, so it
+-- can sit left / centered / right inside a wider bar; bar/text layers fill the box
+-- width and never shift. Vertical alignment is a no-op: every layer is box-height.
+local function alignOffset(align, display, boxW, boxH)
+	boxW, boxH = boxW or 220, boxH or 30 -- pos may omit width/height (Display defaults them)
+	local lw = (display == "icon" or display == "border" or display == "gradient") and boxH or boxW
+	local slack = boxW - lw
+	if slack <= 0 then
+		return 0
+	end
+	if align == "top" or align == "center" or align == "bottom" then
+		return math.floor(slack / 2)
+	elseif align == "topright" or align == "right" or align == "bottomright" then
+		return slack
+	end
+	return 0 -- topleft / left / bottomleft
+end
+
 --- Build runtime phase tables (each with its display control) from a canonical
 --- def. The def must already be canonical (see QAT.CanonicalizeDef).
 local function Normalize(def)
@@ -106,9 +125,10 @@ local function Normalize(def)
 			-- an icon phase in the same tracker.
 			drawLevel = p.layer or 0,
 			point = pos.point,
-			-- Per-layer offset from the tracker origin, and per-layer visibility.
-			x = pos.x + (ls.xOffset or 0),
-			y = pos.y + (ls.yOffset or 0),
+			-- Layers stack at the shared origin; a 9-point alignment lets a smaller layer
+			-- (e.g. a square icon) sit within the tracker's box rather than only top-left.
+			x = pos.x + alignOffset(ls.align, look.display, pos.width, pos.height),
+			y = pos.y,
 			forceHidden = ls.visible == false,
 			width = pos.width,
 			height = pos.height,

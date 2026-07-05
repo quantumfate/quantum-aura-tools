@@ -88,6 +88,32 @@ function QAT.Settings_Register()
 			default = QAT.defaults.account.backgroundCapture,
 			warning = "Adds a persistent combat-event subscription while on.",
 		},
+		{
+			type = "checkbox",
+			name = "Persist captured effects",
+			tooltip = "Keep captured effects across reloads and sessions (the standing "
+				.. "library the viewer shows). Turn off to keep them only for the current "
+				.. "session. Favourites are always kept.",
+			getFunc = function()
+				return account.persistCapture ~= false
+			end,
+			setFunc = function(v)
+				account.persistCapture = v
+			end,
+			default = QAT.defaults.account.persistCapture,
+		},
+		{
+			type = "button",
+			name = "Clear captured library",
+			tooltip = "Forget every persisted captured effect. Favourites are kept.",
+			warning = "This cannot be undone.",
+			isDangerous = true,
+			func = function()
+				if QAT.Capture_ForgetLibrary then
+					QAT.Capture_ForgetLibrary()
+				end
+			end,
+		},
 	}
 
 	LAM:RegisterOptionControls(QAT.name .. "Panel", optionsData)

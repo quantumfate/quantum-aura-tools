@@ -73,6 +73,39 @@ QAT.migrations = {
 			end
 		end
 	end,
+
+	-- schema 7 -> 8: retire per-layer x/y offsets (layers now stack at the shared
+	-- origin with a 9-point alignment instead — the offset trick was only ever used to
+	-- fake tables, which the new group grid layout replaces). Grid blocks are optional
+	-- and initialized lazily by CanonicalizeGrid, so nothing to seed here.
+	[7] = function(sv)
+		local function walk(defs)
+			for _, def in ipairs(defs or {}) do
+				if def.kind == "folder" then
+					walk(def.children)
+				elseif def.layerSettings then
+					for _, s in pairs(def.layerSettings) do
+						if type(s) == "table" then
+							s.xOffset, s.yOffset = nil, nil
+							s.align = s.align or "topleft"
+						end
+					end
+				end
+			end
+		end
+		walk(sv.trackers)
+	end,
+
+	-- schema 8 -> 9: captured effects now persist by default (the standing library),
+	-- not just favourites. Add the records bucket and the opt-out account flag.
+	[8] = function(sv)
+		sv.capture = sv.capture or {}
+		sv.capture.records = sv.capture.records or {}
+		sv.account = sv.account or {}
+		if sv.account.persistCapture == nil then
+			sv.account.persistCapture = true
+		end
+	end,
 }
 
 function QAT.RunMigrations(sv)

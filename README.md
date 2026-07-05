@@ -5,7 +5,7 @@ A phase-based aura, uptime and raid-mechanic tracker for **The Elder Scrolls Onl
 One tracker changes its look as its state changes — ready → active → cooldown —
 instead of stacking several to fake states.
 
-> ⚠️ Beta (v0.2.0-beta2). The saved-data format may still change between builds.
+> ⚠️ Beta (v0.2.0-beta3). The saved-data format may still change between builds.
 
 ## Features
 
@@ -23,8 +23,8 @@ instead of stacking several to fake states.
   - A **low-time** recolour + pulse for bars and borders.
 - **Parallel layers.** Stack several state machines in one tracker so it can show,
   say, a duration icon *and* a cooldown frame at once. Each layer is its own node in
-  the tree with a settings card (stack order, x/y offset, visibility); drag a phase
-  between layers.
+  the tree with a settings card (stack order, 9-point alignment, visibility); drag a
+  phase between layers.
 - **Switch trackers.** Pick several mutually-exclusive effects (e.g. the four
   vampire stages); build one aura that shows whichever is active. Stage order is
   editable, or opt out and wire the transitions yourself.
@@ -39,6 +39,11 @@ instead of stacking several to fake states.
 - **Scribing-aware.** Add a scribed grimoire's cast id from the live bar/grimoire
   lists; the aggregator's **Focus Scribing** surfaces scribed effects (see below).
 - **Groups.** Folders that organise trackers and share load conditions.
+- **Grid layout.** Turn any group into a drawn **table** — arrange its members into
+  rows × columns with optional row/column headers, styled cells (colours, borders,
+  gaps, striped rows) and an optional "fill empty cells" mode that packs live effects
+  toward one side so a row grows like a buff bar. Off by default; a group stays a
+  plain folder until you switch it on.
 - **Tracks** buffs, debuffs, procs, cooldowns, and passive/permanent buffs.
 
 ## Effect Aggregator
@@ -52,12 +57,16 @@ hunting.
   model as you go.
 - **Build Tracker** turns one effect (or several, as a switch tracker) into a
   pre-filled tracker in the editor.
-- **Favourite** effects to keep them across reloads and float them to the top;
+- **Persists by default.** Everything captured is kept across reloads and sessions as
+  a standing library, so the viewer is already populated next time. Turn it off in
+  settings to keep captures for the session only, or clear the library outright.
+- **Favourite** effects to float them to the top (kept even with persistence off);
   **Ignore** noise to hide it (the ignored list un-ignores in one click).
 - **Focus Scribing** floats effects from your scribable grimoires up within each
   favourite band, and tags each with the grimoire it comes from.
 - **Freeze view** holds the list still while capture keeps running.
-- Capture is background and **off by default**. English client only for now.
+- Background capture (recording with no viewer open) is **off by default**; the viewer
+  captures whenever it's open. English client only for now.
 
 ## Commands & keybinds
 

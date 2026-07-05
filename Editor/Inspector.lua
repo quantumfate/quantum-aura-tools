@@ -97,7 +97,7 @@ function QAT.Editor_MovePhaseToLayer(def, phaseId, targetLayer)
 	QAT.widgets.NotifyTrackerChanged(def.id)
 end
 
--- Set one per-layer display setting (xOffset | yOffset | visible).
+-- Set one per-layer display setting (align | visible).
 function QAT.Editor_SetLayerSetting(def, layer, key, value)
 	def.layerSettings = def.layerSettings or {}
 	def.layerSettings[layer] = def.layerSettings[layer] or {}
@@ -485,6 +485,12 @@ local function renderCrumb(def)
 		insp.crumbBadge:SetHidden(true)
 		insp.setInitBtn:SetHidden(true)
 		insp.delPhaseBtn:SetHidden(true)
+	elseif scope == "grid" and isFolder then
+		insp.crumbLeaf:SetText("Grid layout")
+		insp.crumbBadge:SetText("GROUP")
+		insp.crumbBadge:SetHidden(false)
+		insp.setInitBtn:SetHidden(true)
+		insp.delPhaseBtn:SetHidden(true)
 	else
 		insp.crumbLeaf:SetText("Load")
 		insp.crumbBadge:SetText(isFolder and "GROUP" or "AURA")
@@ -515,7 +521,7 @@ function QAT.Editor_RenderLayerCard(container, def)
 	end
 	local posLabel = (idx == 1 and "back") or (idx == #layers and "front") or nil
 	def.layerSettings = def.layerSettings or {}
-	local s = def.layerSettings[layer] or { xOffset = 0, yOffset = 0, visible = true }
+	local s = def.layerSettings[layer] or { align = "topleft", visible = true }
 
 	local cw = container.qatViewportW or container:GetWidth()
 	if cw < 240 then
@@ -572,34 +578,32 @@ function QAT.Editor_RenderLayerCard(container, def)
 	end
 	y = y + ROW + 4
 
-	-- Offset sliders (from the tracker origin).
-	local function offsetRow(key, label, field)
-		rowLabel(key, label)
-		local sl = get("sl" .. key, function()
-			return QAT.widgets.Slider(container, "QAT_Layer_Sl" .. key, 200, nil)
-		end)
-		sl:SetMinMax(-300, 300)
-		sl:SetValue(s[field] or 0)
-		sl:ClearAnchors()
-		sl:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y + 4)
-		local val = get("val" .. key, function()
-			return QAT.widgets.Label(container, "QAT_Layer_Val" .. key, "")
-		end)
-		val:ClearAnchors()
-		val:SetAnchor(LEFT, sl, RIGHT, 12, 0)
-		local function fmt(v)
-			return string.format("%+dpx", math.floor(v + 0.5))
-		end
-		val:SetText(fmt(s[field] or 0))
-		sl.onChange = function(v)
-			v = math.floor(v + 0.5)
-			val:SetText(fmt(v))
-			QAT.Editor_SetLayerSetting(def, layer, field, v)
-		end
-		y = y + ROW + 4
+	-- Alignment: where this layer sits within the tracker's box. Only matters when the
+	-- layer is narrower than the box (e.g. a square icon over a wide bar) — layers stack
+	-- at the shared origin, there is no free x/y offset.
+	rowLabel("Align", "Alignment")
+	local alignOpts = {
+		{ label = "Top left", value = "topleft" },
+		{ label = "Top", value = "top" },
+		{ label = "Top right", value = "topright" },
+		{ label = "Left", value = "left" },
+		{ label = "Center", value = "center" },
+		{ label = "Right", value = "right" },
+		{ label = "Bottom left", value = "bottomleft" },
+		{ label = "Bottom", value = "bottom" },
+		{ label = "Bottom right", value = "bottomright" },
+	}
+	local align = get("align", function()
+		return QAT.widgets.Dropdown(container, "QAT_Layer_Align", 160, alignOpts, "topleft", nil)
+	end)
+	align:SetOptions(alignOpts)
+	align:SetValue(s.align or "topleft")
+	align:ClearAnchors()
+	align:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
+	align.onSelect = function(v)
+		QAT.Editor_SetLayerSetting(def, layer, "align", v)
 	end
-	offsetRow("Y", "Vertical offset", "yOffset")
-	offsetRow("X", "Horizontal offset", "xOffset")
+	y = y + ROW + 4
 
 	-- Visibility.
 	rowLabel("Vis", "Layer visible")
@@ -665,9 +669,14 @@ refreshBody = function()
 		insp.placeholder:SetHidden(true)
 		insp.crumb:SetHidden(false)
 
-		-- Folders have no phases, so they are always Load scope.
+		-- Folders have no phases: they are Load scope, or Grid scope when arranged as a
+		-- table (a grid-enabled group selected on its "Grid layout" row).
 		local isFolder = def.kind == "folder"
-		local scope = (isFolder and "load") or (QAT.editor.selectedScope or "load")
+		local scope = QAT.editor.selectedScope or "load"
+		if isFolder then
+			local gridScope = scope == "grid" and def.grid and def.grid.enabled
+			scope = gridScope and "grid" or "load"
+		end
 		QAT.editor.selectedScope = scope
 		renderCrumb(def)
 
@@ -700,6 +709,15 @@ refreshBody = function()
 			insp.loadContainer.qatViewportW = viewportW
 			QAT.Safe("tab Layer", function()
 				QAT.Editor_RenderLayerCard(insp.loadContainer, def)
+			end)
+		elseif scope == "grid" then
+			if QAT.editor.tabBar then
+				QAT.editor.tabBar:SetHidden(true)
+			end
+			insp.loadScroll:SetHidden(false)
+			insp.loadContainer.qatViewportW = viewportW
+			QAT.Safe("tab Grid", function()
+				QAT.Editor_RenderGridCard(insp.loadContainer, def)
 			end)
 		else
 			if QAT.editor.tabBar then

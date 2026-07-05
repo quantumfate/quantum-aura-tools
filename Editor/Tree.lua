@@ -151,6 +151,17 @@ function QAT.Editor_SelectLayer(id, layer)
 	end
 end
 
+-- Select a group's grid-layout scope (folders with grid enabled) — shows the table
+-- builder card.
+function QAT.Editor_SelectGrid(id)
+	QAT.editor.selectedId = id
+	QAT.editor.selectedScope = "grid"
+	QAT.Editor_Tree_Build()
+	if QAT.Editor_Inspector_Show then
+		QAT.Editor_Inspector_Show(id)
+	end
+end
+
 -- Select a phase of a tracker (phase scope).
 function QAT.Editor_SelectPhase(id, phaseId)
 	QAT.editor.selectedId = id
@@ -589,6 +600,41 @@ local function makeLoadRow(parent, def, depth, y)
 	return ROW_H
 end
 
+-- The "Grid layout" row shown under a group whose grid is enabled — selects the
+-- table-builder scope, with a C×R badge summarising the current dimensions.
+local function makeGridRow(parent, def, depth, y)
+	local name = "QAT_TreeGrid_" .. def.id
+	local row = baseRow(parent, name, y)
+	row.defId = nil
+	row.dropId = nil
+	local selected = QAT.editor.selectedId == def.id and QAT.editor.selectedScope == "grid"
+	setBg(row, selected and BG_FULL or BG_NONE)
+	row:SetHandler("OnMouseDown", nil)
+	row:SetHandler(
+		"OnMouseUp",
+		rowMouseUp(function()
+			QAT.Editor_SelectGrid(def.id)
+		end)
+	)
+
+	local label = row.label or QAT.widgets.Label(row, name .. "_Label", "")
+	row.label = label
+	label:SetText("Grid layout")
+	label:SetColor(0.85, 0.88, 0.93, 1)
+	label:ClearAnchors()
+	label:SetAnchor(LEFT, row, LEFT, 8 + depth * INDENT, 0)
+
+	local g = def.grid or {}
+	local count = row.count or QAT.widgets.Label(row, name .. "_Cnt", "", "$(MEDIUM_FONT)|13|soft-shadow-thin")
+	row.count = count
+	count:SetText(string.format("%d×%d", g.cols or 2, g.rows or 2))
+	count:SetColor(0.45, 0.52, 0.63, 1)
+	count:ClearAnchors()
+	count:SetAnchor(RIGHT, row, RIGHT, -10, 0)
+
+	return ROW_H
+end
+
 -- One row per phase (idle included, per "show idle"). The initial phase carries a
 -- green dot and an INITIAL badge; hidden (display=none) phases read dimmed.
 local function makePhaseRow(parent, def, phase, depth, y)
@@ -789,8 +835,12 @@ local function buildRows(parent, defs, depth, y)
 		y = y + makeRow(parent, def, depth, y)
 		if def.kind == "folder" then
 			if not QAT.editor.collapsed[def.id] then
-				-- Group children: Load conditions row, member rows, then + add tracker.
+				-- Group children: Load conditions row, an optional Grid layout row (when
+				-- the group is arranged as a table), member rows, then + add tracker.
 				y = y + makeLoadRow(parent, def, depth + 1, y)
+				if def.grid and def.grid.enabled then
+					y = y + makeGridRow(parent, def, depth + 1, y)
+				end
 				y = buildRows(parent, def.children, depth + 1, y)
 				y = y + makeAddTrackerRow(parent, def, depth + 1, y)
 			end

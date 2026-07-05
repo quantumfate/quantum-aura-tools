@@ -96,9 +96,8 @@ Settled rules (grilled):
   as members come and go. Icons keep their size; bars fill cell width.
 - **Absent = idle (display none) OR unloaded.** Either makes the cell empty; with
   fill on, an absent member collapses and its neighbours reflow.
-- **Fill ⟂ headers per axis.** Enabling fill on an axis auto-disables that axis's
-  headers (a sliding axis can't carry position-accurate labels). Cross-axis headers
-  are unaffected.
+- **Fill and headers are independent.** Any combination is allowed — headers stay
+  drawn at their fixed track positions while the cells pack under them.
 - **Enable = one big master toggle** at the top of the group (its Load scope). When
   off, the "Grid layout" tree row is absent and the group reads as a plain folder.
 - **Shrinking cols/rows** orphans dropped-cell assignments back to **unplaced**

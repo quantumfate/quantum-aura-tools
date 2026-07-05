@@ -8,3 +8,6 @@ stubs/*
 # Claude-design handoff package for the Effect Aggregator UI (local only, never push).
 UIUX Layout Refinement.zip
 handoff/
+
+# release build artifacts
+*.zip

@@ -54,6 +54,11 @@ local function OnUpdate()
 	for _, tracker in ipairs(QAT.runtime.list) do
 		tracker:Tick(now)
 	end
+	-- After trackers have updated (so member visibility is current), lay out any grid
+	-- groups: position placed members into cells and redraw the table chrome.
+	if QAT.GridLayout_Update then
+		QAT.GridLayout_Update()
+	end
 end
 
 -- The distinct unit tags any loaded tracker watches (player, reticleover, ...).
@@ -124,6 +129,11 @@ local function BuildTrackers(defs, parentLoads)
 			local childLoads = QAT.util.DeepCopy(parentLoads)
 			if def.load then
 				table.insert(childLoads, def.load)
+			end
+			-- A group arranged as a table registers its grid so the layout pass can draw
+			-- the chrome and place members. The same chain gates the whole table.
+			if def.grid and def.grid.enabled and QAT.GridLayout_Register then
+				QAT.GridLayout_Register(def, childLoads)
 			end
 			BuildTrackers(def.children, childLoads)
 		else
@@ -217,6 +227,9 @@ local function RegisterLoadEvents()
 end
 
 function QAT.Runtime_Init()
+	if QAT.GridLayout_Reset then
+		QAT.GridLayout_Reset()
+	end
 	BuildTrackers(QAT.sv.trackers, {})
 
 	RegisterEffectFilters()
@@ -262,6 +275,9 @@ local function rebuildAll()
 	QAT.runtime.trackers = {}
 	QAT.runtime.list = {}
 	QAT.runtime.byAbilityId = {}
+	if QAT.GridLayout_Reset then
+		QAT.GridLayout_Reset()
+	end
 
 	BuildTrackers(QAT.sv.trackers, {})
 	RegisterEffectFilters()

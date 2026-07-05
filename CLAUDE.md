@@ -117,7 +117,15 @@ filter/list/teaching-inspector window, one-click build-tracker, pin/ignore persi
 (`sv.capture`, schema 6). Background capture default OFF. `/qat aggregator`. Full
 spec + as-built notes: `AGGREGATOR.md` and [[m5-aggregator-design]]. Also landed
 alongside: load-condition chips, per-phase + global LibMediaProvider fonts, audio-cue
-sound picker (see `EDITOR.md` "Authoring UX").
+sound picker (see `EDITOR.md` "Authoring UX"). **Capture now persists by default**
+(`sv.capture.records`, schema 9; opt-out `account.persistCapture` + "Clear captured
+library" in settings); favourites are a subset flag on top.
+
+**Group grid layout done** (schema 8, headline display feature): a group can become a
+drawn table (`def.grid`) — rows×cols, headers, styled cells, fill/fake-growth. Editor
+`Editor/GridTab.lua` (scope "grid" on a "Grid layout" tree row), chrome `Display/Grid.lua`,
+per-tick layout `Engine/GridLayout.lua`. Retired per-layer x/y offsets → 9-point align.
+Spec: `DESIGN.md` "Group grid layout" + [[group-grid-layout]].
 
 **Next: M6 raid library** + named-boss load condition (target a boss by name; engine
 resolves the live slot; dropdown fed by aggregator-harvested names). Backlog:

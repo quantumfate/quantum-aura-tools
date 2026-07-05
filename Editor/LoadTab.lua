@@ -125,6 +125,39 @@ local function renderMembers(container, def, get, cw, OUT)
 	sub:SetAnchor(TOPLEFT, container, TOPLEFT, PAD, y + 3)
 	y = y + 24
 
+	-- Master switch: arrange this group's members as a drawn table. Off = plain logical
+	-- folder (its members keep their own screen positions). On reveals the "Grid layout"
+	-- tree row and a shortcut into the builder.
+	local gridOn = def.grid ~= nil and def.grid.enabled
+	local arrange = get("gridToggle", function()
+		return QAT.widgets.TextButton(container, "QAT_Load_GridToggle", "", nil)
+	end)
+	arrange:SetText(gridOn and "✓ Arranged as table" or "Arrange as table")
+	arrange:SetHeight(28)
+	arrange:SetSelected(gridOn)
+	arrange:ClearAnchors()
+	arrange:SetAnchor(TOPLEFT, container, TOPLEFT, PAD, y)
+	QAT.widgets.Tooltip(arrange, "Lay this group's members out in a grid with headers and styled cells.")
+	arrange.onClick = function()
+		if QAT.Editor_GridSetEnabled then
+			QAT.Editor_GridSetEnabled(def, not (def.grid ~= nil and def.grid.enabled))
+		end
+	end
+
+	local openGrid = get("gridOpen", function()
+		return QAT.widgets.TextButton(container, "QAT_Load_GridOpen", "Open grid layout →", nil)
+	end)
+	openGrid:SetHeight(28)
+	openGrid:SetHidden(not gridOn)
+	openGrid:ClearAnchors()
+	openGrid:SetAnchor(LEFT, arrange, RIGHT, 10, 0)
+	openGrid.onClick = function()
+		if QAT.Editor_SelectGrid then
+			QAT.Editor_SelectGrid(def.id)
+		end
+	end
+	y = y + 38
+
 	local kids = def.children or {}
 	if #kids == 0 then
 		local empty = get("mEmpty", function()

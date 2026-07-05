@@ -59,6 +59,20 @@ local DISPLAY_KINDS = {
 }
 local COLOR_KEYS = { "background", "bar", "border", "stacks", "text", "timer", "cooldown" }
 
+-- The 9-point alignment a parallel layer uses to sit within the tracker's box (its
+-- only positional control — layers stack at the shared origin, no free offset).
+QAT.LAYER_ALIGNS = {
+	topleft = true,
+	top = true,
+	topright = true,
+	left = true,
+	center = true,
+	right = true,
+	bottomleft = true,
+	bottom = true,
+	bottomright = true,
+}
+
 local function canonicalLook(src)
 	src = src or {}
 	local display = src.display
@@ -330,13 +344,16 @@ function QAT.CanonicalizeDef(def)
 		end
 	end
 
-	-- Per-layer display settings (offset from the tracker origin + visibility). Keyed
-	-- by layer number; defaulted per present layer, stale entries dropped.
+	-- Per-layer display settings: a 9-point alignment within the tracker's box (so a
+	-- small layer can sit centered/right over a wider one) + visibility. Keyed by layer
+	-- number; defaulted per present layer, stale entries dropped. Layers only stack at
+	-- the shared origin — there is no free x/y offset (that was a misfeature used to
+	-- fake tables; the group grid layout is the real table). Legacy offsets are dropped.
 	def.layerSettings = def.layerSettings or {}
 	for layer in pairs(firstOf) do
 		local s = def.layerSettings[layer] or {}
-		s.xOffset = tonumber(s.xOffset) or 0
-		s.yOffset = tonumber(s.yOffset) or 0
+		s.xOffset, s.yOffset = nil, nil
+		s.align = QAT.LAYER_ALIGNS[s.align] and s.align or "topleft"
 		if s.visible == nil then
 			s.visible = true
 		end
@@ -351,6 +368,106 @@ function QAT.CanonicalizeDef(def)
 	return def
 end
 
+-- Per-element defaults for a grid's drawn chrome. Copied (never shared) into each
+-- grid so authored edits stay isolated.
+local GRID_STYLE = {
+	headerBg = { 0.10, 0.13, 0.18, 1 },
+	headerText = { 0.85, 0.90, 0.96, 1 },
+	cellBg = { 0.06, 0.08, 0.11, 0.85 },
+	cellText = { 0.90, 0.92, 0.95, 1 },
+	border = { 0.16, 0.22, 0.30, 1 },
+}
+
+local function copyColor(c, fallback)
+	if type(c) == "table" then
+		return { c[1] or fallback[1], c[2] or fallback[2], c[3] or fallback[3], c[4] or fallback[4] }
+	end
+	return { fallback[1], fallback[2], fallback[3], fallback[4] }
+end
+
+--- Normalize a folder's optional grid (table-layout) block in place. Absent grid =
+--- the folder is a plain logical group. Prunes label arrays to the row/column count,
+--- drops cell assignments that point outside the grid or at a non-member tracker,
+--- enforces the "fill perpendicular to headers" rule, and fills style defaults.
+---@param def table folder def
+function QAT.CanonicalizeGrid(def)
+	local g = def.grid
+	if not g then
+		return
+	end
+	g.enabled = g.enabled == true
+	g.cols = math.max(1, math.floor(tonumber(g.cols) or 2))
+	g.rows = math.max(1, math.floor(tonumber(g.rows) or 2))
+	if g.colHeaders == nil then
+		g.colHeaders = false
+	end
+	if g.rowHeaders == nil then
+		g.rowHeaders = false
+	end
+
+	-- Header labels are free text, one per column/row; trim any past the current count.
+	g.colLabels = g.colLabels or {}
+	g.rowLabels = g.rowLabels or {}
+	for i = #g.colLabels, g.cols + 1, -1 do
+		g.colLabels[i] = nil
+	end
+	for i = #g.rowLabels, g.rows + 1, -1 do
+		g.rowLabels[i] = nil
+	end
+
+	-- Cell assignments: "r{n}c{n}" -> member tracker id. Drop any that fall outside the
+	-- grid, target a non-member (or a sub-folder), or duplicate an already-placed member.
+	local members = {}
+	for _, c in ipairs(def.children or {}) do
+		if c.kind ~= "folder" then
+			members[c.id] = true
+		end
+	end
+	g.cells = g.cells or {}
+	local placed = {}
+	for key, tid in pairs(g.cells) do
+		local r, c = tostring(key):match("^r(%d+)c(%d+)$")
+		r, c = tonumber(r), tonumber(c)
+		if not r or r < 1 or r > g.rows or c < 1 or c > g.cols or not members[tid] or placed[tid] then
+			g.cells[key] = nil
+		else
+			placed[tid] = true
+		end
+	end
+
+	-- Fake-growth reflow. `axis` is the packing direction (rows = pack horizontally
+	-- within each row; cols = pack vertically within each column); `from` is the side
+	-- growth starts from. Fill and headers are independent — headers stay drawn at their
+	-- fixed track positions while the cells pack, so either combination is allowed.
+	g.fill = g.fill or {}
+	g.fill.enabled = g.fill.enabled == true
+	if g.fill.axis ~= "cols" then
+		g.fill.axis = "rows"
+	end
+	if g.fill.from ~= "left" then
+		g.fill.from = "right"
+	end
+
+	-- Drawn-chrome style.
+	local s = g.style or {}
+	s.headerBg = copyColor(s.headerBg, GRID_STYLE.headerBg)
+	s.headerText = copyColor(s.headerText, GRID_STYLE.headerText)
+	s.cellBg = copyColor(s.cellBg, GRID_STYLE.cellBg)
+	s.cellText = copyColor(s.cellText, GRID_STYLE.cellText)
+	s.border = copyColor(s.border, GRID_STYLE.border)
+	s.borderWidth = math.max(0, math.floor(tonumber(s.borderWidth) or 1))
+	s.corner = math.max(0, math.floor(tonumber(s.corner) or 4))
+	s.gap = math.max(0, math.floor(tonumber(s.gap) or 6))
+	s.striped = s.striped == true
+	g.style = s
+
+	-- Origin: the grid draws as one movable unit from a top-left corner. A plain folder
+	-- has no position; a grid one gains it here (seeded near screen-centre).
+	if g.enabled then
+		def.pos = def.pos or { x = math.floor((GuiRoot and GuiRoot:GetWidth() or 1920) / 2) - 120, y = 300 }
+	end
+end
+
 --- Canonicalize a whole tracker tree in place (recurses into folder children).
 ---@param defs table[] array of tracker/folder defs
 function QAT.CanonicalizeTree(defs)
@@ -358,6 +475,7 @@ function QAT.CanonicalizeTree(defs)
 		if def.kind == "folder" then
 			def.children = def.children or {}
 			QAT.CanonicalizeTree(def.children)
+			QAT.CanonicalizeGrid(def) -- after children, so member-id pruning sees them
 		else
 			QAT.CanonicalizeDef(def)
 		end

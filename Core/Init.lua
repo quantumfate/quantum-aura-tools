@@ -5,11 +5,11 @@ QAT = {
 	name = "QuantumAuraTools",
 	displayName = "Quantum's Aura Tools",
 	author = "@quantumfate",
-	version = "0.1.0",
+	version = "0.2.0-beta3",
 	-- Internal data-schema version. Independent of the ZO_SavedVars version
 	-- (which we keep pinned at 1 so it never wipes data); migrations below own
 	-- all schema evolution. See Core/Migrations.lua.
-	schemaVersion = 7,
+	schemaVersion = 9,
 	slash = "/qat",
 }
 
@@ -20,14 +20,16 @@ QAT.defaults = {
 	account = {
 		enabled = true,
 		backgroundCapture = false, -- passive recently-seen recording; off by default
+		persistCapture = true, -- keep captured effects across reloads (the standing library)
 		capturePopupSeen = false, -- whether the one-time capture popup has been dismissed
 		examplesSeeded = false, -- whether starter example trackers were seeded once
 		addTrackerHintSeen = false, -- whether the "trackers start hidden" hint was dismissed for good
 	},
 	trackers = {}, -- tree of tracker and folder defs
 	userLibrary = {}, -- user-captured ability ids, kept separate from the bundled library
-	capture = { -- effect-aggregator persistence (the session catch itself is transient)
-		favourites = {}, -- key -> frozen CapturedEffect record, kept across reloads
+	capture = { -- effect-aggregator persistence
+		records = {}, -- key -> frozen CapturedEffect, the standing library (persist-by-default)
+		favourites = {}, -- key -> frozen CapturedEffect record, floated to the top
 		ignored = {}, -- abilityId -> true, permanently suppressed known-noise
 	},
 	editor = { -- editor window geometry

@@ -156,6 +156,61 @@ local function atIndex(abilityId, targetName)
 	return abilityId .. "\t" .. (targetName or "")
 end
 
+-- A shallow, self-describing copy of a row safe to store in SavedVars (drops the live
+-- fusion/seed bookkeeping). Used for both the persisted library records and favourites.
+local function frozenCopy(row)
+	return {
+		key = row.key,
+		abilityId = row.abilityId,
+		name = row.name,
+		sourceName = row.sourceName,
+		sourceType = row.sourceType,
+		sourceRole = row.sourceRole,
+		targetTag = row.targetTag,
+		targetName = row.targetName,
+		targetRole = row.targetRole,
+		bucket = row.bucket,
+		zoneId = row.zoneId,
+		effectType = row.effectType,
+		timed = row.timed,
+		castByPlayer = row.castByPlayer,
+		buffSlot = row.buffSlot,
+		maxStacks = row.maxStacks,
+		seenCount = row.seenCount,
+		firstSeen = row.firstSeen,
+		lastSeen = row.lastSeen,
+		icon = row.icon,
+		favourited = row.favourited == true,
+	}
+end
+
+-- Persist-by-default: every captured row is written to the standing library
+-- (sv.capture.records) so the catch survives reloads. A game setting can turn this
+-- off; favourites persist regardless via their own bucket.
+local function persistEnabled()
+	return not QAT.sv or QAT.sv.account.persistCapture ~= false
+end
+
+-- Rows touched since the last notify, flushed to the library in one batch on the
+-- coalesced tick (so a busy fight writes SavedVars once per cycle, not per event).
+local dirtyRows = {}
+local function markDirty(row)
+	dirtyRows[row] = true
+end
+local function flushPersist()
+	if not persistEnabled() then
+		dirtyRows = {}
+		return
+	end
+	local records = QAT.sv.capture.records
+	if records then
+		for row in pairs(dirtyRows) do
+			records[row.key] = frozenCopy(row)
+		end
+	end
+	dirtyRows = {}
+end
+
 -- Coalesced change notification so a busy fight doesn't fire per-event.
 local changePending = false
 local function notifyChanged()
@@ -165,6 +220,7 @@ local function notifyChanged()
 	changePending = true
 	zo_callLater(function()
 		changePending = false
+		flushPersist()
 		CALLBACK_MANAGER:FireCallbacks("QAT_CaptureChanged")
 	end, 120)
 end
@@ -220,6 +276,7 @@ local function ingest(obs)
 				if obs.castByPlayer ~= nil then
 					row.castByPlayer = obs.castByPlayer
 				end
+				markDirty(row)
 			end
 			notifyChanged()
 			return
@@ -247,6 +304,7 @@ local function ingest(obs)
 		if obs.buffSlot then
 			row.buffSlot = obs.buffSlot
 		end
+		markDirty(row)
 		notifyChanged()
 		return
 	end
@@ -281,6 +339,7 @@ local function ingest(obs)
 	QAT.capture.byAbilityTarget[ati] = QAT.capture.byAbilityTarget[ati] or {}
 	table.insert(QAT.capture.byAbilityTarget[ati], row)
 
+	markDirty(row)
 	notifyChanged()
 end
 
@@ -485,41 +544,23 @@ function QAT.Capture_Clear()
 	QAT.capture.byAbilityTarget = {}
 	QAT.capture.observations = 0
 	QAT.capture.everCaptured = false
-	QAT.Capture_SeedFavourites()
+	QAT.Capture_SeedLibrary()
 	QAT.log.capture:Debug("catch cleared")
 	notifyChanged()
+end
+
+--- Forget the entire persisted library (all recorded rows). Favourites are kept
+--- (they have their own bucket); the live catch is rebuilt from what remains.
+function QAT.Capture_ForgetLibrary()
+	QAT.sv.capture.records = {}
+	dirtyRows = {}
+	QAT.Capture_Clear()
+	QAT.log.capture:Info("persisted capture library cleared")
 end
 
 -- ---------------------------------------------------------------------------
 -- Favourite / ignore (persisted)
 -- ---------------------------------------------------------------------------
-
--- A shallow, self-describing copy safe to store in SavedVars.
-local function frozenCopy(row)
-	return {
-		key = row.key,
-		abilityId = row.abilityId,
-		name = row.name,
-		sourceName = row.sourceName,
-		sourceType = row.sourceType,
-		sourceRole = row.sourceRole,
-		targetTag = row.targetTag,
-		targetName = row.targetName,
-		targetRole = row.targetRole,
-		bucket = row.bucket,
-		zoneId = row.zoneId,
-		effectType = row.effectType,
-		timed = row.timed,
-		castByPlayer = row.castByPlayer,
-		buffSlot = row.buffSlot,
-		maxStacks = row.maxStacks,
-		seenCount = row.seenCount,
-		firstSeen = row.firstSeen,
-		lastSeen = row.lastSeen,
-		icon = row.icon,
-		favourited = true,
-	}
-end
 
 --- Promote a row to the persisted favourites (survives reloads; floats to the top).
 function QAT.Capture_Favourite(row)
@@ -528,6 +569,12 @@ function QAT.Capture_Favourite(row)
 	end
 	row.favourited = true
 	QAT.sv.capture.favourites[row.key] = frozenCopy(row)
+	-- Keep the library record's flag in step (create it if persistence had it absent).
+	if persistEnabled() then
+		QAT.sv.capture.records[row.key] = frozenCopy(row)
+	elseif QAT.sv.capture.records[row.key] then
+		QAT.sv.capture.records[row.key].favourited = true
+	end
 	notifyChanged()
 end
 
@@ -537,10 +584,14 @@ function QAT.Capture_Unfavourite(row)
 	end
 	row.favourited = false
 	QAT.sv.capture.favourites[row.key] = nil
-	-- A library-only row (re-seeded from favourites, never seen live this session) has
-	-- nothing keeping it once it's no longer a favourite, so drop it rather than leave
-	-- a dead, dataless entry. A row with live data this session stays.
-	if row.seeded then
+	if QAT.sv.capture.records[row.key] then
+		QAT.sv.capture.records[row.key].favourited = false
+	end
+	-- A library-only placeholder with nothing persisting it (records off / never
+	-- recorded) has nothing left once unfavourited, so drop it rather than leave a dead,
+	-- dataless entry. A row with live data this session, or a standing library record,
+	-- stays.
+	if row.seeded and not QAT.sv.capture.records[row.key] then
 		QAT.capture.store[row.key] = nil
 		local list = QAT.capture.list
 		for i = #list, 1, -1 do
@@ -572,6 +623,8 @@ function QAT.Capture_Ignore(abilityId)
 		if row.abilityId == abilityId then
 			QAT.capture.store[row.key] = nil
 			QAT.capture.byAbilityTarget[atIndex(abilityId, row.targetName)] = nil
+			QAT.sv.capture.records[row.key] = nil -- purge from the persisted library too
+			dirtyRows[row] = nil
 		else
 			table.insert(kept, row)
 		end
@@ -588,26 +641,39 @@ function QAT.Capture_Unignore(abilityId)
 	end
 end
 
--- Load persisted favourited rows back into the live store so they show before/without
--- capture (the standing library).
-function QAT.Capture_SeedFavourites()
-	for key, saved in pairs(QAT.sv.capture.favourites or {}) do
-		if not QAT.capture.store[key] and not QAT.sv.capture.ignored[saved.abilityId] then
-			local row = QAT.util.DeepCopy(saved)
-			row.favourited = true
-			row.seeded = true -- library placeholder until a live sighting arrives
-			-- Recompute from the id so the icon (and name) are always valid, even for
-			-- favourites saved before icons were persisted.
-			row.icon = GetAbilityIcon(saved.abilityId)
-			if not saved.name or saved.name == "" then
-				row.name = GetAbilityName(saved.abilityId)
-			end
-			QAT.capture.store[key] = row
-			table.insert(QAT.capture.list, row)
-			local ati = atIndex(row.abilityId, row.targetName)
-			QAT.capture.byAbilityTarget[ati] = QAT.capture.byAbilityTarget[ati] or {}
-			table.insert(QAT.capture.byAbilityTarget[ati], row)
-		end
+-- Insert one persisted record back into the live store as a library placeholder (until
+-- a live sighting upgrades it). No-op if already present or the ability is ignored.
+local function seedRow(key, saved, favourited)
+	if QAT.capture.store[key] or QAT.sv.capture.ignored[saved.abilityId] then
+		return
+	end
+	local row = QAT.util.DeepCopy(saved)
+	row.favourited = favourited and true or false
+	row.seeded = true -- library placeholder until a live sighting arrives
+	-- Recompute from the id so the icon (and name) are always valid, even for records
+	-- saved before icons were persisted.
+	row.icon = GetAbilityIcon(saved.abilityId)
+	if not saved.name or saved.name == "" then
+		row.name = GetAbilityName(saved.abilityId)
+	end
+	QAT.capture.store[key] = row
+	table.insert(QAT.capture.list, row)
+	local ati = atIndex(row.abilityId, row.targetName)
+	QAT.capture.byAbilityTarget[ati] = QAT.capture.byAbilityTarget[ati] or {}
+	table.insert(QAT.capture.byAbilityTarget[ati], row)
+end
+
+-- Load the persisted library (all recorded rows + favourites) back into the live store
+-- so it shows before/without any fresh capture this session.
+function QAT.Capture_SeedLibrary()
+	local favs = QAT.sv.capture.favourites or {}
+	for key, saved in pairs(QAT.sv.capture.records or {}) do
+		seedRow(key, saved, favs[key] ~= nil)
+	end
+	-- Favourites saved on an install that predates the records bucket (or with records
+	-- disabled) still seed, so nothing favourited is ever lost.
+	for key, saved in pairs(favs) do
+		seedRow(key, saved, true)
 	end
 end
 
@@ -617,10 +683,14 @@ end
 
 function QAT.Capture_Init()
 	QAT.capture.currentZoneId = currentZoneId()
-	QAT.Capture_SeedFavourites()
+	QAT.Capture_SeedLibrary()
 	-- Capture is decoupled from the window: if it was left on, resume on load.
 	if QAT.sv.account.backgroundCapture then
 		QAT.Capture_Start()
 	end
-	QAT.log.capture:Info("capture engine ready (%d favourited)", NonContiguousCount(QAT.sv.capture.favourites))
+	QAT.log.capture:Info(
+		"capture engine ready (%d recorded, %d favourited)",
+		NonContiguousCount(QAT.sv.capture.records),
+		NonContiguousCount(QAT.sv.capture.favourites)
+	)
 end
