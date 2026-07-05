@@ -62,8 +62,60 @@ HyperTools confusion). A group:
 - offers **bulk move**: dragging a group's transient move handle translates every
   descendant by the same `(dx, dy)`. The group stores no position; each tracker
   keeps its own absolute position. (See the editor's move model in EDITOR.md.)
-- has **no display, no phases, no track affordance, no auto-layout** (stacking /
-  bar-pack auto-arrange is a v2 maybe; v1 positions every tracker explicitly)
+- has **no display, no phases, no track affordance** by default (a plain logical
+  folder), UNLESS grid mode is enabled (below)
+
+### Group grid layout (table container)
+
+A group may optionally become a **table** that arranges its member trackers into a
+grid of rows × columns and draws real chrome on the HUD. This is the replacement
+for the discredited "fake a table with per-layer x/y offsets" trick — layer offsets
+are being removed (layers now stack at the shared origin, z-order + align only).
+Off by default: a group with `grid.enabled = false` is still just a logical folder.
+
+Model (folder `def.grid`):
+
+- `enabled`, `cols`, `rows`.
+- `colHeaders` / `rowHeaders` (bool) + `colLabels` / `rowLabels` (free-text arrays,
+  independent of member names).
+- `cells`: map `"r{n}c{n}" -> trackerId`. Stores member **id**, survives reorder.
+  Trackers not in any cell = **unplaced** (still logical members, not drawn in table).
+- `fill`: `{ enabled, axis = "rows"|"cols", from = "left"|"right" }` — fake-growth:
+  absent members collapse and the rest reflow toward `from`, so a row/col grows from
+  one side like a buff bar.
+- `style`: `headerBg, headerText, cellBg, cellText, border, borderWidth, corner,
+  gap, striped`.
+
+Settled rules (grilled):
+
+- **1 tracker : 1 cell.** No spanning, no merging. Sub-groups are NOT placeable
+  (folders can't be cells — it stops at trackers, for now).
+- **Ragged, frozen sizing.** Column width = max member width across **all assigned**
+  members of that column (present or not); row height = max across the column's/row's
+  members. Frozen to all-assigned max so the table stays **rigid** — no width popping
+  as members come and go. Icons keep their size; bars fill cell width.
+- **Absent = idle (display none) OR unloaded.** Either makes the cell empty; with
+  fill on, an absent member collapses and its neighbours reflow.
+- **Fill ⟂ headers per axis.** Enabling fill on an axis auto-disables that axis's
+  headers (a sliding axis can't carry position-accurate labels). Cross-axis headers
+  are unaffected.
+- **Enable = one big master toggle** at the top of the group (its Load scope). When
+  off, the "Grid layout" tree row is absent and the group reads as a plain folder.
+- **Shrinking cols/rows** orphans dropped-cell assignments back to **unplaced**
+  (never deletes the tracker).
+- **HUD drag** moves the whole grid as one origin. Member x/y is ignored while grid
+  is on but **preserved**, restored when grid is toggled off.
+
+Editor: folder gains a **"Grid layout"** tree row (scope `"grid"`, badge `C×R`),
+sibling of "Load conditions". Its Inspector renderer holds the builder from the
+mocks — cols/rows steppers, header toggles, fill toggle (+ axis + from side), TABLE
+STYLE card, the assignment table (click cell → place-mode from Unplaced, ✕ to
+unplace), Unplaced row, schematic On-screen preview. See [[group-grid-layout]].
+
+Engine/Display: a group container drawn only when `grid.enabled` — header cells,
+per-cell bg + border, striped rows, gap. Member tracker TLWs are repositioned into
+computed cell rects (like `Runtime_RepositionTracker`); each keeps its own
+appearance. Fill/reflow is a layout-tick recompute, no rebuild.
 
 ### Update model (engine)
 
