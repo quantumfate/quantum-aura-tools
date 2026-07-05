@@ -301,6 +301,28 @@ function QAT.widgets.AbilityChip(parent, name)
 	l:SetAnchor(LEFT, ic, RIGHT, 6, -1)
 	c.icon, c.label = ic, l
 	QAT.widgets.Tooltip(c, "")
+	-- Optional remove affordance: a trailing × that calls onRemove. Created lazily.
+	function c:SetRemovable(onRemove)
+		self.onRemove = onRemove
+		if not self.xb then
+			local xb = QAT.widgets.Label(self, name .. "_X", "×", "$(BOLD_FONT)|17|soft-shadow-thin")
+			xb:SetMouseEnabled(true)
+			xb:SetColor(0.55, 0.62, 0.72, 1)
+			xb:SetHandler("OnMouseEnter", function()
+				xb:SetColor(0.95, 0.55, 0.55, 1)
+			end)
+			xb:SetHandler("OnMouseExit", function()
+				xb:SetColor(0.55, 0.62, 0.72, 1)
+			end)
+			xb:SetHandler("OnMouseUp", function(_, b, inside)
+				if inside and b == MOUSE_BUTTON_INDEX_LEFT and self.onRemove then
+					self.onRemove()
+				end
+			end)
+			self.xb = xb
+		end
+		self.xb:SetHidden(onRemove == nil)
+	end
 	-- Set the chip's ability. A 0/nil id shows the "(none)" fallback dimmed.
 	function c:SetAbility(id)
 		local nm, tex = QAT.util.AbilityInfo(id)
@@ -309,7 +331,12 @@ function QAT.widgets.AbilityChip(parent, name)
 		l:SetText(nm .. idText)
 		l:SetColor(0.80, 0.86, 0.94, (id and id ~= 0) and 1 or 0.5)
 		self.tooltipText = (id and id ~= 0) and nm or "No ability set"
-		self:SetWidth(4 + 18 + 6 + math.ceil(l:GetTextWidth()) + 8)
+		local extra = (self.xb and not self.xb:IsHidden()) and 20 or 0
+		self:SetWidth(4 + 18 + 6 + math.ceil(l:GetTextWidth()) + 8 + extra)
+		if self.xb then
+			self.xb:ClearAnchors()
+			self.xb:SetAnchor(RIGHT, self, RIGHT, -6, -1)
+		end
 		-- Re-assert the edge: a CT_BACKDROP border can drop after a pooled resize.
 		self:SetEdgeColor(unpack(CHIP_EDGE))
 		self:SetEdgeTexture("", 1, 1, 1)
@@ -326,7 +353,7 @@ function QAT.widgets.Badge(parent, name, text, rgb)
 	b:SetEdgeColor(rgb[1] * 0.6, rgb[2] * 0.6, rgb[3] * 0.6, 1)
 	b:SetEdgeTexture("", 1, 1, 1)
 	b:SetHeight(16)
-	local l = QAT.widgets.Label(b, name .. "_L", "", "$(BOLD_FONT)|12|soft-shadow-thin")
+	local l = QAT.widgets.Label(b, name .. "_L", "", "$(BOLD_FONT)|14|soft-shadow-thin")
 	l:SetColor(rgb[1], rgb[2], rgb[3], 1)
 	l:SetAnchor(CENTER, b, CENTER, 0, 0)
 	b.label = l

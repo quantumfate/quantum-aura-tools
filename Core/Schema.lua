@@ -40,7 +40,23 @@
 
 -- "audio" is a non-visual kind: it draws nothing and plays the phase's cue on
 -- enter (the sound is stored in phase.cues.sound).
-local DISPLAY_KINDS = { bar = true, icon = true, text = true, none = true, audio = true }
+-- "border" draws only an animated square frame whose perimeter drains clockwise as
+-- the timer runs out; its background is transparent so it can overlay another phase
+-- (e.g. an icon phase) without occluding it. The icon can optionally sit behind it.
+-- "bar" is a progress bar with an optional square icon on the left; the bar's height
+-- (thin/half/full) and vertical anchor (top/middle/bottom) are configurable and it
+-- always shares the row with the icon (never hidden behind it). "gradient" keeps the
+-- icon fully lit and sweeps a translucent fill across it in a chosen direction.
+-- (The former "barbeside" kind folded into "bar"; it now normalizes to "bar".)
+local DISPLAY_KINDS = {
+	bar = true,
+	icon = true,
+	text = true,
+	none = true,
+	audio = true,
+	border = true,
+	gradient = true,
+}
 local COLOR_KEYS = { "background", "bar", "border", "stacks", "text", "timer", "cooldown" }
 
 local function canonicalLook(src)
@@ -71,10 +87,23 @@ local function canonicalLook(src)
 		decimals = src.decimals,
 		showStacks = src.showStacks or false,
 		showTime = src.showTime ~= false, -- default on; the time number is the common readout
+		showIcon = src.showIcon ~= false, -- bar kind: show the left icon (default on)
 		font = src.font, -- optional LibMediaProvider font family name (nil = default face)
 		fontSizes = { label = f.label, time = f.time, stacks = f.stacks },
 		colors = colors,
 		borderThickness = src.borderThickness, -- nil = default 1px
+		-- border-kind options
+		iconBehind = src.iconBehind or false, -- show the icon behind the draining frame
+		lowThreshold = src.lowThreshold, -- seconds; below this the frame recolors/pulses (nil = off)
+		lowColor = src.lowColor, -- rgba for the low-time state
+		lowPulse = src.lowPulse or false, -- also pulse the frame alpha while low
+		-- bar-kind options (icon is optional; bar shares the row and resizes for it)
+		barHeight = src.barHeight or "full", -- "thin" | "half" | "full"
+		barAnchor = src.barAnchor or "middle", -- "top" | "middle" | "bottom"
+		-- gradient-kind options: always a reveal (fill = remaining time); only the
+		-- direction it drains from is configurable.
+		sweepDir = src.sweepDir or "rtl", -- "ltr" | "rtl" | "ttb" | "btt"
+		sweepColor = src.sweepColor, -- optional rgba tint for the translucent fill
 	}
 end
 
@@ -244,6 +273,10 @@ function QAT.CanonicalizeDef(def)
 	-- whose target phase no longer exists are dropped.
 	for _, phase in ipairs(def.phases) do
 		phase.look = canonicalLook(phase.look)
+		-- Layer: phases sharing a layer form one mutually-exclusive state machine;
+		-- different layers run in parallel and draw in ascending order. Default 0, so
+		-- every pre-existing single-layer tracker is unchanged.
+		phase.layer = tonumber(phase.layer) or 0
 		phase.duration = phase.duration or { type = "none" }
 		phase.duration.unit = phase.duration.unit or def.unit
 		phase.transitions = phase.transitions or {}
@@ -271,6 +304,48 @@ function QAT.CanonicalizeDef(def)
 		end)()
 	then
 		def.initial = def.phases[1] and def.phases[1].id
+	end
+
+	-- Per-layer starting phase. def.initial is layer 0's start; other layers keep
+	-- theirs in def.layerInitial (keyed by layer number). Each present layer defaults
+	-- to its first phase; stale entries for empty layers are dropped.
+	local firstOf, seen = {}, {}
+	for _, p in ipairs(def.phases) do
+		if firstOf[p.layer] == nil then
+			firstOf[p.layer] = p.id
+		end
+		seen[p.id] = p.layer
+	end
+	def.layerInitial = def.layerInitial or {}
+	def.layerInitial[0] = def.initial
+	for layer, first in pairs(firstOf) do
+		local li = def.layerInitial[layer]
+		if not (li and seen[li] == layer) then
+			def.layerInitial[layer] = first
+		end
+	end
+	for layer in pairs(def.layerInitial) do
+		if firstOf[layer] == nil then
+			def.layerInitial[layer] = nil
+		end
+	end
+
+	-- Per-layer display settings (offset from the tracker origin + visibility). Keyed
+	-- by layer number; defaulted per present layer, stale entries dropped.
+	def.layerSettings = def.layerSettings or {}
+	for layer in pairs(firstOf) do
+		local s = def.layerSettings[layer] or {}
+		s.xOffset = tonumber(s.xOffset) or 0
+		s.yOffset = tonumber(s.yOffset) or 0
+		if s.visible == nil then
+			s.visible = true
+		end
+		def.layerSettings[layer] = s
+	end
+	for layer in pairs(def.layerSettings) do
+		if firstOf[layer] == nil then
+			def.layerSettings[layer] = nil
+		end
 	end
 
 	return def

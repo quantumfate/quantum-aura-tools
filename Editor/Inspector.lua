@@ -45,24 +45,156 @@ end
 
 -- ===== Phase mutations (shared with the tree, which owns the phase rows) =====
 
-function QAT.Editor_AddPhase(def)
+function QAT.Editor_AddPhase(def, layer)
 	local n = #def.phases + 1
 	local id = "phase" .. n
 	while phaseById(def, id) do
 		n = n + 1
 		id = "phase" .. n
 	end
-	table.insert(def.phases, { id = id, look = { display = "bar" }, duration = { type = "none" }, transitions = {} })
+	table.insert(
+		def.phases,
+		{ id = id, layer = layer or 0, look = { display = "bar" }, duration = { type = "none" }, transitions = {} }
+	)
 	QAT.editor.selectedPhaseId = id
 	QAT.editor.selectedScope = "phase"
 	QAT.CanonicalizeDef(def)
 	QAT.widgets.NotifyTrackerChanged(def.id)
 end
 
-function QAT.Editor_SetInitialPhase(def, phaseId)
-	def.initial = phaseId
+-- Sorted list of the layer numbers a tracker currently uses.
+function QAT.Editor_LayerList(def)
+	local seen, out = {}, {}
+	for _, p in ipairs(def.phases or {}) do
+		local L = p.layer or 0
+		if not seen[L] then
+			seen[L] = true
+			out[#out + 1] = L
+		end
+	end
+	table.sort(out)
+	return out
+end
+
+-- Move a phase into another layer (via a tree drag). No-op if it's already there.
+-- Keeps the phase selected so the editor stays put.
+function QAT.Editor_MovePhaseToLayer(def, phaseId, targetLayer)
+	local moved = false
+	for _, p in ipairs(def.phases) do
+		if p.id == phaseId and (p.layer or 0) ~= targetLayer then
+			p.layer = targetLayer
+			moved = true
+			break
+		end
+	end
+	if not moved then
+		return
+	end
+	QAT.CanonicalizeDef(def)
+	if QAT.Editor_SelectPhase then
+		QAT.Editor_SelectPhase(def.id, phaseId)
+	end
+	QAT.widgets.NotifyTrackerChanged(def.id)
+end
+
+-- Set one per-layer display setting (xOffset | yOffset | visible).
+function QAT.Editor_SetLayerSetting(def, layer, key, value)
+	def.layerSettings = def.layerSettings or {}
+	def.layerSettings[layer] = def.layerSettings[layer] or {}
+	def.layerSettings[layer][key] = value
 	QAT.CanonicalizeDef(def)
 	QAT.widgets.NotifyTrackerChanged(def.id)
+end
+
+-- Move a layer forward (toward the front / higher number) or back in the stack by
+-- swapping it with its neighbour: every phase's layer, plus the two layers' settings
+-- and initial phases, are exchanged. Returns the layer's new number (for reselection).
+function QAT.Editor_MoveLayer(def, layer, dir)
+	local layers = QAT.Editor_LayerList(def)
+	local idx
+	for i, L in ipairs(layers) do
+		if L == layer then
+			idx = i
+			break
+		end
+	end
+	if not idx then
+		return layer
+	end
+	local other = dir == "forward" and layers[idx + 1] or layers[idx - 1]
+	if not other then
+		return layer -- already at an end
+	end
+	-- Swap the two layer numbers across all phases (via a temporary sentinel).
+	local TMP = -999
+	for _, p in ipairs(def.phases) do
+		if (p.layer or 0) == layer then
+			p.layer = TMP
+		end
+	end
+	for _, p in ipairs(def.phases) do
+		if (p.layer or 0) == other then
+			p.layer = layer
+		end
+	end
+	for _, p in ipairs(def.phases) do
+		if p.layer == TMP then
+			p.layer = other
+		end
+	end
+	def.layerSettings = def.layerSettings or {}
+	def.layerSettings[layer], def.layerSettings[other] = def.layerSettings[other], def.layerSettings[layer]
+	def.layerInitial = def.layerInitial or {}
+	def.layerInitial[layer], def.layerInitial[other] = def.layerInitial[other], def.layerInitial[layer]
+	if layer == 0 or other == 0 then
+		def.initial = def.layerInitial[0]
+	end
+	QAT.CanonicalizeDef(def)
+	QAT.widgets.NotifyTrackerChanged(def.id)
+	return other
+end
+
+-- Add a new parallel layer: a fresh phase on the next unused layer, which becomes
+-- that layer's initial (via canonicalize). Layers run concurrently and draw in
+-- ascending order (lowest = back, highest = front).
+function QAT.Editor_AddLayer(def)
+	local maxLayer = 0
+	for _, p in ipairs(def.phases) do
+		if (p.layer or 0) > maxLayer then
+			maxLayer = p.layer or 0
+		end
+	end
+	QAT.Editor_AddPhase(def, maxLayer + 1)
+end
+
+function QAT.Editor_SetInitialPhase(def, phaseId)
+	-- "Initial" is per layer: set this phase as its layer's start. Layer 0 also drives
+	-- def.initial (the canonical layer-0 start).
+	local layer = 0
+	for _, p in ipairs(def.phases) do
+		if p.id == phaseId then
+			layer = p.layer or 0
+			break
+		end
+	end
+	def.layerInitial = def.layerInitial or {}
+	def.layerInitial[layer] = phaseId
+	if layer == 0 then
+		def.initial = phaseId
+	end
+	QAT.CanonicalizeDef(def)
+	QAT.widgets.NotifyTrackerChanged(def.id)
+end
+
+-- Is this phase its layer's starting phase? (Layer-aware INITIAL badge.)
+function QAT.Editor_IsInitialPhase(def, phaseId)
+	for _, p in ipairs(def.phases) do
+		if p.id == phaseId then
+			local li = def.layerInitial and def.layerInitial[p.layer or 0]
+			return li == phaseId or ((p.layer or 0) == 0 and def.initial == phaseId)
+		end
+	end
+	return false
 end
 
 function QAT.Editor_DeletePhase(def, phaseId)
@@ -93,7 +225,7 @@ local function makeBadge(parent, name)
 	b:SetCenterColor(0.16, 0.22, 0.34, 1)
 	b:SetEdgeColor(0.30, 0.40, 0.58, 1)
 	b:SetEdgeTexture("", 1, 1, 1)
-	local l = QAT.widgets.Label(b, name .. "_L", "", "$(BOLD_FONT)|11|soft-shadow-thin")
+	local l = QAT.widgets.Label(b, name .. "_L", "", "$(BOLD_FONT)|13|soft-shadow-thin")
 	l:SetColor(0.62, 0.72, 0.90, 1)
 	l:SetAnchor(CENTER, b, CENTER, 0, 0)
 	b.label = l
@@ -163,16 +295,28 @@ function QAT.Editor_Inspector_Build(pane)
 			end
 		end
 	end
-	insp.sizeCaption = QAT.widgets.Label(row1, "QAT_Insp_SizeCaption", "Size")
+	-- The size box is Width × Height for the whole tracker. Bars fill it with a square
+	-- icon on the left (Height × Height); Icon and Border phases are square and use
+	-- Height for both, so Width doesn't affect them. Captions + tooltips make that clear.
+	local SIZE_TIP = "Tracker box in pixels: Width × Height.\n"
+		.. "• Bar: fills the box; the left icon is square (Height × Height).\n"
+		.. "• Icon / Border: square — uses Height for both, so Width is ignored."
+	insp.sizeCaption = QAT.widgets.Label(row1, "QAT_Insp_SizeCaption", "Size (W×H)")
 	insp.sizeCaption:SetAnchor(LEFT, insp.nameBox, RIGHT, 18, 0)
+	QAT.widgets.Tooltip(insp.sizeCaption, SIZE_TIP)
 	insp.widthBox = QAT.widgets.EditBox(row1, "QAT_Insp_WidthBox", 54, 22)
 	insp.widthBox:SetAnchor(LEFT, insp.sizeCaption, RIGHT, 6, 0)
 	insp.widthBox.onChange = dimChange("width")
+	QAT.widgets.Tooltip(insp.widthBox, "Width (px). Used by Bar phases; ignored by square Icon/Border phases.")
 	insp.sizeX = QAT.widgets.Label(row1, "QAT_Insp_SizeX", "x")
 	insp.sizeX:SetAnchor(LEFT, insp.widthBox, RIGHT, 4, 0)
 	insp.heightBox = QAT.widgets.EditBox(row1, "QAT_Insp_HeightBox", 54, 22)
 	insp.heightBox:SetAnchor(LEFT, insp.sizeX, RIGHT, 4, 0)
 	insp.heightBox.onChange = dimChange("height")
+	QAT.widgets.Tooltip(
+		insp.heightBox,
+		"Height (px). The bar height, and the square size of Icon/Border phases and the bar's left icon."
+	)
 
 	-- Position (chained after Size). Top-left origin: 0,0 is the screen's top-left
 	-- corner, x grows right and y grows down; clamped to the screen. Moves live.
@@ -330,12 +474,17 @@ local function renderCrumb(def)
 	insp.crumbRoot:SetText(def.name or def.id)
 	if scope == "phase" and not isFolder then
 		insp.crumbLeaf:SetText(QAT.editor.selectedPhaseId or "")
-		local isInitial = QAT.editor.selectedPhaseId == def.initial
+		local isInitial = QAT.Editor_IsInitialPhase(def, QAT.editor.selectedPhaseId)
 		insp.crumbBadge:SetText("INITIAL")
 		insp.crumbBadge:SetHidden(not isInitial)
 		insp.setInitBtn:SetHidden(false)
 		insp.setInitBtn:SetSelected(isInitial)
 		insp.delPhaseBtn:SetHidden(false)
+	elseif scope == "layer" and not isFolder then
+		insp.crumbLeaf:SetText("Layer " .. ((QAT.editor.selectedLayer or 0) + 1))
+		insp.crumbBadge:SetHidden(true)
+		insp.setInitBtn:SetHidden(true)
+		insp.delPhaseBtn:SetHidden(true)
 	else
 		insp.crumbLeaf:SetText("Load")
 		insp.crumbBadge:SetText(isFolder and "GROUP" or "AURA")
@@ -343,6 +492,137 @@ local function renderCrumb(def)
 		insp.setInitBtn:SetHidden(true)
 		insp.delPhaseBtn:SetHidden(true)
 	end
+end
+
+-- The Layer settings card (layer scope): stack order, x/y offset from the tracker
+-- origin, and a visibility toggle. Rendered into the shared load scroll container.
+function QAT.Editor_RenderLayerCard(container, def)
+	local pool = container.pool or QAT.widgets.NewPool()
+	container.pool = pool
+	QAT.widgets.PoolBegin(pool)
+	local function get(k, f)
+		return QAT.widgets.PoolGet(pool, k, f)
+	end
+
+	QAT.CanonicalizeDef(def)
+	local layer = QAT.editor.selectedLayer or 0
+	local layers = QAT.Editor_LayerList(def)
+	local idx = 1
+	for i, L in ipairs(layers) do
+		if L == layer then
+			idx = i
+		end
+	end
+	local posLabel = (idx == 1 and "back") or (idx == #layers and "front") or nil
+	def.layerSettings = def.layerSettings or {}
+	local s = def.layerSettings[layer] or { xOffset = 0, yOffset = 0, visible = true }
+
+	local cw = container.qatViewportW or container:GetWidth()
+	if cw < 240 then
+		cw = 900
+	end
+	local OUT, ROW = 14, 34
+	local card = get("card", function()
+		return QAT.widgets.Card(container, "QAT_Layer_Card", "Layer")
+	end)
+	card:SetTitle("Layer " .. (layer + 1) .. (posLabel and ("  ·  " .. posLabel) or ""))
+	card:ClearAnchors()
+	card:SetAnchor(TOPLEFT, container, TOPLEFT, OUT, OUT)
+	local PAD = OUT + card.padX
+	local LX = PAD + 120
+	local y = OUT + card.contentY
+
+	local sub = get("sub", function()
+		return QAT.widgets.Label(container, "QAT_Layer_Sub", "")
+	end)
+	sub:SetText("Controls this layer of the parallel stack. Drag a phase in the tree to move it between layers.")
+	sub:SetColor(0.55, 0.6, 0.7, 1)
+	sub:ClearAnchors()
+	sub:SetAnchor(TOPLEFT, container, TOPLEFT, PAD, y)
+	y = y + 30
+
+	local function rowLabel(key, text)
+		local l = get("L" .. key, function()
+			return QAT.widgets.Label(container, "QAT_Layer_L" .. key, "")
+		end)
+		l:SetText(text)
+		l:ClearAnchors()
+		l:SetAnchor(TOPLEFT, container, TOPLEFT, PAD, y + 4)
+	end
+
+	-- Stack order: Forward (toward front) / Back (toward behind).
+	rowLabel("Order", "Stack order")
+	local fwd = get("fwd", function()
+		return QAT.widgets.TextButton(container, "QAT_Layer_Fwd", "Forward", nil)
+	end)
+	fwd:SetHeight(26)
+	fwd:ClearAnchors()
+	fwd:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
+	fwd.onClick = function()
+		QAT.Editor_SelectLayer(def.id, QAT.Editor_MoveLayer(def, layer, "forward"))
+	end
+	local back = get("back", function()
+		return QAT.widgets.TextButton(container, "QAT_Layer_Back", "Back", nil)
+	end)
+	back:SetHeight(26)
+	back:ClearAnchors()
+	back:SetAnchor(LEFT, fwd, RIGHT, 8, 0)
+	back.onClick = function()
+		QAT.Editor_SelectLayer(def.id, QAT.Editor_MoveLayer(def, layer, "back"))
+	end
+	y = y + ROW + 4
+
+	-- Offset sliders (from the tracker origin).
+	local function offsetRow(key, label, field)
+		rowLabel(key, label)
+		local sl = get("sl" .. key, function()
+			return QAT.widgets.Slider(container, "QAT_Layer_Sl" .. key, 200, nil)
+		end)
+		sl:SetMinMax(-300, 300)
+		sl:SetValue(s[field] or 0)
+		sl:ClearAnchors()
+		sl:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y + 4)
+		local val = get("val" .. key, function()
+			return QAT.widgets.Label(container, "QAT_Layer_Val" .. key, "")
+		end)
+		val:ClearAnchors()
+		val:SetAnchor(LEFT, sl, RIGHT, 12, 0)
+		local function fmt(v)
+			return string.format("%+dpx", math.floor(v + 0.5))
+		end
+		val:SetText(fmt(s[field] or 0))
+		sl.onChange = function(v)
+			v = math.floor(v + 0.5)
+			val:SetText(fmt(v))
+			QAT.Editor_SetLayerSetting(def, layer, field, v)
+		end
+		y = y + ROW + 4
+	end
+	offsetRow("Y", "Vertical offset", "yOffset")
+	offsetRow("X", "Horizontal offset", "xOffset")
+
+	-- Visibility.
+	rowLabel("Vis", "Layer visible")
+	local chk = get("vis", function()
+		return QAT.widgets.Checkbox(container, "QAT_Layer_Vis", true)
+	end)
+	chk:SetChecked(s.visible ~= false)
+	chk:ClearAnchors()
+	chk:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
+	local visLbl = get("visLbl", function()
+		return QAT.widgets.Label(container, "QAT_Layer_VisLbl", "")
+	end)
+	visLbl:SetText(s.visible ~= false and "shown" or "hidden")
+	visLbl:ClearAnchors()
+	visLbl:SetAnchor(LEFT, chk, RIGHT, 10, 0)
+	chk.onToggle = function(v)
+		visLbl:SetText(v and "shown" or "hidden")
+		QAT.Editor_SetLayerSetting(def, layer, "visible", v)
+	end
+	y = y + ROW + 4
+
+	card:SetDimensions(cw - OUT * 2, (y - OUT) + 10)
+	QAT.widgets.PoolEnd(pool)
 end
 
 refreshBody = function()
@@ -412,6 +692,15 @@ refreshBody = function()
 					renderer(container, def)
 				end)
 			end
+		elseif scope == "layer" then
+			if QAT.editor.tabBar then
+				QAT.editor.tabBar:SetHidden(true)
+			end
+			insp.loadScroll:SetHidden(false)
+			insp.loadContainer.qatViewportW = viewportW
+			QAT.Safe("tab Layer", function()
+				QAT.Editor_RenderLayerCard(insp.loadContainer, def)
+			end)
 		else
 			if QAT.editor.tabBar then
 				QAT.editor.tabBar:SetHidden(true)

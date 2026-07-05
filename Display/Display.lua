@@ -75,12 +75,17 @@ function QAT.display.Create(def)
 	-- An icon is square: it uses the height for both dimensions so it does not
 	-- inherit the bar's width (phases each own their control, so an icon phase and a
 	-- bar phase in the same tracker can be sized independently).
-	if kind == "icon" then
+	if kind == "icon" or kind == "border" or kind == "gradient" then
 		w = h
 	end
 	local colors = def.colors
 	local fontSizes = def.fontSizes
-	local showLeftIcon = (kind == "bar") and def.icon ~= nil and def.icon ~= ""
+	-- The bar kind carries an optional square icon on the left. When shown, the bar
+	-- shares the row with it (starts after it) rather than sitting behind it.
+	local showLeftIcon = (kind == "bar") and def.showIcon ~= false and def.icon ~= nil and def.icon ~= ""
+	-- The border kind is a frame-only overlay: transparent background, and the icon
+	-- only appears if the author opts to place it behind the draining frame.
+	local iconBehind = (kind == "border") and def.iconBehind and def.icon ~= nil and def.icon ~= ""
 
 	-- Top-left origin: pos.x/pos.y are the control's top-left corner from the screen's
 	-- top-left (x right, y down), matching the editor's Position fields.
@@ -90,6 +95,9 @@ function QAT.display.Create(def)
 	end)
 	tlw:SetDimensions(w, h)
 	tlw:SetHidden(true)
+	-- Layer order: a higher-layer phase (e.g. a transparent cooldown frame) draws
+	-- above a lower one (e.g. the duration icon) sharing the tracker's position.
+	tlw:SetDrawLevel(def.drawLevel or 0)
 	tlw.qatTrackerId = def.trackerId
 	-- Custom drag (only while the editor is open, gated by QAT.trackersMovable):
 	-- ESO's SetMovable rewrites the anchor mid-drag, so GetLeft/GetTop read back
@@ -141,17 +149,25 @@ function QAT.display.Create(def)
 		borderT = 1
 	end
 	bg:SetAnchorFill()
-	bg:SetCenterColor(unpack(colorOf(colors, "background")))
-	bg:SetEdgeColor(unpack(colorOf(colors, "border")))
-	bg:SetEdgeTexture("", borderT, borderT, borderT) -- empty texture => solid colour edge of this thickness
+	if kind == "border" then
+		-- Frame-only: the CT_BACKDROP draws nothing (our own segments are the frame),
+		-- keeping the background fully transparent so it can overlay another phase.
+		bg:SetCenterColor(0, 0, 0, 0)
+		bg:SetEdgeColor(0, 0, 0, 0)
+		bg:SetEdgeTexture("", 1, 1, 1)
+	else
+		bg:SetCenterColor(unpack(colorOf(colors, "background")))
+		bg:SetEdgeColor(unpack(colorOf(colors, "border")))
+		bg:SetEdgeTexture("", borderT, borderT, borderT) -- empty texture => solid colour edge of this thickness
+	end
 
-	local showIcon = (kind == "icon") or showLeftIcon
+	local showIcon = (kind == "icon") or (kind == "gradient") or showLeftIcon or iconBehind
 	local icon = reuse(name .. "_Icon", function()
 		return WM:CreateControl(name .. "_Icon", tlw, CT_TEXTURE)
 	end)
 	icon:ClearAnchors()
-	if kind == "icon" then
-		icon:SetAnchorFill() -- the icon IS the display
+	if kind == "icon" or kind == "gradient" or iconBehind then
+		icon:SetAnchorFill() -- the icon IS the display (border kind: it sits behind the frame)
 	else
 		icon:SetDimensions(h, h)
 		icon:SetAnchor(LEFT, tlw, LEFT, 0, 0)
@@ -164,12 +180,62 @@ function QAT.display.Create(def)
 		return WM:CreateControl(name .. "_Bar", tlw, CT_STATUSBAR)
 	end)
 	bar:ClearAnchors()
-	bar:SetAnchor(TOPLEFT, tlw, TOPLEFT, showLeftIcon and h or 0, 0)
-	bar:SetAnchor(BOTTOMRIGHT, tlw, BOTTOMRIGHT, 0, 0)
+	if kind == "bar" then
+		-- Bar of the chosen height, anchored top/middle/bottom. When an icon shows the
+		-- bar starts after it (small gap) so the two never overlap; otherwise it fills
+		-- the full width. Full height + no icon reproduces the classic bar.
+		local BESIDE_GAP = showLeftIcon and 4 or 0
+		local bh = (def.barHeight == "thin" and 6) or (def.barHeight == "half" and math.floor(h / 2)) or h
+		local yoff = (def.barAnchor == "top" and 0)
+			or (def.barAnchor == "bottom" and (h - bh))
+			or math.floor((h - bh) / 2)
+		local xstart = (showLeftIcon and h or 0) + BESIDE_GAP
+		bar:SetAnchor(TOPLEFT, tlw, TOPLEFT, xstart, yoff)
+		bar:SetDimensions(w - xstart, bh)
+	else
+		bar:SetAnchor(TOPLEFT, tlw, TOPLEFT, 0, 0)
+		bar:SetAnchor(BOTTOMRIGHT, tlw, BOTTOMRIGHT, 0, 0)
+	end
 	bar:SetColor(unpack(colorOf(colors, "bar")))
 	bar:SetMinMax(0, 1)
 	bar:SetValue(1)
 	bar:SetHidden(kind ~= "bar")
+
+	-- Border-kind drain frame: four solid edge textures (top, right, bottom, left)
+	-- laid clockwise from the top-left corner. Each is resized every frame so the
+	-- combined visible length equals the remaining fraction of the perimeter — the
+	-- frame shrinks clockwise as time runs out. Hidden entirely for other kinds.
+	local edgeNames = { "_ETop", "_ERight", "_EBottom", "_ELeft" }
+	local edges = {}
+	for _, suffix in ipairs(edgeNames) do
+		local e = reuse(name .. suffix, function()
+			return WM:CreateControl(name .. suffix, tlw, CT_TEXTURE)
+		end)
+		e:ClearAnchors()
+		e:SetTexture("") -- solid colour, no image
+		e:SetDrawLevel(2) -- above icon (0) and proc (1), below labels (5)
+		e:SetHidden(kind ~= "border")
+		edges[#edges + 1] = e
+	end
+
+	-- Gradient-kind sweep: a translucent progress bar overlaid on the fully-lit icon —
+	-- the same fill animation as the Bar kind but see-through, so the icon shows behind
+	-- it. "reveal" maps the fill to remaining time; "shine" loops the fill for a pulse.
+	local sweep = reuse(name .. "_Sweep", function()
+		return WM:CreateControl(name .. "_Sweep", tlw, CT_STATUSBAR)
+	end)
+	sweep:ClearAnchors()
+	sweep:SetAnchorFill()
+	sweep:SetMinMax(0, 1)
+	sweep:SetValue(1)
+	sweep:SetDrawLevel(2) -- above the icon (0), below the readout labels (5)
+	-- Fill direction: horizontal for ltr/rtl, vertical for ttb/btt; the reverse
+	-- alignment fills from the far edge (right / bottom).
+	local dir = def.sweepDir or "rtl"
+	local horiz = (dir == "ltr" or dir == "rtl")
+	sweep:SetOrientation(horiz and ORIENTATION_HORIZONTAL or ORIENTATION_VERTICAL)
+	sweep:SetBarAlignment((dir == "rtl" or dir == "ttb") and BAR_ALIGNMENT_REVERSE or BAR_ALIGNMENT_NORMAL)
+	sweep:SetHidden(kind ~= "gradient")
 
 	-- Three independent labels so each can carry its own color (text / timer / stacks).
 	local nameLabel = reuse(name .. "_Name", function()
@@ -196,7 +262,7 @@ function QAT.display.Create(def)
 	nameLabel:ClearAnchors()
 	timeLabel:ClearAnchors()
 	stacksLabel:ClearAnchors()
-	if kind == "icon" then
+	if kind == "icon" or kind == "border" or kind == "gradient" then
 		nameLabel:SetHidden(true)
 	else
 		nameLabel:SetHidden(false)
@@ -231,6 +297,13 @@ function QAT.display.Create(def)
 		kind = kind,
 		bg = bg,
 		bar = (kind == "bar") and bar or nil,
+		edges = (kind == "border") and edges or nil,
+		sweep = (kind == "gradient") and sweep or nil,
+		sweepColor = def.sweepColor,
+		borderT = borderT,
+		lowThreshold = def.lowThreshold,
+		lowColor = def.lowColor,
+		lowPulse = def.lowPulse or false,
 		icon = showIcon and icon or nil,
 		nameLabel = nameLabel,
 		timeLabel = timeLabel,
@@ -239,6 +312,7 @@ function QAT.display.Create(def)
 		colors = colors,
 		name = def.name or tostring(def.id),
 		decimals = def.decimals or 1,
+		forceHidden = def.forceHidden or false,
 		showStacks = def.showStacks or false,
 		showTime = def.showTime ~= false,
 	}
@@ -327,7 +401,87 @@ function QAT.display.Create(def)
 		end
 	end
 
+	-- Lay the four drain edges clockwise from the top-left so the visible border
+	-- length equals `frac` of the perimeter. `remaining` drives the optional low-time
+	-- recolor/pulse. Segments shorter than the corner thickness are hidden.
+	function control:setBorderFraction(frac, remaining)
+		local es = self.edges
+		if not es then
+			return
+		end
+		local tw, th = self.tlw:GetWidth(), self.tlw:GetHeight()
+		local t = self.borderT
+		local P = 2 * (tw + th)
+		local want = zo_clamp(frac or 0, 0, 1) * P
+		local tl = zo_min(want, tw)
+		want = want - tl
+		local rl = zo_min(want, th)
+		want = want - rl
+		local bl = zo_min(want, tw)
+		want = want - bl
+		local ll = zo_min(want, th)
+
+		-- Colour: the frame reads as the progress fill; drop to the low colour (and
+		-- optionally pulse alpha) once under the author's threshold.
+		local c = colorOf(self.colors, "bar")
+		if self.lowThreshold and remaining and remaining > 0 and remaining <= self.lowThreshold then
+			c = self.lowColor or { 0.90, 0.20, 0.20, 1 }
+			if self.lowPulse then
+				local a = 0.55 + 0.45 * (0.5 + 0.5 * math.sin(GetFrameTimeSeconds() * 6))
+				c = { c[1], c[2], c[3], (c[4] or 1) * a }
+			end
+		end
+
+		local top, right, bottom, left = es[1], es[2], es[3], es[4]
+		top:ClearAnchors()
+		top:SetAnchor(TOPLEFT, self.tlw, TOPLEFT, 0, 0)
+		right:ClearAnchors()
+		right:SetAnchor(TOPRIGHT, self.tlw, TOPRIGHT, 0, 0)
+		bottom:ClearAnchors()
+		bottom:SetAnchor(BOTTOMRIGHT, self.tlw, BOTTOMRIGHT, 0, 0)
+		left:ClearAnchors()
+		left:SetAnchor(BOTTOMLEFT, self.tlw, BOTTOMLEFT, 0, 0)
+		local function seg(e, len, horiz)
+			if len < t then
+				e:SetHidden(true)
+				return
+			end
+			e:SetHidden(false)
+			e:SetColor(c[1], c[2], c[3], c[4] or 1)
+			if horiz then
+				e:SetDimensions(len, t)
+			else
+				e:SetDimensions(t, len)
+			end
+		end
+		seg(top, tl, true)
+		seg(right, rl, false)
+		seg(bottom, bl, true)
+		seg(left, ll, false)
+	end
+
+	-- Drive the gradient sweep. `frac` is remaining/duration (1 for a passive). "shine"
+	-- loops a band across the icon, faster as time runs low; "reveal" dims the expired
+	-- portion with a moving boundary whose leading edge is the coloured band.
+	function control:setGradient(frac, remaining, hasTimer)
+		local sw = self.sweep
+		if not sw then
+			return
+		end
+		-- Translucent fill so the icon reads through it; default a soft blue at ~45%.
+		-- The fill always maps to remaining time (a reveal); its direction is fixed at
+		-- creation from sweepDir.
+		local c = self.sweepColor or { 0.30, 0.65, 1.0, 0.45 }
+		sw:SetColor(c[1], c[2], c[3], c[4] or 0.45)
+		sw:SetValue(hasTimer and frac or 1)
+	end
+
 	function control:SetState(active, remaining, duration, stacks)
+		if self.forceHidden then
+			self.tlw:SetHidden(true) -- layer toggled invisible
+			self:SetProc(false)
+			return
+		end
 		if not active or self.kind == "none" or self.kind == "audio" then
 			self.tlw:SetHidden(true) -- non-visual kinds; an audio cue fires on enter
 			self:SetProc(false)
@@ -342,8 +496,25 @@ function QAT.display.Create(def)
 
 		self:resetColors()
 
+		local frac = hasTimer and zo_clamp(remaining / duration, 0, 1) or 1
+
 		if self.bar then
-			self.bar:SetValue(hasTimer and zo_clamp(remaining / duration, 0, 1) or 1)
+			self.bar:SetValue(frac)
+			-- Low-time recolor/pulse for the beside bar (matches the border kind).
+			if self.lowThreshold and remaining and remaining > 0 and remaining <= self.lowThreshold then
+				local lc = self.lowColor or { 0.90, 0.20, 0.20, 1 }
+				local a = lc[4] or 1
+				if self.lowPulse then
+					a = a * (0.55 + 0.45 * (0.5 + 0.5 * math.sin(GetFrameTimeSeconds() * 6)))
+				end
+				self.bar:SetColor(lc[1], lc[2], lc[3], a)
+			end
+		end
+
+		if self.kind == "border" then
+			self:setBorderFraction(frac, remaining)
+		elseif self.kind == "gradient" then
+			self:setGradient(frac, remaining, hasTimer)
 		end
 
 		self.nameLabel:SetText(self.name)
@@ -352,7 +523,7 @@ function QAT.display.Create(def)
 		self.timeLabel:SetHidden(not showTime)
 		self.stacksLabel:SetHidden(not showStacks)
 
-		if self.kind == "icon" then
+		if self.kind == "icon" or self.kind == "border" or self.kind == "gradient" then
 			self:placeIconNumbers(showTime, showStacks)
 		end
 

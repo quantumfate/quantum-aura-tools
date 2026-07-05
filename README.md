@@ -57,10 +57,21 @@ Controls → Keybindings.
 **LibAddonMenu-2.0**, **LibSets**, **LibMediaProvider** (optional: LibDebugLogger).
 API 101050.
 
-## Coming next
+## Planned
 
-A searchable set/ability picker, targeting a boss by name (the engine resolves the
-live slot), and an in-addon raid-mechanic library.
+- **Overhead icons — self.** Render your own tracked auras above your character in
+  the world, not just on the HUD.
+- **Overhead uptimes — group.** Aura uptimes above your groupmates' heads. ESO won't
+  let a client read other players' buffs, so this needs everyone running the add-on
+  and sharing their own state over **LibGroupBroadcast**.
+- **Shared trackers.** Raid leads broadcast a tracker to the group so everyone runs
+  the same setup (also via LibGroupBroadcast).
+- **Named-boss targeting.** Scope a tracker to a specific boss (e.g. only Z'Maja);
+  the engine resolves the live boss slot, backed by a boss/zone name catalogue.
+- **Searchable set / ability picker** and an in-addon **raid-mechanic library**.
+
+> Overhead-group and shared trackers only benefit groupmates who also run the
+> add-on — non-users show nothing.
 
 ## Credits & license
 

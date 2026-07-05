@@ -113,12 +113,26 @@ local function makeRow(parent, name)
 	star:SetAnchor(LEFT, nameL, RIGHT, 8, 0)
 	c.star = star
 
-	local seenL = W.Label(c, name .. "_Seen", "", "$(MEDIUM_FONT)|14|soft-shadow-thin")
+	-- Scribed source, shown on the right (like a "from <source>" column): the grimoire's
+	-- icon plus a "from <grimoire>" label, for effects that are a scribable grimoire's
+	-- own cast id. Sits left of the seen/ago column.
+	local scribe = W.IconWell(c, name .. "_Scr", 32)
+	scribe:SetAnchor(RIGHT, c, RIGHT, -74, 0)
+	scribe:SetHidden(true)
+	c.scribe = scribe
+	local scribeL = W.Label(c, name .. "_ScrL", "", "$(MEDIUM_FONT)|14|soft-shadow-thin")
+	scribeL:SetColor(0.55, 0.62, 0.74, 1)
+	scribeL:SetHorizontalAlignment(TEXT_ALIGN_RIGHT)
+	scribeL:SetAnchor(RIGHT, scribe, LEFT, -8, 0)
+	scribeL:SetHidden(true)
+	c.scribeL = scribeL
+
+	local seenL = W.Label(c, name .. "_Seen", "", "$(MEDIUM_FONT)|15|soft-shadow-thin")
 	seenL:SetColor(0.6, 0.68, 0.78, 1)
 	seenL:SetAnchor(TOPRIGHT, c, TOPRIGHT, -10, 6)
 	c.seenL = seenL
 
-	local idL = W.Label(c, name .. "_Id", "", "$(MEDIUM_FONT)|14|soft-shadow-thin")
+	local idL = W.Label(c, name .. "_Id", "", "$(MEDIUM_FONT)|15|soft-shadow-thin")
 	idL:SetColor(0.5, 0.58, 0.68, 1)
 	idL:SetAnchor(TOPLEFT, icon, TOPRIGHT, 10, 22)
 	c.idL = idL
@@ -131,12 +145,12 @@ local function makeRow(parent, name)
 	timeBadge:SetAnchor(LEFT, effBadge, RIGHT, 5, 0)
 	c.timeBadge = timeBadge
 
-	local stacksL = W.Label(c, name .. "_Stacks", "", "$(MEDIUM_FONT)|14|soft-shadow-thin")
+	local stacksL = W.Label(c, name .. "_Stacks", "", "$(MEDIUM_FONT)|15|soft-shadow-thin")
 	stacksL:SetColor(0.7, 0.75, 0.82, 1)
 	stacksL:SetAnchor(LEFT, timeBadge, RIGHT, 6, 0)
 	c.stacksL = stacksL
 
-	local lastL = W.Label(c, name .. "_Last", "", "$(MEDIUM_FONT)|14|soft-shadow-thin")
+	local lastL = W.Label(c, name .. "_Last", "", "$(MEDIUM_FONT)|15|soft-shadow-thin")
 	lastL:SetColor(0.45, 0.52, 0.6, 1)
 	lastL:SetAnchor(BOTTOMRIGHT, c, BOTTOMRIGHT, -10, -6)
 	c.lastL = lastL
@@ -187,6 +201,20 @@ local function bindRow(c, row, y)
 	c.icon:SetTexture(row.icon)
 	c.nameL:SetText(row.name or ("#" .. row.abilityId))
 	c.star:SetHidden(not row.favourited)
+	-- Scribed source column: "from <grimoire>" + the grimoire icon, when the effect is
+	-- a scribable grimoire's own cast id.
+	local scribedName = QAT.Aggregator_RowScribedFrom and QAT.Aggregator_RowScribedFrom(row)
+	local scrIcon = QAT.Aggregator_RowScribedIcon and QAT.Aggregator_RowScribedIcon(row)
+	if scribedName and (not scrIcon or scrIcon == "") then
+		scrIcon = row.icon -- grimoire icon unavailable; use the ability icon
+	end
+	local showScribe = scribedName ~= nil
+	c.scribe:SetHidden(not showScribe)
+	c.scribeL:SetHidden(not showScribe)
+	if showScribe then
+		c.scribe:SetTexture(scrIcon or row.icon)
+		c.scribeL:SetText("from  " .. scribedName)
+	end
 	c.seenL:SetText("seen " .. (row.seenCount or 0))
 	c.idL:SetText("#" .. row.abilityId)
 
@@ -245,18 +273,19 @@ local function makeHeader(parent, name)
 	label:SetAnchor(LEFT, dot, RIGHT, 8, 0)
 	c.label = label
 
-	local count = W.Label(c, name .. "_C", "", "$(MEDIUM_FONT)|14|soft-shadow-thin")
+	local count = W.Label(c, name .. "_C", "", "$(MEDIUM_FONT)|15|soft-shadow-thin")
 	count:SetColor(0.5, 0.58, 0.68, 1)
 	count:SetAnchor(LEFT, label, RIGHT, 8, 0)
 	c.count = count
 
-	local hint = W.Label(c, name .. "_H", "", "$(MEDIUM_FONT)|13|soft-shadow-thin")
+	local hint = W.Label(c, name .. "_H", "", "$(MEDIUM_FONT)|15|soft-shadow-thin")
 	hint:SetColor(0.42, 0.48, 0.56, 1)
 	hint:SetAnchor(RIGHT, c, RIGHT, -10, 0)
 	c.hint = hint
 
 	c:SetHandler("OnMouseUp", function(self, button, upInside)
-		if upInside and button == MOUSE_BUTTON_INDEX_LEFT then
+		-- Self→Self is pinned open (it's easy to lose in the noise); it never collapses.
+		if upInside and button == MOUSE_BUTTON_INDEX_LEFT and self.bucket ~= "ss" then
 			QAT.aggregator.collapsed[self.bucket] = not QAT.aggregator.collapsed[self.bucket]
 			QAT.Aggregator_List_Render()
 		end
@@ -266,7 +295,7 @@ end
 
 local function bindHeader(c, bucket, n, y)
 	local meta = BUCKET_META[bucket]
-	local collapsed = QAT.aggregator.collapsed[bucket]
+	local collapsed = bucket ~= "ss" and QAT.aggregator.collapsed[bucket]
 	c.bucket = bucket
 	c:SetWidth(rowW)
 	c:ClearAnchors()
@@ -308,7 +337,7 @@ function QAT.Aggregator_List_Build(pane)
 	local selectBtn = W.TextButton(tb, "QAT_AggList_Select", "Select multiple", function()
 		QAT.Aggregator_SetSelecting(not QAT.aggregator.selecting)
 	end)
-	selectBtn:SetHeight(24)
+	selectBtn:SetHeight(28)
 	selectBtn:SetAnchor(LEFT, tb, LEFT, 0, 0)
 	QAT.widgets.Tooltip(
 		selectBtn,
@@ -316,7 +345,7 @@ function QAT.Aggregator_List_Build(pane)
 	)
 	QAT.aggregator.selectBtn = selectBtn
 
-	local count = W.Label(tb, "QAT_AggList_Count", "", "$(MEDIUM_FONT)|14|soft-shadow-thin")
+	local count = W.Label(tb, "QAT_AggList_Count", "", "$(MEDIUM_FONT)|15|soft-shadow-thin")
 	count:SetColor(0.55, 0.62, 0.72, 1)
 	count:SetAnchor(LEFT, selectBtn, RIGHT, 12, 0)
 	QAT.aggregator.listCountLabel = count
@@ -333,7 +362,7 @@ function QAT.Aggregator_List_Build(pane)
 			end
 			QAT.Aggregator_List_Render()
 		end)
-		b:SetHeight(24)
+		b:SetHeight(28)
 		if prev then
 			b:SetAnchor(LEFT, prev, RIGHT, -1, 0)
 		else
@@ -367,27 +396,41 @@ function QAT.Aggregator_List_Render()
 	if not a.listContent then
 		return
 	end
+	-- Refresh the loadout lookup so the scribed marker + Focus sorting reflect the
+	-- current bars/grimoires (cheap; runs once per render, not per row).
+	if QAT.Aggregator_RefreshMine then
+		QAT.Aggregator_RefreshMine()
+	end
 	local fq = a.filter
 
 	-- Group passing rows by bucket.
-	local groups, shown, hiddenPassive = {}, 0, 0
+	local groups, shown = {}, 0
 	for _, row in ipairs(QAT.capture.list) do
 		if QAT.Aggregator_RowPasses(row, fq) then
 			groups[row.bucket] = groups[row.bucket] or {}
 			table.insert(groups[row.bucket], row)
 			shown = shown + 1
-		elseif row.bucket == "ss" then
-			hiddenPassive = hiddenPassive + 1
 		end
 	end
 
 	-- Favourites float to the top of every section regardless of the active sort;
 	-- within each of the two bands the chosen sort applies.
 	local base = SORTS[fq.sort] or SORTS.lastSeen
+	local focusOn = fq.prioritiseMine
 	local cmp = function(a, b)
+		-- Favourites always outrank everything: favourite → non-favourite first.
 		local fa, fb = a.favourited and true or false, b.favourited and true or false
 		if fa ~= fb then
 			return fa
+		end
+		-- Within each favourite band, Focus Scribing floats scribed abilities up (a
+		-- scribed non-favourite can never beat a favourite — this tier is below it).
+		if focusOn then
+			local sa = QAT.Aggregator_RowScribedFrom(a) ~= nil
+			local sb = QAT.Aggregator_RowScribedFrom(b) ~= nil
+			if sa ~= sb then
+				return sa
+			end
 		end
 		return base(a, b)
 	end
@@ -406,7 +449,7 @@ function QAT.Aggregator_List_Render()
 			end)
 			bindHeader(hc, bucket, #g, y)
 			y = y + HEADER_H + 2
-			if not a.collapsed[bucket] then
+			if bucket == "ss" or not a.collapsed[bucket] then
 				for _, row in ipairs(g) do
 					local rc = W.PoolGet(rowPool, row.key, function()
 						return makeRow(a.listContent, "QAT_AggRow_" .. NonContiguousCount(rowPool.cache))
@@ -424,9 +467,6 @@ function QAT.Aggregator_List_Render()
 
 	-- Toolbar count.
 	local text = shown .. " effect" .. (shown == 1 and "" or "s")
-	if hiddenPassive > 0 and not fq.revealPassives and fq.relationship == "all" then
-		text = text .. "  ·  " .. hiddenPassive .. " passive rows hidden"
-	end
 	if a.listCountLabel then
 		a.listCountLabel:SetText(text)
 	end

@@ -503,7 +503,7 @@ local function render(container, def)
 		panel:SetAnchor(TOPLEFT, container, TOPLEFT, P2, y2)
 		panel:SetDimensions(innerW, 74)
 
-		local hdr = text("$(BOLD_FONT)|12|soft-shadow-thin")
+		local hdr = text("$(BOLD_FONT)|14|soft-shadow-thin")
 		hdr:SetText("THIS PHASE")
 		hdr:SetColor(0.5, 0.56, 0.64, 1)
 		hdr:ClearAnchors()

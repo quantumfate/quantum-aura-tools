@@ -122,7 +122,7 @@ local function makeSelRow(parent, name)
 	down:SetAnchor(RIGHT, del, LEFT, -6, 0)
 	local up = W.IconButton(p, name .. "_Up", ARROW_UP, 16, nil)
 	up:SetAnchor(RIGHT, down, LEFT, -4, 0)
-	local idl = W.Label(p, name .. "_Id", "", "$(MEDIUM_FONT)|13|soft-shadow-thin")
+	local idl = W.Label(p, name .. "_Id", "", "$(MEDIUM_FONT)|14|soft-shadow-thin")
 	idl:SetColor(0.5, 0.58, 0.68, 1)
 	idl:SetAnchor(RIGHT, up, LEFT, -10, 0)
 	function p:Bind(n, row, cb)
@@ -213,6 +213,16 @@ function QAT.Aggregator_Inspector_Build(pane)
 	I.relBadge = W.Badge(body, "QAT_AggIns_RB", "", BUCKET_COL.bs)
 	I.relBadge:SetAnchor(LEFT, I.timeBadge, RIGHT, 6, 0)
 
+	-- "Comes from <grimoire>" — shown only when the ability IS a scribable grimoire's
+	-- cast id (the sole attributable case). Icon + name, hidden otherwise.
+	I.scribedIcon = W.IconWell(body, "QAT_AggIns_ScrIcon", 22)
+	I.scribedIcon:SetAnchor(TOPLEFT, I.typeBadge, BOTTOMLEFT, 0, 14)
+	I.scribedIcon:SetHidden(true)
+	I.scribedLbl = W.Label(body, "QAT_AggIns_ScrLbl", "", "$(MEDIUM_FONT)|15|soft-shadow-thin")
+	I.scribedLbl:SetColor(0.66, 0.74, 0.86, 1)
+	I.scribedLbl:SetAnchor(LEFT, I.scribedIcon, RIGHT, 8, 0)
+	I.scribedLbl:SetHidden(true)
+
 	-- Actions: Build Tracker (primary) then Pin / Copy id / Ignore.
 	local build = W.TextButton(body, "QAT_AggIns_Build", "Build Tracker", function()
 		QAT.Aggregator_BuildTracker(I.row)
@@ -241,7 +251,7 @@ function QAT.Aggregator_Inspector_Build(pane)
 		QAT.Aggregator_Inspector_Render(stillThere or nil)
 		QAT.Aggregator_List_Render()
 	end)
-	I.favBtn:SetHeight(28)
+	I.favBtn:SetHeight(30)
 	I.favBtn:SetAnchor(TOPLEFT, build, BOTTOMLEFT, 0, 8)
 
 	I.copyBtn = W.TextButton(body, "QAT_AggIns_Copy", "Copy id", function()
@@ -253,7 +263,7 @@ function QAT.Aggregator_Inspector_Build(pane)
 			end, 1500)
 		end
 	end)
-	I.copyBtn:SetHeight(28)
+	I.copyBtn:SetHeight(30)
 	I.copyBtn:SetAnchor(LEFT, I.favBtn, RIGHT, 8, 0)
 
 	I.ignoreBtn = W.TextButton(body, "QAT_AggIns_Ignore", "Ignore", function()
@@ -264,7 +274,7 @@ function QAT.Aggregator_Inspector_Build(pane)
 			QAT.Aggregator_List_Render()
 		end
 	end)
-	I.ignoreBtn:SetHeight(28)
+	I.ignoreBtn:SetHeight(30)
 	I.ignoreBtn:SetAnchor(LEFT, I.copyBtn, RIGHT, 8, 0)
 
 	-- RAW DATA card.
@@ -294,7 +304,7 @@ function QAT.Aggregator_Inspector_Build(pane)
 	obs:SetWidth(INNER_W)
 	I.obsCard = obs
 	local function cell(key, title, x, y)
-		local t = W.Label(obs, "QAT_AggIns_O" .. key .. "T", title, "$(MEDIUM_FONT)|13|soft-shadow-thin")
+		local t = W.Label(obs, "QAT_AggIns_O" .. key .. "T", title, "$(MEDIUM_FONT)|14|soft-shadow-thin")
 		t:SetColor(0.5, 0.57, 0.66, 1)
 		t:SetAnchor(TOPLEFT, obs, TOPLEFT, x, y)
 		local v = W.Label(obs, "QAT_AggIns_O" .. key .. "V", "", "$(BOLD_FONT)|17|soft-shadow-thin")
@@ -338,7 +348,7 @@ function QAT.Aggregator_Inspector_Build(pane)
 	I.bDone = W.TextButton(body, "QAT_AggIns_BDone", "Done", function()
 		QAT.Aggregator_SetSelecting(false)
 	end)
-	I.bDone:SetHeight(26)
+	I.bDone:SetHeight(30)
 	I.bDone:SetAnchor(TOPRIGHT, body, TOPLEFT, PAD + INNER_W, PAD)
 
 	-- The single source of truth for creating the tracker; same anchor family as the
@@ -377,9 +387,9 @@ function QAT.Aggregator_Inspector_Build(pane)
 		"Build one phase per effect plus a fallback, with no transitions — you add the switching rules yourself in the editor."
 	)
 
-	I.bSelHdr = W.Label(body, "QAT_AggIns_BSelHdr", "SELECTED", "$(BOLD_FONT)|13|soft-shadow-thin")
+	I.bSelHdr = W.Label(body, "QAT_AggIns_BSelHdr", "SELECTED", "$(BOLD_FONT)|14|soft-shadow-thin")
 	I.bSelHdr:SetColor(0.5, 0.57, 0.66, 1)
-	I.bRawHdr = W.Label(body, "QAT_AggIns_BRawHdr", "RAW DATA", "$(BOLD_FONT)|13|soft-shadow-thin")
+	I.bRawHdr = W.Label(body, "QAT_AggIns_BRawHdr", "RAW DATA", "$(BOLD_FONT)|14|soft-shadow-thin")
 	I.bRawHdr:SetColor(0.5, 0.57, 0.66, 1)
 
 	-- Raw-field rows reused for whichever tab is active; positioned each render.
@@ -468,6 +478,22 @@ function QAT.Aggregator_Inspector_Render(row)
 	I.timeBadge:SetColorRGB(row.timed and COL_TIMED or COL_PASSIVE)
 	I.relBadge:SetText(BUCKET_LABEL[row.bucket] or "?")
 	I.relBadge:SetColorRGB(BUCKET_COL[row.bucket] or BUCKET_COL.os)
+
+	-- "Comes from <grimoire>" for a scribable grimoire's own cast id. Refresh the
+	-- loadout lookup here (inspector renders only on selection, so this is cheap).
+	QAT.Aggregator_RefreshMine()
+	local grimoire = QAT.Aggregator_RowScribedFrom(row)
+	I.scribedIcon:SetHidden(not grimoire)
+	I.scribedLbl:SetHidden(not grimoire)
+	if grimoire then
+		I.scribedIcon:SetTexture((QAT.Aggregator_RowScribedIcon and QAT.Aggregator_RowScribedIcon(row)) or row.icon)
+		I.scribedLbl:SetText("Comes from  " .. grimoire)
+		I.buildBtn:ClearAnchors()
+		I.buildBtn:SetAnchor(TOPLEFT, I.scribedIcon, BOTTOMLEFT, 0, 14)
+	else
+		I.buildBtn:ClearAnchors()
+		I.buildBtn:SetAnchor(TOPLEFT, I.typeBadge, BOTTOMLEFT, 0, 16)
+	end
 
 	I.favBtn:SetText(row.favourited and "Favourited" or "Favourite")
 	I.favBtn:SetSelected(row.favourited)

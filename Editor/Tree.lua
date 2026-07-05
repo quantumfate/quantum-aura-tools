@@ -9,7 +9,7 @@
 -- whenever it changes, which is fine for the expected node counts.
 
 local WM = GetWindowManager()
-local TOOLBAR_H, ROW_H, INDENT = 30, 30, 16
+local TOOLBAR_H, ROW_H, INDENT = 30, 36, 16
 
 local idCounter = 0
 local function newId(prefix)
@@ -132,6 +132,18 @@ QAT.Editor_SelectNode = selectNode
 function QAT.Editor_SelectLoad(id)
 	QAT.editor.selectedId = id
 	QAT.editor.selectedScope = "load"
+	QAT.editor.expandedTracker = id
+	QAT.Editor_Tree_Build()
+	if QAT.Editor_Inspector_Show then
+		QAT.Editor_Inspector_Show(id)
+	end
+end
+
+-- Select a layer of a tracker (layer scope) — shows the Layer settings card.
+function QAT.Editor_SelectLayer(id, layer)
+	QAT.editor.selectedId = id
+	QAT.editor.selectedScope = "layer"
+	QAT.editor.selectedLayer = layer
 	QAT.editor.expandedTracker = id
 	QAT.Editor_Tree_Build()
 	if QAT.Editor_Inspector_Show then
@@ -334,6 +346,7 @@ local function baseRow(parent, name, y)
 	local row = rows[name] or QAT.widgets.Clickable(parent, name, BG_NONE)
 	rows[name] = row
 	row:SetHidden(false)
+	row.dropLayer = nil -- cleared each build; only layer/phase/add rows set it
 	row:ClearAnchors()
 	row:SetAnchor(TOPLEFT, parent, TOPLEFT, 0, y)
 	row:SetDimensions(treeRowW, ROW_H)
@@ -361,19 +374,59 @@ local function rowAt(my)
 	return nil
 end
 
+-- The owning tracker id + layer number a drop at screen-Y targets, for phase drags.
+-- Layer/phase/add rows carry dropId (tracker) + dropLayer; others leave dropLayer nil.
+local function rowLayerAt(my)
+	if not my then
+		return nil
+	end
+	for _, row in pairs(rows) do
+		if
+			not row:IsHidden()
+			and row.dropId
+			and row.dropLayer ~= nil
+			and my >= row:GetTop()
+			and my <= row:GetBottom()
+		then
+			return row.dropId, row.dropLayer
+		end
+	end
+	return nil
+end
+
 -- A shared mouse-up for tree rows: complete an in-progress drag (drop onto the row
 -- under the cursor) or, if it was a plain click, run the row's own action. ESO has
 -- no implicit mouse capture, so the release may land on a different row than the
--- press; both ends read the shared treeDragId, so either row can finish the drop.
+-- press; both ends read the shared drag state, so either row can finish the drop.
 local function rowMouseUp(clickAction)
 	return function(_, button, upInside)
 		if button ~= MOUSE_BUTTON_INDEX_LEFT then
 			return
 		end
 		local _, my = GetUIMousePosition()
+		local moved = math.abs((my or 0) - (QAT.editor.treeDragY or 0)) > 8
+
+		-- A phase being dragged between layers takes precedence over node reparenting.
+		local pd = QAT.editor.treePhaseDrag
+		if pd then
+			QAT.editor.treePhaseDrag = nil
+			if moved then
+				local dropId, dropLayer = rowLayerAt(my)
+				if dropId == pd.id and dropLayer ~= nil and QAT.Editor_MovePhaseToLayer then
+					local d = findNode(QAT.sv.trackers, pd.id)
+					if d then
+						QAT.Editor_MovePhaseToLayer(d, pd.phaseId, dropLayer)
+					end
+				end
+			elseif upInside and clickAction then
+				clickAction()
+			end
+			QAT.editor.treeDragId = nil
+			return
+		end
+
 		local dragging = QAT.editor.treeDragId ~= nil
-		local moved = dragging and math.abs((my or 0) - (QAT.editor.treeDragY or 0)) > 8
-		if moved then
+		if dragging and moved then
 			dropNode(QAT.editor.treeDragId, rowAt(my))
 		elseif upInside and clickAction then
 			clickAction()
@@ -543,12 +596,21 @@ local function makePhaseRow(parent, def, phase, depth, y)
 	local row = baseRow(parent, name, y)
 	row.defId = nil
 	row.dropId = def.id
-	local isInitial = def.initial == phase.id
+	local isInitial = QAT.Editor_IsInitialPhase(def, phase.id)
 	local selected = QAT.editor.selectedId == def.id
 		and QAT.editor.selectedScope == "phase"
 		and QAT.editor.selectedPhaseId == phase.id
 	setBg(row, selected and BG_FULL or BG_NONE)
-	row:SetHandler("OnMouseDown", nil)
+	row.dropLayer = phase.layer or 0 -- drop target: this phase's layer
+	-- Press starts a phase drag; a plain click (no move) selects. Dropping over another
+	-- layer's row (or its + add phase / header) moves the phase into that layer.
+	row:SetHandler("OnMouseDown", function(_, button)
+		if button == MOUSE_BUTTON_INDEX_LEFT then
+			QAT.editor.treePhaseDrag = { id = def.id, phaseId = phase.id }
+			local _, my = GetUIMousePosition()
+			QAT.editor.treeDragY = my
+		end
+	end)
 	row:SetHandler(
 		"OnMouseUp",
 		rowMouseUp(function()
@@ -588,12 +650,14 @@ local function makePhaseRow(parent, def, phase, depth, y)
 	return ROW_H
 end
 
--- The "+ add phase" affordance closing out an expanded tracker's children.
-local function makeAddRow(parent, def, depth, y)
-	local name = "QAT_TreeAdd_" .. def.id
+-- The "+ add phase" affordance closing out a layer's phase list. `layer` targets
+-- which parallel layer the new phase joins.
+local function makeAddRow(parent, def, depth, y, layer)
+	local name = "QAT_TreeAdd_" .. def.id .. "_L" .. (layer or 0)
 	local row = baseRow(parent, name, y)
 	row.defId = nil
 	row.dropId = def.id
+	row.dropLayer = layer or 0 -- dropping a dragged phase here also targets this layer
 	setBg(row, BG_NONE)
 	row:SetHandler("OnMouseDown", nil)
 	row:SetHandler(
@@ -602,7 +666,7 @@ local function makeAddRow(parent, def, depth, y)
 			if QAT.Editor_AddPhase then
 				local d = findNode(QAT.sv.trackers, def.id)
 				if d then
-					QAT.Editor_AddPhase(d)
+					QAT.Editor_AddPhase(d, layer or 0)
 				end
 			end
 		end)
@@ -612,6 +676,81 @@ local function makeAddRow(parent, def, depth, y)
 	row.label = label
 	label:SetText("+ add phase")
 	label:SetColor(0.55, 0.62, 0.74, 1)
+	label:ClearAnchors()
+	label:SetAnchor(LEFT, row, LEFT, 10 + depth * INDENT, 0)
+
+	return ROW_H
+end
+
+-- A selectable "Layer n" section row heading its phases. Selecting it opens the Layer
+-- settings card. `posLabel` marks the draw extremes ("back" = behind, "front" = in
+-- front); `phaseCount` shows on the right.
+local function makeLayerHeaderRow(parent, def, layer, posLabel, phaseCount, depth, y)
+	local name = "QAT_TreeLayer_" .. def.id .. "_L" .. layer
+	local row = baseRow(parent, name, y)
+	row.defId = nil
+	row.dropId = def.id
+	row.dropLayer = layer -- drop a dragged phase here to move it into this layer
+	local selected = QAT.editor.selectedId == def.id
+		and QAT.editor.selectedScope == "layer"
+		and QAT.editor.selectedLayer == layer
+	setBg(row, selected and BG_FULL or BG_NONE)
+	row:SetHandler("OnMouseDown", nil)
+	row:SetHandler(
+		"OnMouseUp",
+		rowMouseUp(function()
+			QAT.Editor_SelectLayer(def.id, layer)
+		end)
+	)
+
+	local label = row.label or QAT.widgets.Label(row, name .. "_Label", "", "$(BOLD_FONT)|15|soft-shadow-thin")
+	row.label = label
+	label:SetText("Layer " .. (layer + 1)) -- 1-based, matches the breadcrumb
+	label:SetColor(0.72, 0.78, 0.88, 1)
+	label:ClearAnchors()
+	label:SetAnchor(LEFT, row, LEFT, 10 + depth * INDENT, 0)
+
+	local badge = ensureBadge(row, name .. "_Badge", 0.78, 0.66, 0.42)
+	badge:SetText(posLabel or "")
+	badge:SetHidden(not posLabel)
+	badge:ClearAnchors()
+	badge:SetAnchor(LEFT, label, RIGHT, 8, 0)
+
+	local count = row.count or QAT.widgets.Label(row, name .. "_Cnt", "", "$(MEDIUM_FONT)|13|soft-shadow-thin")
+	row.count = count
+	count:SetText(phaseCount .. (phaseCount == 1 and " phase" or " phases"))
+	count:SetColor(0.45, 0.52, 0.63, 1)
+	count:ClearAnchors()
+	count:SetAnchor(RIGHT, row, RIGHT, -10, 0)
+
+	return ROW_H
+end
+
+-- The "+ add layer" affordance closing out an expanded tracker: starts a new
+-- parallel layer that draws in front of the others.
+local function makeAddLayerRow(parent, def, depth, y)
+	local name = "QAT_TreeAddLayer_" .. def.id
+	local row = baseRow(parent, name, y)
+	row.defId = nil
+	row.dropId = def.id
+	setBg(row, BG_NONE)
+	row:SetHandler("OnMouseDown", nil)
+	row:SetHandler(
+		"OnMouseUp",
+		rowMouseUp(function()
+			if QAT.Editor_AddLayer then
+				local d = findNode(QAT.sv.trackers, def.id)
+				if d then
+					QAT.Editor_AddLayer(d)
+				end
+			end
+		end)
+	)
+
+	local label = row.label or QAT.widgets.Label(row, name .. "_Label", "")
+	row.label = label
+	label:SetText("+ add layer")
+	label:SetColor(0.45, 0.52, 0.64, 1)
 	label:ClearAnchors()
 	label:SetAnchor(LEFT, row, LEFT, 10 + depth * INDENT, 0)
 
@@ -657,10 +796,35 @@ local function buildRows(parent, defs, depth, y)
 			end
 		elseif QAT.editor.expandedTracker == def.id then
 			y = y + makeLoadRow(parent, def, depth + 1, y)
+			-- Group phases by layer, preserving each layer's phase order. Layer headers
+			-- only appear once a tracker actually has more than one layer, so simple
+			-- single-layer trackers stay flat.
+			local order, byLayer = {}, {}
 			for _, p in ipairs(def.phases or {}) do
-				y = y + makePhaseRow(parent, def, p, depth + 1, y)
+				local L = p.layer or 0
+				if not byLayer[L] then
+					byLayer[L] = {}
+					order[#order + 1] = L
+				end
+				table.insert(byLayer[L], p)
 			end
-			y = y + makeAddRow(parent, def, depth + 1, y)
+			table.sort(order)
+			local multi = #order > 1
+			for li, L in ipairs(order) do
+				-- With more than one layer, each layer is a selectable section and its
+				-- phases indent under it; with one layer the phases sit flat (no section).
+				local phaseDepth = depth + 1
+				if multi then
+					local pos = (li == 1 and "back") or (li == #order and "front") or nil
+					y = y + makeLayerHeaderRow(parent, def, L, pos, #byLayer[L], depth + 1, y)
+					phaseDepth = depth + 2
+				end
+				for _, p in ipairs(byLayer[L]) do
+					y = y + makePhaseRow(parent, def, p, phaseDepth, y)
+				end
+				y = y + makeAddRow(parent, def, phaseDepth, y, L)
+			end
+			y = y + makeAddLayerRow(parent, def, depth + 1, y)
 		end
 	end
 	return y

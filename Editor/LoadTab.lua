@@ -3,8 +3,8 @@
 -- ids and "use current zone/boss" buttons keep entry practical.
 
 local WM = GetWindowManager()
-local ROW_H = 26
-local GAP = 6
+local ROW_H = 28
+local GAP = 10
 local MROW_H = 30
 
 local CLASS_OPTS = {
@@ -345,6 +345,215 @@ local function renderLoadout(container, def, load, get, cw, OUT, top)
 	end
 
 	card:SetDimensions(cw - OUT * 2, (y - top) + 8)
+	return y + 8
+end
+
+-- Add an ability id to the Skill-ids condition list (deduped), then persist + redraw.
+local function addSkillId(container, def, load, id)
+	if not (id and id > 0) then
+		return
+	end
+	load.skills = load.skills or {}
+	for _, e in ipairs(load.skills) do
+		if e == id then
+			return -- already a condition
+		end
+	end
+	table.insert(load.skills, id)
+	commit(def)
+	render(container, def)
+end
+
+-- "Slotted abilities" card: every ability currently on either bar, each with a
+-- one-click "add as condition" that drops its id into Skill ids above.
+local function renderSlotted(container, def, load, get, cw, OUT, top)
+	local card = get("slcard", function()
+		return QAT.widgets.Card(container, "QAT_Load_SlCard", "Slotted abilities")
+	end)
+	card:SetTitle("Slotted abilities")
+	card:ClearAnchors()
+	card:SetAnchor(TOPLEFT, container, TOPLEFT, OUT, top)
+	local PAD = OUT + card.padX
+	local y = top + card.contentY
+
+	local sub = get("slSub", function()
+		return QAT.widgets.Label(container, "QAT_Load_SlSub", "")
+	end)
+	sub:SetText("Every ability currently on your bars. Add as condition drops its id into Skill ids above.")
+	sub:SetColor(0.55, 0.6, 0.7, 1)
+	sub:ClearAnchors()
+	sub:SetAnchor(TOPLEFT, container, TOPLEFT, PAD, y + 3)
+	y = y + 26
+
+	local entries = QAT.conditions.ScanSlottedAbilities()
+	if #entries == 0 then
+		local empty = get("slEmpty", function()
+			return QAT.widgets.Label(container, "QAT_Load_SlEmpty", "")
+		end)
+		empty:SetText("No abilities slotted.")
+		empty:SetColor(0.5, 0.55, 0.64, 1)
+		empty:ClearAnchors()
+		empty:SetAnchor(TOPLEFT, container, TOPLEFT, PAD, y + 2)
+		y = y + ROW_H
+	end
+
+	local rowW = cw - OUT * 2 - card.padX * 2
+	local ROWH = 48
+	for i, e in ipairs(entries) do
+		local rowc = get("slRow" .. i, function()
+			return QAT.widgets.Panel(
+				container,
+				"QAT_Load_SlRow" .. i,
+				{ 0.039, 0.078, 0.110, 1 },
+				{ 0.114, 0.165, 0.208, 1 }
+			)
+		end)
+		rowc:SetHidden(false)
+		rowc:ClearAnchors()
+		rowc:SetAnchor(TOPLEFT, container, TOPLEFT, PAD, y)
+		rowc:SetDimensions(rowW, ROWH)
+
+		local swatch = get("slSw" .. i, function()
+			return QAT.widgets.IconWell(container, "QAT_Load_SlSw" .. i, 30)
+		end)
+		swatch:SetTexture(e.icon or "/esoui/art/icons/icon_missing.dds")
+		swatch:ClearAnchors()
+		swatch:SetAnchor(LEFT, rowc, LEFT, 10, 0)
+
+		local nm = get("slNm" .. i, function()
+			return QAT.widgets.Label(container, "QAT_Load_SlNm" .. i, "")
+		end)
+		nm:SetText(string.format("%s  |c888888#%d|r", e.name or "?", e.abilityId))
+		nm:ClearAnchors()
+		nm:SetAnchor(LEFT, rowc, LEFT, 52, 0)
+
+		local badge = get("slB" .. i, function()
+			return QAT.widgets.Badge(container, "QAT_Load_SlB" .. i, "", BAR_COLOR[e.bar])
+		end)
+		badge:SetColorRGB(BAR_COLOR[e.bar])
+		badge:SetText((e.bar == "front" and "Front" or "Back") .. " · " .. e.slot)
+		badge:ClearAnchors()
+		badge:SetAnchor(LEFT, nm, RIGHT, 10, 0)
+
+		local addBtn = get("slAdd" .. i, function()
+			return QAT.widgets.TextButton(container, "QAT_Load_SlAdd" .. i, "+ Add as condition", nil)
+		end)
+		addBtn:SetHeight(ROW_H)
+		addBtn:ClearAnchors()
+		addBtn:SetAnchor(RIGHT, rowc, RIGHT, -12, 0)
+		local aid = e.abilityId
+		addBtn.onClick = function()
+			addSkillId(container, def, load, aid)
+		end
+
+		y = y + ROWH + 8
+	end
+
+	card:SetDimensions(cw - OUT * 2, (y - top) + 8)
+	return y + 8
+end
+
+-- "Scribed skills available" card: grimoires this character can scribe. Add uses the
+-- grimoire's cast id; the individual scripts fused into it aren't listed, since which
+-- scripts are allowed is fixed by the game's compatibility table.
+local function renderScribed(container, def, load, get, cw, OUT, top)
+	if not (IsScribingEnabled and IsScribingEnabled()) then
+		return top -- hide the card entirely on accounts without Scribing
+	end
+	local card = get("sccard", function()
+		return QAT.widgets.Card(container, "QAT_Load_ScCard", "Scribed skills available")
+	end)
+	card:SetTitle("Scribed skills available")
+	card:ClearAnchors()
+	card:SetAnchor(TOPLEFT, container, TOPLEFT, OUT, top)
+	local PAD = OUT + card.padX
+	local y = top + card.contentY
+
+	local sub = get("scSub", function()
+		return QAT.widgets.Label(container, "QAT_Load_ScSub", "")
+	end)
+	sub:SetText(
+		"Grimoires this character can scribe. Add uses the grimoire's cast id; the fused scripts aren't listed."
+	)
+	sub:SetColor(0.55, 0.6, 0.7, 1)
+	sub:ClearAnchors()
+	sub:SetAnchor(TOPLEFT, container, TOPLEFT, PAD, y + 3)
+	y = y + 26
+
+	local entries = QAT.conditions.ScribedGrimoires()
+	if #entries == 0 then
+		local empty = get("scEmpty", function()
+			return QAT.widgets.Label(container, "QAT_Load_ScEmpty", "")
+		end)
+		empty:SetText("No grimoires unlocked.")
+		empty:SetColor(0.5, 0.55, 0.64, 1)
+		empty:ClearAnchors()
+		empty:SetAnchor(TOPLEFT, container, TOPLEFT, PAD, y + 2)
+		y = y + ROW_H
+	end
+
+	-- Compact cards laid out in a wrapping row: icon + name/#id + a "+" add button.
+	local CELLW, CELLH, GAPX = 224, 44, 10
+	local rightLimit = cw - OUT - card.padX
+	local x = PAD
+	for i, e in ipairs(entries) do
+		if x + CELLW > rightLimit and x > PAD then
+			x = PAD
+			y = y + CELLH + 8
+		end
+		local cell = get("scCell" .. i, function()
+			return QAT.widgets.Panel(
+				container,
+				"QAT_Load_ScCell" .. i,
+				{ 0.039, 0.078, 0.110, 1 },
+				{ 0.114, 0.165, 0.208, 1 }
+			)
+		end)
+		cell:SetHidden(false)
+		cell:ClearAnchors()
+		cell:SetAnchor(TOPLEFT, container, TOPLEFT, x, y)
+		cell:SetDimensions(CELLW, CELLH)
+
+		local swatch = get("scSw" .. i, function()
+			return QAT.widgets.IconWell(container, "QAT_Load_ScSw" .. i, 28)
+		end)
+		swatch:SetTexture(e.icon or "/esoui/art/icons/icon_missing.dds")
+		swatch:ClearAnchors()
+		swatch:SetAnchor(LEFT, cell, LEFT, 8, 0)
+
+		local nm = get("scNm" .. i, function()
+			return QAT.widgets.Label(container, "QAT_Load_ScNm" .. i, "", "$(BOLD_FONT)|15|soft-shadow-thin")
+		end)
+		nm:SetText(e.name or "?")
+		nm:SetMaxLineCount(1)
+		nm:ClearAnchors()
+		nm:SetAnchor(TOPLEFT, cell, TOPLEFT, 44, 5)
+		nm:SetAnchor(TOPRIGHT, cell, TOPLEFT, CELLW - 38, 5)
+
+		local idl = get("scId" .. i, function()
+			return QAT.widgets.Label(container, "QAT_Load_ScId" .. i, "")
+		end)
+		idl:SetText(string.format("|c888888#%d|r", e.abilityId or 0))
+		idl:ClearAnchors()
+		idl:SetAnchor(TOPLEFT, cell, TOPLEFT, 44, 24)
+
+		local addBtn = get("scAdd" .. i, function()
+			return QAT.widgets.TextButton(container, "QAT_Load_ScAdd" .. i, "+", nil)
+		end)
+		addBtn:SetHeight(ROW_H)
+		addBtn:SetMinWidth(28)
+		addBtn:ClearAnchors()
+		addBtn:SetAnchor(RIGHT, cell, RIGHT, -8, 0)
+		local aid = e.abilityId
+		addBtn.onClick = function()
+			addSkillId(container, def, load, aid)
+		end
+
+		x = x + CELLW + GAPX
+	end
+
+	card:SetDimensions(cw - OUT * 2, (y + CELLH - top) + 8)
+	return y + CELLH + 8
 end
 
 render = function(container, def)
@@ -449,7 +658,7 @@ render = function(container, def)
 	-- Lay out removable chips (wrapping) from x0 at row yTop, within [x0, rightLimit].
 	-- entries = { { text=, onRemove= }, ... }. Returns endX, endY (just past the last
 	-- chip, for an inline trailing control) and yBelow (below the last chip row).
-	local CHIP_H, CHIP_PITCH, CHIP_GAP = 22, 27, 6
+	local CHIP_H, CHIP_PITCH, CHIP_GAP = 24, 30, 6
 	local function chipList(prefix, entries, x0, yTop, rightLimit, emptyText)
 		if #entries == 0 then
 			local e = get(prefix .. "Empty", function()
@@ -544,22 +753,31 @@ render = function(container, def)
 	)
 	y = y + ROW_H + GAP
 
-	-- Skills slotted (ability ids) — removable chips + an inline "add id" box.
+	-- Skills slotted (ability ids) — resolved ability embeds (icon + name + #id) with a
+	-- remove ×, plus an inline "add id" box. Chips wrap within the card width.
 	label("lSkills", "Skill ids", y)
 	load.skills = load.skills or {}
-	local skillEntries = {}
+	local sX, sY = LX, y
 	for i, id in ipairs(load.skills) do
 		local idx = i
-		table.insert(skillEntries, {
-			text = tostring(id),
-			onRemove = function()
-				table.remove(load.skills, idx)
-				commit(def)
-				render(container, def)
-			end,
-		})
+		local chip = get("skillChip" .. i, function()
+			return QAT.widgets.AbilityChip(container, "QAT_Load_SkillChip" .. i)
+		end)
+		chip:SetHidden(false)
+		chip:SetRemovable(function()
+			table.remove(load.skills, idx)
+			commit(def)
+			render(container, def)
+		end)
+		chip:SetAbility(id)
+		local w = chip:GetWidth()
+		if sX > LX and sX + w > RIGHTEDGE then -- wrap onto the next row
+			sX, sY = LX, sY + CHIP_PITCH
+		end
+		chip:ClearAnchors()
+		chip:SetAnchor(TOPLEFT, container, TOPLEFT, sX, sY)
+		sX = sX + w + 6
 	end
-	local sX, sY = chipList("skill", skillEntries, LX, y, RIGHTEDGE, "")
 	local addSkill = get("addSkill", function()
 		return QAT.widgets.EditBox(container, "QAT_Load_AddSkill", 92, ROW_H)
 	end)
@@ -829,7 +1047,9 @@ render = function(container, def)
 	-- "add as condition" per set. Shown for groups too (a group's sets cascade to
 	-- its members), just as for a single tracker.
 	local loadoutTop = y + ROW_H + 8 + 14
-	renderLoadout(container, def, load, get, cw, OUT, loadoutTop)
+	local afterLoadout = renderLoadout(container, def, load, get, cw, OUT, loadoutTop)
+	local afterSlotted = renderSlotted(container, def, load, get, cw, OUT, afterLoadout + 14)
+	renderScribed(container, def, load, get, cw, OUT, afterSlotted + 14)
 
 	QAT.widgets.PoolEnd(pool)
 end

@@ -2,15 +2,27 @@
 -- phase strip in the header. Laid out as grouped cards (Source / Colors / Text &
 -- Timer / Font size); only the cards and fields relevant to the chosen Kind show.
 
-local ROW_H, DD_H, SW = 26, 24, 24
-local RH = 30 -- row pitch inside a card
+local ROW_H, DD_H, SW = 28, 26, 24
+local RH = 34 -- row pitch inside a card
 
 local KIND_OPTS = {
 	{ label = "Bar", value = "bar" },
 	{ label = "Icon", value = "icon" },
+	{ label = "Border (drain)", value = "border" },
+	{ label = "Gradient sweep", value = "gradient" },
 	{ label = "Text", value = "text" },
 	{ label = "None (hidden)", value = "none" },
 	{ label = "Audio Cue", value = "audio" },
+}
+local BAR_ANCHOR_OPTS =
+	{ { label = "Top", value = "top" }, { label = "Middle", value = "middle" }, { label = "Bottom", value = "bottom" } }
+local BAR_HEIGHT_OPTS =
+	{ { label = "Thin", value = "thin" }, { label = "Half", value = "half" }, { label = "Full", value = "full" } }
+local SWEEP_DIR_OPTS = {
+	{ label = "Right → Left", value = "rtl" },
+	{ label = "Left → Right", value = "ltr" },
+	{ label = "Top → Bottom", value = "ttb" },
+	{ label = "Bottom → Top", value = "btt" },
 }
 local FONT_DEFAULTS = { label = 20, time = 20, stacks = 16 }
 local FONT_LABEL = { label = "Text", time = "Timer", stacks = "Stacks" } -- match Colors naming
@@ -95,6 +107,8 @@ local COLOR_SET = {
 		{ "border", "Border" },
 	},
 	text = { { "text", "Text" }, { "timer", "Timer" }, { "background", "Background" }, { "border", "Border" } },
+	border = { { "bar", "Frame" }, { "timer", "Timer" }, { "stacks", "Stacks" } },
+	gradient = { { "timer", "Timer" }, { "stacks", "Stacks" } },
 }
 
 local function selectedPhase(def)
@@ -135,7 +149,7 @@ local function render(container, def)
 	look.colors = look.colors or {}
 	look.fontSizes = look.fontSizes or {}
 	local kind = look.display or "bar"
-	local isVisual = kind == "bar" or kind == "icon" or kind == "text"
+	local isVisual = kind == "bar" or kind == "icon" or kind == "text" or kind == "border" or kind == "gradient"
 	local canLabel = kind == "bar" or kind == "text"
 
 	local cw = container.qatViewportW or container:GetWidth()
@@ -171,6 +185,51 @@ local function render(container, def)
 	local sFieldW = topW - sLX - src.padX
 	local sy = src.contentY
 
+	-- Low-time warning row (shared by Border and Bar-beside kinds): below this many
+	-- seconds the fill switches to the low colour and optionally pulses. Blank = off.
+	local function lowTimeFields(yy)
+		rowLabel(src, "Low", "Low at (s)", yy)
+		local lowBox = get("lowBox", function()
+			return QAT.widgets.EditBox(src, "QAT_App_LowBox", 60, ROW_H)
+		end)
+		lowBox.onChange = function(text)
+			local n = tonumber(zo_strtrim(text or ""))
+			phase.look.lowThreshold = (n and n > 0) and n or nil
+			commit(def)
+		end
+		lowBox:SetDimensions(60, ROW_H)
+		lowBox:SetText(look.lowThreshold and tostring(look.lowThreshold) or "")
+		lowBox:ClearAnchors()
+		lowBox:SetAnchor(TOPLEFT, src, TOPLEFT, sLX, vy(yy, ROW_H))
+		local lowSw = get("lowSw", function()
+			return QAT.widgets.ColorSwatch(src, "QAT_App_LowSw", SW, { 0.9, 0.2, 0.2, 1 })
+		end)
+		lowSw.onChange = function(c)
+			phase.look.lowColor = c
+			commit(def)
+		end
+		lowSw:SetColor(look.lowColor or { 0.9, 0.2, 0.2, 1 })
+		lowSw:ClearAnchors()
+		lowSw:SetAnchor(LEFT, lowBox, RIGHT, 8, 0)
+		local pulseChk = get("pulseChk", function()
+			return QAT.widgets.Checkbox(src, "QAT_App_LowPulse", false)
+		end)
+		pulseChk:SetChecked(look.lowPulse or false)
+		pulseChk.onToggle = function(v)
+			phase.look.lowPulse = v or nil
+			commit(def)
+		end
+		pulseChk:ClearAnchors()
+		pulseChk:SetAnchor(LEFT, lowSw, RIGHT, 10, 0)
+		local pulseLbl = get("pulseLbl", function()
+			return QAT.widgets.Label(src, "QAT_App_LowPulseLbl", "pulse")
+		end)
+		pulseLbl:SetText("pulse")
+		pulseLbl:ClearAnchors()
+		pulseLbl:SetAnchor(LEFT, pulseChk, RIGHT, 6, 0)
+		return yy + RH
+	end
+
 	rowLabel(src, "Id", "Phase id", sy)
 	local idBox = get("idBox", function()
 		return QAT.widgets.EditBox(src, "QAT_App_IdBox", 100, ROW_H)
@@ -182,6 +241,13 @@ local function render(container, def)
 			phase.id = text
 			if def.initial == was then
 				def.initial = text
+			end
+			if def.layerInitial then
+				for layer, id in pairs(def.layerInitial) do
+					if id == was then
+						def.layerInitial[layer] = text
+					end
+				end
 			end
 			for _, p in ipairs(def.phases) do
 				for _, tr in ipairs(p.transitions) do
@@ -251,6 +317,166 @@ local function render(container, def)
 		nameBox:SetText(look.name or "")
 		nameBox:ClearAnchors()
 		nameBox:SetAnchor(TOPLEFT, src, TOPLEFT, sLX, vy(sy, ROW_H))
+		sy = sy + RH
+
+		-- Bars carry a left icon (the tracked ability's, or an override). Toggle it,
+		-- and when shown, pick the texture — sits square on the left, height × height.
+		if kind == "bar" then
+			rowLabel(src, "ShowIcon", "Show icon", sy)
+			local siChk = get("siChk", function()
+				return QAT.widgets.Checkbox(src, "QAT_App_ShowIcon", true)
+			end)
+			siChk:SetChecked(look.showIcon ~= false)
+			siChk.onToggle = function(v)
+				phase.look.showIcon = v or nil -- nil = default (on)
+				commit(def)
+			end
+			siChk:ClearAnchors()
+			siChk:SetAnchor(TOPLEFT, src, TOPLEFT, sLX, vy(sy, 20))
+			sy = sy + RH
+
+			if look.showIcon ~= false then
+				rowLabel(src, "Icon", "Icon", sy)
+				local iconBox = get("barIconBox", function()
+					return QAT.widgets.EditBox(src, "QAT_App_BarIconBox", 100, ROW_H)
+				end)
+				iconBox.onChange = function(text)
+					text = zo_strtrim(text or "")
+					phase.look.icon = (text ~= "" and text) or nil
+					commit(def)
+				end
+				iconBox:SetDimensions(sFieldW - ROW_H - 8, ROW_H)
+				iconBox:SetText(look.icon or QAT.util.PhaseIcon(phase) or "")
+				iconBox:ClearAnchors()
+				iconBox:SetAnchor(TOPLEFT, src, TOPLEFT, sLX, vy(sy, ROW_H))
+				local prev = get("barIconPrev", function()
+					return QAT.widgets.IconWell(src, "QAT_App_BarIconPrev", ROW_H)
+				end)
+				prev:SetTexture(QAT.util.PhaseIcon(phase) or "/esoui/art/icons/icon_missing.dds")
+				prev:ClearAnchors()
+				prev:SetAnchor(LEFT, iconBox, RIGHT, 8, 0)
+				sy = sy + RH
+			end
+
+			rowLabel(src, "BarAnchor", "Bar anchor", sy)
+			local anchDD = get("bsAnchDD", function()
+				return QAT.widgets.Dropdown(src, "QAT_App_BsAnchor", 110, BAR_ANCHOR_OPTS, "middle")
+			end)
+			anchDD.onSelect = function(v)
+				phase.look.barAnchor = v
+				commit(def)
+			end
+			anchDD:SetValue(look.barAnchor or "middle")
+			anchDD:ClearAnchors()
+			anchDD:SetAnchor(TOPLEFT, src, TOPLEFT, sLX, vy(sy, DD_H))
+			sy = sy + RH
+
+			rowLabel(src, "BarHeight", "Bar height", sy)
+			local bhDD = get("bsHDD", function()
+				return QAT.widgets.Dropdown(src, "QAT_App_BsHeight", 110, BAR_HEIGHT_OPTS, "full")
+			end)
+			bhDD.onSelect = function(v)
+				phase.look.barHeight = v
+				commit(def)
+			end
+			bhDD:SetValue(look.barHeight or "full")
+			bhDD:ClearAnchors()
+			bhDD:SetAnchor(TOPLEFT, src, TOPLEFT, sLX, vy(sy, DD_H))
+			sy = sy + RH
+
+			sy = lowTimeFields(sy)
+		end
+	elseif kind == "border" then
+		-- Icon-behind toggle + the icon it would show. The frame is transparent, so the
+		-- icon is optional (a bare frame overlays another phase cleanly).
+		rowLabel(src, "IconBehind", "Icon behind", sy)
+		local ibChk = get("ibChk", function()
+			return QAT.widgets.Checkbox(src, "QAT_App_IconBehind", false)
+		end)
+		ibChk:SetChecked(look.iconBehind or false)
+		ibChk.onToggle = function(v)
+			phase.look.iconBehind = v or nil
+			commit(def)
+		end
+		ibChk:ClearAnchors()
+		ibChk:SetAnchor(TOPLEFT, src, TOPLEFT, sLX, vy(sy, 20))
+		sy = sy + RH
+
+		if look.iconBehind then
+			rowLabel(src, "Icon", "Icon", sy)
+			local iconBox = get("iconBox", function()
+				return QAT.widgets.EditBox(src, "QAT_App_IconBox", 100, ROW_H)
+			end)
+			iconBox.onChange = function(text)
+				text = zo_strtrim(text or "")
+				phase.look.icon = (text ~= "" and text) or nil
+				commit(def)
+			end
+			iconBox:SetDimensions(sFieldW - ROW_H - 8, ROW_H)
+			iconBox:SetText(look.icon or QAT.util.PhaseIcon(phase) or "")
+			iconBox:ClearAnchors()
+			iconBox:SetAnchor(TOPLEFT, src, TOPLEFT, sLX, vy(sy, ROW_H))
+			local prev = get("iconPreview", function()
+				return QAT.widgets.IconWell(src, "QAT_App_IconPreview", ROW_H)
+			end)
+			prev:SetTexture(QAT.util.PhaseIcon(phase) or "/esoui/art/icons/icon_missing.dds")
+			prev:ClearAnchors()
+			prev:SetAnchor(LEFT, iconBox, RIGHT, 8, 0)
+			sy = sy + RH
+		end
+
+		sy = lowTimeFields(sy)
+	elseif kind == "gradient" then
+		-- Sweep direction + optional colour, and the icon it sweeps over. The fill
+		-- always maps to remaining time; only the direction it drains from is chosen.
+		rowLabel(src, "Sweep", "Direction", sy)
+		local swDD = get("grSweepDD", function()
+			return QAT.widgets.Dropdown(src, "QAT_App_GrSweep", 130, SWEEP_DIR_OPTS, "rtl")
+		end)
+		swDD.onSelect = function(v)
+			phase.look.sweepDir = v
+			commit(def)
+		end
+		swDD:SetValue(look.sweepDir or "rtl")
+		swDD:ClearAnchors()
+		swDD:SetAnchor(TOPLEFT, src, TOPLEFT, sLX, vy(sy, DD_H))
+		local swSw = get("grSweepSw", function()
+			return QAT.widgets.ColorSwatch(src, "QAT_App_GrSweepSw", SW, { 1, 1, 1, 0.85 })
+		end)
+		swSw.onChange = function(c)
+			phase.look.sweepColor = c
+			commit(def)
+		end
+		swSw:SetColor(look.sweepColor or { 1, 1, 1, 0.85 })
+		swSw:ClearAnchors()
+		swSw:SetAnchor(LEFT, swDD, RIGHT, 8, 0)
+		local swLbl = get("grSweepLbl", function()
+			return QAT.widgets.Label(src, "QAT_App_GrSweepLbl", "band")
+		end)
+		swLbl:SetText("band")
+		swLbl:ClearAnchors()
+		swLbl:SetAnchor(LEFT, swSw, RIGHT, 6, 0)
+		sy = sy + RH
+
+		rowLabel(src, "Icon", "Icon", sy)
+		local iconBox = get("grIconBox", function()
+			return QAT.widgets.EditBox(src, "QAT_App_GrIconBox", 100, ROW_H)
+		end)
+		iconBox.onChange = function(text)
+			text = zo_strtrim(text or "")
+			phase.look.icon = (text ~= "" and text) or nil
+			commit(def)
+		end
+		iconBox:SetDimensions(sFieldW - ROW_H - 8, ROW_H)
+		iconBox:SetText(look.icon or QAT.util.PhaseIcon(phase) or "")
+		iconBox:ClearAnchors()
+		iconBox:SetAnchor(TOPLEFT, src, TOPLEFT, sLX, vy(sy, ROW_H))
+		local prev = get("grIconPrev", function()
+			return QAT.widgets.IconWell(src, "QAT_App_GrIconPrev", ROW_H)
+		end)
+		prev:SetTexture(QAT.util.PhaseIcon(phase) or "/esoui/art/icons/icon_missing.dds")
+		prev:ClearAnchors()
+		prev:SetAnchor(LEFT, iconBox, RIGHT, 8, 0)
 		sy = sy + RH
 	elseif kind == "audio" then
 		phase.cues = phase.cues or {}

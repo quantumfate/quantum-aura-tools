@@ -257,6 +257,61 @@ function QAT.conditions.SkillSlotted(abilityIds)
 	return false
 end
 
+-- Abilities currently slotted on both action bars, for the "add as condition"
+-- helper. Slots 3-8 are the five actives plus the ultimate; the hotbar tells us
+-- which weapon bar (primary = front, backup = back). Empty/non-ability slots skip.
+---@return table[] entries { abilityId, name, icon, bar = "front"|"back", slot }
+function QAT.conditions.ScanSlottedAbilities()
+	local out = {}
+	local bars = { { HOTBAR_CATEGORY_PRIMARY, "front" }, { HOTBAR_CATEGORY_BACKUP, "back" } }
+	for _, hb in ipairs(bars) do
+		local hotbar, bar = hb[1], hb[2]
+		for slot = 3, 8 do
+			if GetSlotType(slot, hotbar) == ACTION_TYPE_ABILITY then
+				local id = GetSlotBoundId(slot, hotbar)
+				if id and id > 0 then
+					out[#out + 1] = {
+						abilityId = id,
+						name = GetAbilityName(id),
+						icon = GetAbilityIcon(id),
+						bar = bar,
+						slot = slot,
+					}
+				end
+			end
+		end
+	end
+	return out
+end
+
+-- Grimoires (scribed skills) this character can scribe. We expose only the grimoire
+-- cast id (the base ability), never the fused script ids, since which scripts a
+-- grimoire allows is fixed by the game's compatibility table and not condition-worthy.
+---@return table[] entries { craftedId, abilityId, name, icon }
+function QAT.conditions.ScribedGrimoires()
+	local out = {}
+	if not (IsScribingEnabled and IsScribingEnabled()) then
+		return out
+	end
+	for i = 1, GetNumCraftedAbilities() do
+		local craftedId = GetCraftedAbilityIdAtIndex(i)
+		if craftedId and craftedId > 0 and IsCraftedAbilityUnlocked(craftedId) then
+			local abilityId = GetAbilityIdForCraftedAbilityId(craftedId)
+			-- A 0 cast id means the grimoire isn't scribed/active on this character, so
+			-- there's nothing to add as a condition — skip it.
+			if abilityId and abilityId > 0 then
+				out[#out + 1] = {
+					craftedId = craftedId,
+					abilityId = abilityId,
+					name = GetCraftedAbilityDisplayName(craftedId),
+					icon = GetCraftedAbilityIcon(craftedId),
+				}
+			end
+		end
+	end
+	return out
+end
+
 local function anyBossMatches(names)
 	local want = QAT.util.ToSet(names)
 	for i = 1, 6 do

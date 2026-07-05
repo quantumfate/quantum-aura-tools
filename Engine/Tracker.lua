@@ -1,23 +1,30 @@
---- Tracker: a phase-based state machine for an on-screen aura.
+--- Tracker: one or more phase-based state machines for an on-screen aura.
 ---
---- A tracker holds named phases and is in exactly one at a time. Idle is just a
---- (usually hidden) phase, so the model is uniform: every behaviour is a phase
---- plus its outgoing, source-attached transitions. A phase owns:
+--- Phases are grouped into layers. Phases sharing a layer form one mutually-exclusive
+--- machine (a "lane"): the tracker is in exactly one of them at a time, idle included,
+--- so the model is uniform — every behaviour is a phase plus its outgoing,
+--- source-attached transitions. Different layers run as independent lanes at the same
+--- time and draw in ascending layer order, so a tracker can show, say, a duration icon
+--- and a cooldown frame together. A single-layer tracker (layer 0 only) behaves
+--- exactly as a plain state machine.
+---
+--- A phase owns:
 ---   * look       - how it draws (display kind, colors, stacks readout)
 ---   * duration   - the timer that animates it and defines when it "ends"
----   * transitions- ordered { when, to }; the first satisfied `when` wins
+---   * transitions- ordered { when, to }; the first satisfied `when` wins (same layer)
 ---   * runtime    - reactive look overrides (ephemeral; never saved)
 ---
 --- A transition `when` is an effect event (gained/faded), a stacks/remaining
 --- threshold, or "expire" (the timer hit zero). Effect whens fire on the event;
 --- threshold/expire whens are polled on the render tick.
----
---- Example: Huntsman is Ready -> Active (while the debuff is up) -> Cooldown (a
---- fixed lockout) -> Ready. The common "show a buff's uptime" case is Idle <->
---- Active and is generated from a flat shorthand by QAT.CanonicalizeDef.
 
 QAT.Tracker = {}
 QAT.Tracker.__index = QAT.Tracker
+
+-- One lane's state machine. Lives inside a tracker; shares the tracker's phase table
+-- (controls) and loaded flag but keeps its own current phase and timer.
+local Lane = {}
+Lane.__index = Lane
 
 -- When a follows-effect phase's effect fades with no sibling yet live, hold the
 -- phase this long before falling back to idle. A switch to a sibling effect (e.g.
@@ -66,6 +73,7 @@ local function Normalize(def)
 	local phases, order = {}, {}
 	for _, p in ipairs(def.phases) do
 		local look = p.look
+		local ls = (def.layerSettings and def.layerSettings[p.layer or 0]) or {}
 		-- Icon- and bar-display phases without an explicit icon fall back to the
 		-- tracked ability's icon (bars show it on the left).
 		local icon = look.icon
@@ -81,18 +89,33 @@ local function Normalize(def)
 			decimals = look.decimals,
 			showStacks = look.showStacks,
 			showTime = look.showTime,
+			showIcon = look.showIcon,
 			font = look.font,
 			fontSizes = look.fontSizes,
 			colors = look.colors,
 			borderThickness = look.borderThickness,
+			iconBehind = look.iconBehind,
+			lowThreshold = look.lowThreshold,
+			lowColor = look.lowColor,
+			lowPulse = look.lowPulse,
+			barHeight = look.barHeight,
+			barAnchor = look.barAnchor,
+			sweepDir = look.sweepDir,
+			sweepColor = look.sweepColor,
+			-- Higher layers draw above lower ones so a transparent frame can overlay
+			-- an icon phase in the same tracker.
+			drawLevel = p.layer or 0,
 			point = pos.point,
-			x = pos.x,
-			y = pos.y,
+			-- Per-layer offset from the tracker origin, and per-layer visibility.
+			x = pos.x + (ls.xOffset or 0),
+			y = pos.y + (ls.yOffset or 0),
+			forceHidden = ls.visible == false,
 			width = pos.width,
 			height = pos.height,
 		}
 		phases[p.id] = {
 			id = p.id,
+			layer = p.layer or 0,
 			control = QAT.display.Create(displayDef),
 			duration = p.duration,
 			transitions = p.transitions,
@@ -101,7 +124,7 @@ local function Normalize(def)
 		}
 		table.insert(order, p.id)
 	end
-	return phases, order, def.initial
+	return phases, order
 end
 
 --- Construct a tracker from an authored def.
@@ -113,19 +136,37 @@ function QAT.Tracker.New(def, loadChain)
 	local self = setmetatable({}, QAT.Tracker)
 	self.def = def
 	self.id = def.id
-	self.phases, self.order, self.initial = Normalize(def)
+	self.phases, self.order = Normalize(def)
 	self.loadChain = loadChain or {}
-
 	self.loaded = false
-	self.current = nil -- current phase id, or nil = unloaded/hidden
-	self.expiresAt = nil
-	self.duration = nil
-	self.stacks = 0
+
+	-- One lane per layer, each with its starting phase. def.layerInitial (canonical)
+	-- maps layer -> initial phase id and always contains layer 0.
+	self.lanes = {}
+	for layer, initial in pairs(def.layerInitial or { [0] = def.initial }) do
+		self.lanes[#self.lanes + 1] = Lane.New(self, layer, initial)
+	end
+	table.sort(self.lanes, function(a, b)
+		return a.layer < b.layer
+	end)
 	return self
 end
 
--- Re-evaluate load conditions; enter the initial phase when newly loaded, hide
--- when newly unloaded.
+function Lane.New(tracker, layer, initial)
+	return setmetatable({
+		tracker = tracker,
+		layer = layer,
+		initial = initial,
+		current = nil, -- current phase id, or nil = hidden
+		expiresAt = nil,
+		duration = nil,
+		stacks = 0,
+		pendingEnd = nil,
+	}, Lane)
+end
+
+-- Re-evaluate load conditions; enter each lane's initial phase when newly loaded,
+-- hide when newly unloaded.
 function QAT.Tracker:RefreshLoad()
 	local want = QAT.conditions.EvaluateLoad(self.loadChain)
 	if want == self.loaded then
@@ -133,7 +174,9 @@ function QAT.Tracker:RefreshLoad()
 	end
 	self.loaded = want
 	QAT.log.engine:Debug("tracker '%s' loaded=%s", self.id, tostring(want))
-	self:Enter(want and self.initial or nil)
+	for _, lane in ipairs(self.lanes) do
+		lane:Enter(want and lane.initial or nil)
+	end
 end
 
 -- All ability ids referenced by any effect transition or effect-duration.
@@ -156,11 +199,13 @@ function QAT.Tracker:AbilityIds()
 	return ids
 end
 
+-- ===== Lane state machine =====
+
 -- Apply timing from a triggering effect (or a carry from a threshold transition)
--- to the current phase's duration. A permanent buff reports endTime <= beginTime;
--- that is treated as "present, no countdown" (expiresAt nil) so it shows a static
--- bar/lit icon instead of instantly expiring.
-function QAT.Tracker:applyTiming(d, timing, now)
+-- to this lane's duration. A permanent buff reports endTime <= beginTime; that is
+-- treated as "present, no countdown" (expiresAt nil) so it shows a static bar/lit
+-- icon instead of instantly expiring.
+function Lane:applyTiming(d, timing, now)
 	if d.type == "fixed" then
 		self.duration = d.seconds
 		self.expiresAt = now + (d.seconds or 0)
@@ -174,14 +219,21 @@ function QAT.Tracker:applyTiming(d, timing, now)
 end
 
 -- Enter a phase (or hide when phaseId is nil).
-function QAT.Tracker:Enter(phaseId, timing)
-	if self.current and self.phases[self.current] then
-		self.phases[self.current].control:SetState(false)
+function Lane:Enter(phaseId, timing)
+	local phases = self.tracker.phases
+	if self.current and phases[self.current] then
+		phases[self.current].control:SetState(false)
 	end
-	QAT.log.engine:Debug("tracker '%s': %s -> %s", self.id, tostring(self.current), tostring(phaseId or "hidden"))
+	QAT.log.engine:Debug(
+		"tracker '%s' lane %d: %s -> %s",
+		self.tracker.id,
+		self.layer,
+		tostring(self.current),
+		tostring(phaseId or "hidden")
+	)
 	self.pendingEnd = nil -- entering any phase cancels a pending fall-back
 	self.current = phaseId
-	local phase = phaseId and self.phases[phaseId]
+	local phase = phaseId and phases[phaseId]
 	if not phase then
 		-- No target, or a transition pointed at a phase that no longer exists (deleted
 		-- mid-session before the def was re-canonicalized): hide rather than crash.
@@ -200,10 +252,9 @@ function QAT.Tracker:Enter(phaseId, timing)
 end
 
 -- Take the first outgoing effect-gained transition whose trigger effect is already
--- present on its unit. Returns true if one was taken. Lets a phase advance on the
--- strength of a buff that is already up, independent of event ordering.
-function QAT.Tracker:TakeLiveTransition()
-	local cur = self.phases[self.current]
+-- present on its unit. Returns true if one was taken.
+function Lane:TakeLiveTransition()
+	local cur = self.tracker.phases[self.current]
 	for _, tr in ipairs(cur.transitions) do
 		local w = tr.when
 		if w.kind == "effect" and w.result == "gained" then
@@ -219,9 +270,9 @@ function QAT.Tracker:TakeLiveTransition()
 	return false
 end
 
--- Go to the current phase's expire target, or the initial phase if it has none.
-function QAT.Tracker:EndPhase()
-	local cur = self.phases[self.current]
+-- Go to the current phase's expire target, or the lane's initial phase if none.
+function Lane:EndPhase()
+	local cur = self.tracker.phases[self.current]
 	local target = self.initial
 	for _, tr in ipairs(cur.transitions) do
 		if tr.when.kind == "expire" then
@@ -232,13 +283,14 @@ function QAT.Tracker:EndPhase()
 	self:Enter(target)
 end
 
--- Handle an effect event against the CURRENT phase's transitions (source-attached:
--- only the active phase's exits are candidates). Returns true if consumed.
-function QAT.Tracker:OnEffect(unitTag, abilityId, result, beginTime, endTime, stackCount)
-	if not self.loaded or not self.current then
+-- Handle an effect event against this lane's CURRENT phase's transitions
+-- (source-attached: only the active phase's exits are candidates). Returns true if
+-- consumed.
+function Lane:OnEffect(unitTag, abilityId, result, beginTime, endTime, stackCount)
+	if not self.current then
 		return false
 	end
-	local cur = self.phases[self.current]
+	local cur = self.tracker.phases[self.current]
 	local rstr = (result == EFFECT_RESULT_FADED) and "faded" or "gained"
 
 	for _, tr in ipairs(cur.transitions) do
@@ -254,11 +306,10 @@ function QAT.Tracker:OnEffect(unitTag, abilityId, result, beginTime, endTime, st
 	local d = cur.duration
 	if d.type == "effect" and d.unit == unitTag and contains(d.abilityIds, abilityId) then
 		if rstr == "faded" then
-			-- The effect keeping this phase alive ended. Before falling back to the
-			-- initial phase, check whether we actually advanced: if an outgoing
-			-- effect-gained transition's trigger buff is already live (a stage-up where
-			-- the fade of the old stage and the gain of the new arrive in the same
-			-- frame, in either order), take that transition instead of resetting.
+			-- The effect keeping this phase alive ended. Before falling back, check
+			-- whether we actually advanced: if an outgoing effect-gained transition's
+			-- trigger buff is already live (a stage-up where the fade of the old stage
+			-- and the gain of the new arrive in the same frame), take it instead.
 			if not self:TakeLiveTransition() then
 				-- Nothing live yet: hold the phase (shown static) for a short grace
 				-- window. A sibling effect gained within it wins via the transition
@@ -280,17 +331,13 @@ function QAT.Tracker:OnEffect(unitTag, abilityId, result, beginTime, endTime, st
 	return false
 end
 
--- Reconcile the current phase against a freshly-enumerated set of live effects.
--- EVENT_EFFECT_CHANGED only fires on change, and a "faded" can be missed across a
--- /reloadui, zone change or armory swap (which silently drop buffs). The seed sweep
--- feeds re-appeared effects as "gained"; this closes the opposite gap: if the phase
--- is held up by a duration effect that is no longer present on its unit, end it.
----@param presentByUnit table unit tag -> { [abilityId] = true } of live effects
-function QAT.Tracker:ReconcilePresence(presentByUnit)
-	if not self.loaded or not self.current then
+-- Reconcile this lane's current phase against a freshly-enumerated set of live
+-- effects (see QAT.Tracker:ReconcilePresence for why).
+function Lane:ReconcilePresence(presentByUnit)
+	if not self.current then
 		return
 	end
-	local d = self.phases[self.current].duration
+	local d = self.tracker.phases[self.current].duration
 	if d.type ~= "effect" then
 		return -- fixed/none phases aren't kept alive by a tracked effect
 	end
@@ -304,10 +351,9 @@ function QAT.Tracker:ReconcilePresence(presentByUnit)
 end
 
 -- Per-phase reactive conditions: ephemeral element recolors plus the Show-Proc
--- glow. Returns (overrides, procActive): a table { element = color, ... } (or nil)
--- and whether any Show-Proc condition currently holds. Never writes to the def.
-function QAT.Tracker:EvalRuntime(remaining)
-	local cur = self.phases[self.current]
+-- glow. Returns (overrides, procActive). Never writes to the def.
+function Lane:EvalRuntime(remaining)
+	local cur = self.tracker.phases[self.current]
 	local overrides, procActive = nil, false
 	for _, c in ipairs(cur.runtime or {}) do
 		local statVal = (c.stat == "stacks") and self.stacks or (remaining or 0)
@@ -325,11 +371,11 @@ function QAT.Tracker:EvalRuntime(remaining)
 	return overrides, procActive
 end
 
-function QAT.Tracker:Render(now)
+function Lane:Render(now)
 	if not self.current then
 		return
 	end
-	local control = self.phases[self.current].control
+	local control = self.tracker.phases[self.current].control
 	local remaining = self.expiresAt and (self.expiresAt - now) or nil
 
 	control:SetState(true, remaining, self.duration, self.stacks)
@@ -342,11 +388,9 @@ function QAT.Tracker:Render(now)
 	control:SetProc(procActive)
 end
 
--- Poll the current phase's threshold/expire transitions. Returns true if it
--- transitioned. Carries the live timing/stacks so a follow-on phase (e.g. a
--- "last 10s" warning that shares the effect) keeps counting.
-function QAT.Tracker:CheckAutoTransitions(now)
-	local cur = self.phases[self.current]
+-- Poll this lane's threshold/expire transitions. Returns true if it transitioned.
+function Lane:CheckAutoTransitions(now)
+	local cur = self.tracker.phases[self.current]
 	local remaining = self.expiresAt and (self.expiresAt - now) or nil
 	local carry = {
 		stacks = self.stacks,
@@ -380,8 +424,9 @@ function QAT.Tracker:CheckAutoTransitions(now)
 	return false
 end
 
--- Render tick: advance the state machine, then animate a counting-down phase.
-function QAT.Tracker:Tick(now)
+-- Render tick for one lane: advance the state machine, then animate a counting-down
+-- phase.
+function Lane:Tick(now)
 	if not self.current then
 		return
 	end
@@ -399,6 +444,37 @@ function QAT.Tracker:Tick(now)
 	end
 	if self.expiresAt then
 		self:Render(now)
+	end
+end
+
+-- ===== Tracker: fan events out to every lane =====
+
+function QAT.Tracker:OnEffect(unitTag, abilityId, result, beginTime, endTime, stackCount)
+	if not self.loaded then
+		return false
+	end
+	local consumed = false
+	for _, lane in ipairs(self.lanes) do
+		if lane:OnEffect(unitTag, abilityId, result, beginTime, endTime, stackCount) then
+			consumed = true
+		end
+	end
+	return consumed
+end
+
+---@param presentByUnit table unit tag -> { [abilityId] = true } of live effects
+function QAT.Tracker:ReconcilePresence(presentByUnit)
+	if not self.loaded then
+		return
+	end
+	for _, lane in ipairs(self.lanes) do
+		lane:ReconcilePresence(presentByUnit)
+	end
+end
+
+function QAT.Tracker:Tick(now)
+	for _, lane in ipairs(self.lanes) do
+		lane:Tick(now)
 	end
 end
 

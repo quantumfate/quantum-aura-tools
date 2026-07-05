@@ -15,7 +15,7 @@ QAT.aggregator = QAT.aggregator or {}
 local WM = GetWindowManager()
 local W = QAT.widgets
 
-local TITLE_H, CTRL_H, FILTER_H = 28, 50, 78
+local TITLE_H, CTRL_H, FILTER_H = 28, 54, 86
 local INSPECTOR_W = 468
 local PANE_GAP = 6
 
@@ -44,16 +44,60 @@ local COL = {
 local function defaultFilter()
 	return {
 		relationship = "all",
-		revealPassives = false,
 		search = "",
 		effect = "any", -- any | buff | debuff
 		timing = "any", -- any | timed | passive
 		seenMin = 0,
 		hasStacks = false,
 		favouritesOnly = false,
+		prioritiseMine = false, -- float effects the character can produce to the top
 		zoneId = nil, -- nil = all zones
 		sort = "lastSeen", -- lastSeen | seen | name
 	}
+end
+
+-- "Mine" lookup: ability ids the character has access to — every ability slotted on
+-- either bar plus every scribable grimoire's cast id. Loadout-dependent, so it is
+-- recomputed on demand (window open / toggle), never stored. `scribed` maps a
+-- grimoire cast id to its name for the "comes from" readout.
+function QAT.Aggregator_RefreshMine()
+	local set, scribed = {}, {}
+	for _, e in ipairs(QAT.conditions.ScanSlottedAbilities()) do
+		set[e.abilityId] = true
+	end
+	for _, g in ipairs(QAT.conditions.ScribedGrimoires()) do
+		if g.abilityId and g.abilityId > 0 then
+			set[g.abilityId] = true
+			scribed[g.abilityId] = { name = g.name, icon = g.icon }
+		end
+	end
+	QAT.aggregator.mine = { set = set, scribed = scribed }
+end
+
+-- Does this effect come from something the player can produce? True when its ability
+-- is slotted/scribable, or it was self-cast (a buff/passive the player put up).
+function QAT.Aggregator_RowIsMine(row)
+	local m = QAT.aggregator.mine
+	if m and m.set[row.abilityId] then
+		return true
+	end
+	return row.castByPlayer and row.bucket == "ss" or false
+end
+
+-- Grimoire name this effect's ability is the cast id of, or nil. Only the grimoire
+-- cast ability itself is attributable — the sub-buffs it grants have their own ids
+-- with no API link back, so we never guess.
+function QAT.Aggregator_RowScribedFrom(row)
+	local m = QAT.aggregator.mine
+	local e = m and m.scribed[row.abilityId]
+	return e and e.name or nil
+end
+
+-- The grimoire's icon for a scribed-attributable row, or nil.
+function QAT.Aggregator_RowScribedIcon(row)
+	local m = QAT.aggregator.mine
+	local e = m and m.scribed[row.abilityId]
+	return e and e.icon or nil
 end
 
 -- ---------------------------------------------------------------------------
@@ -104,10 +148,7 @@ function QAT.Aggregator_RowPasses(row, fq)
 		return false
 	end
 	if fq.relationship == "all" then
-		if row.bucket == "ss" and not fq.revealPassives then
-			return false
-		end
-		return true
+		return true -- Self→Self passives are always shown (their section is pinned open)
 	end
 	return row.bucket == fq.relationship
 end
@@ -120,10 +161,7 @@ local function bucketCounts(fq)
 			if counts[row.bucket] ~= nil then
 				counts[row.bucket] = counts[row.bucket] + 1
 			end
-			-- "All" excludes Self→Self unless passives are revealed.
-			if row.bucket ~= "ss" or fq.revealPassives then
-				counts.all = counts.all + 1
-			end
+			counts.all = counts.all + 1 -- every bucket (incl. Self→Self) counts toward All
 		end
 	end
 	return counts
@@ -210,7 +248,7 @@ local function buildControlBar(f)
 		QAT.Capture_Toggle()
 	end)
 	toggle:SetMinWidth(120)
-	toggle:SetHeight(28)
+	toggle:SetHeight(30)
 	toggle:SetAnchor(LEFT, bar, LEFT, 10, 0)
 	QAT.aggregator.toggleBtn = toggle
 
@@ -246,6 +284,12 @@ local function buildControlBar(f)
 	end)
 	zone:SetAnchor(RIGHT, freeze, LEFT, 8, 0)
 	QAT.aggregator.zoneDd = zone
+
+	-- A hairline divider setting the view controls (zone/freeze/clear) apart from the
+	-- live-capture status on the left.
+	local vrule = W.Panel(bar, "QAT_Agg_CtrlRule", { 0.16, 0.20, 0.27, 1 })
+	vrule:SetDimensions(1, 22)
+	vrule:SetAnchor(RIGHT, zone, LEFT, -12, 0)
 end
 
 -- ---------------------------------------------------------------------------
@@ -256,37 +300,51 @@ end
 -- onSelect(value) fires on change. Returns { setValue, setCount } helpers.
 local function segmented(parent, name, options, current, onSelect)
 	local group = { buttons = {} }
-	local prev
+	-- A recessed inset track sits behind the pills (created first so it draws under
+	-- them), auto-sized by anchoring to the first and last button. Reads as one control
+	-- surface instead of loose bordered buttons.
+	local track = W.Panel(parent, name .. "_Track", { 0.018, 0.028, 0.042, 1 }, { 0.10, 0.13, 0.18, 1 })
+	group.track = track
+	local prev, first, last
 	for _, opt in ipairs(options) do
 		local btn = W.TextButton(parent, name .. "_" .. opt.value, opt.label, function()
 			group:setValue(opt.value) -- move the highlight to the clicked segment
 			onSelect(opt.value)
 		end)
-		btn:SetHeight(26)
+		btn:SetHeight(28)
 		btn.optValue = opt.value
 		btn.optLabel = opt.label
 		if prev then
-			btn:SetAnchor(LEFT, prev, RIGHT, -1, 0) -- shared border, joined pills
-		else
-			btn:SetAnchor(LEFT, parent, LEFT, 0, 0)
+			btn:SetAnchor(LEFT, prev, RIGHT, 2, 0) -- small gap so each reads as a pill
 		end
 		btn:SetSelected(opt.value == current)
 		group.buttons[opt.value] = btn
 		prev = btn
+		first = first or btn
+		last = btn
 	end
+	-- Wrap the track around the pills with a little padding; it follows their widths
+	-- (which change as counts are appended).
+	local P = 4
+	track:ClearAnchors()
+	track:SetAnchor(TOPLEFT, first, TOPLEFT, -P, -P)
+	track:SetAnchor(BOTTOMRIGHT, last, BOTTOMRIGHT, P, P)
 	function group:setValue(v)
 		for val, btn in pairs(self.buttons) do
 			btn:SetSelected(val == v)
 		end
 	end
-	-- Append a live count to a segment's label.
+	-- Append a live count to a segment's label; a zero is dimmed so only meaningful
+	-- numbers stand out.
 	function group:setCount(v, n)
 		local btn = self.buttons[v]
 		if btn then
-			btn:SetText(btn.optLabel .. "  " .. n)
+			local col = (n == 0) and "|c46505f" or "|c9fb0c6"
+			btn:SetText(btn.optLabel .. "  " .. col .. n .. "|r")
 		end
 	end
-	group.first = options[1] and group.buttons[options[1].value]
+	-- The first pill is the anchor surface (caller positions it); the track follows.
+	group.first = first
 	return group
 end
 
@@ -401,7 +459,8 @@ local function buildFilterBar(f)
 	topRule:SetAnchor(TOPLEFT, bar, TOPLEFT, 0, 0)
 	topRule:SetAnchor(TOPRIGHT, bar, TOPRIGHT, 0, 0)
 
-	-- Row 1: relationship segmented + reveal-passives toggle.
+	-- Row 1: relationship segmented (left) + Favourites / Focus Scribing / Ignored
+	-- toggles (right, in that order).
 	local rel = segmented(bar, "QAT_Agg_Rel", RELATIONSHIPS, QAT.aggregator.filter.relationship, function(v)
 		QAT.aggregator.filter.relationship = v
 		QAT.Aggregator_Refresh()
@@ -410,21 +469,11 @@ local function buildFilterBar(f)
 	rel.first:SetAnchor(TOPLEFT, bar, TOPLEFT, 10, 8)
 	QAT.aggregator.relSeg = rel
 
-	local reveal = W.TextButton(bar, "QAT_Agg_Reveal", "Reveal Self-passives", function()
-		local on = not QAT.aggregator.filter.revealPassives
-		QAT.aggregator.filter.revealPassives = on
-		QAT.aggregator.revealBtn:SetSelected(on)
-		QAT.Aggregator_Refresh()
-	end)
-	reveal:SetHeight(26)
-	reveal:SetAnchor(TOPRIGHT, bar, TOPRIGHT, -10, 8)
-	QAT.aggregator.revealBtn = reveal
-
 	local ignoredBtn = W.TextButton(bar, "QAT_Agg_IgnoredBtn", "Ignored", function()
 		QAT.Aggregator_ToggleIgnored()
 	end)
-	ignoredBtn:SetHeight(26)
-	ignoredBtn:SetAnchor(RIGHT, reveal, LEFT, -8, 0)
+	ignoredBtn:SetHeight(30)
+	ignoredBtn:SetAnchor(TOPRIGHT, bar, TOPRIGHT, -10, 8)
 	QAT.widgets.Tooltip(ignoredBtn, "Abilities you've ignored — click the × on one to un-ignore it.")
 	QAT.aggregator.ignoredBtn = ignoredBtn
 
@@ -471,14 +520,34 @@ local function buildFilterBar(f)
 	timing.first:ClearAnchors()
 	timing.first:SetAnchor(LEFT, eff.buttons["debuff"], RIGHT, 12, 0)
 
+	-- Focus Scribing: float effects the character can produce (slotted or scribable) to
+	-- the top, so a same-named buff's own-source id sorts above copies from others.
+	local mine = W.TextButton(bar, "QAT_Agg_Mine", "Focus Scribing ability", function()
+		local on = not QAT.aggregator.filter.prioritiseMine
+		QAT.aggregator.filter.prioritiseMine = on
+		if on then
+			QAT.Aggregator_RefreshMine() -- pick up the current loadout
+		end
+		QAT.aggregator.mineBtn:SetSelected(on)
+		QAT.Aggregator_Refresh()
+	end)
+	mine:SetHeight(30)
+	mine:SetSelected(QAT.aggregator.filter.prioritiseMine)
+	mine:SetAnchor(RIGHT, ignoredBtn, LEFT, -8, 0)
+	QAT.widgets.Tooltip(
+		mine,
+		"Float effects from your scribable grimoires (and your slotted skills) to the top, so a scribed variant of a shared buff sorts above copies from other sources."
+	)
+	QAT.aggregator.mineBtn = mine
+
 	local fav = W.TextButton(bar, "QAT_Agg_Fav", "Favourites only", function()
 		local on = not QAT.aggregator.filter.favouritesOnly
 		QAT.aggregator.filter.favouritesOnly = on
 		QAT.aggregator.favBtn:SetSelected(on)
 		QAT.Aggregator_Refresh()
 	end)
-	fav:SetHeight(26)
-	fav:SetAnchor(TOPRIGHT, bar, TOPRIGHT, -10, row2Y)
+	fav:SetHeight(30)
+	fav:SetAnchor(RIGHT, mine, LEFT, -8, 0)
 	QAT.widgets.Tooltip(fav, "Show only favourited effects. Favourites always float to the top of each section.")
 	QAT.aggregator.favBtn = fav
 	-- Gold star as a texture (the ★ glyph boxes out in the default font).
