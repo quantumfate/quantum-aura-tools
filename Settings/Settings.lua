@@ -20,7 +20,7 @@ function QAT.Settings_Register()
 		registerForRefresh = true,
 		registerForDefaults = true,
 		slashCommand = "/qatsettings",
-		website = "https://github.com/quantumfate/quantums-uptime",
+		website = "https://github.com/quantumfate/quantum-aura-tools",
 	}
 
 	QAT.settingsPanel = LAM:RegisterAddonPanel(QAT.name .. "Panel", panelData)
