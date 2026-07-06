@@ -1,12 +1,12 @@
 ## Title: Quantum's Aura Tools
 ## Author: |cFF66CC@quantumfate|r
-## Version: 0.2.0-beta3
-## AddOnVersion: 202
+## Version: 0.2.0-beta4
+## AddOnVersion: 203
 ## APIVersion: 101050
 ## Description: Phase-based aura, uptime and raid-mechanic tracker. Build trackers for buffs, debuffs, procs and cooldowns.
 ## SavedVariables: QuantumAuraToolsSV
 ## DependsOn: LibAddonMenu-2.0 LibSets LibMediaProvider
-## OptionalDependsOn: LibDebugLogger
+## OptionalDependsOn: LibDebugLogger LibAsync
 
 ; Quantum's Aura Tools — independent clean-room rewrite of HyperTools.
 ; Credits: Hyperioxes & Shadowwolf136 (original HyperTools). MIT licensed.

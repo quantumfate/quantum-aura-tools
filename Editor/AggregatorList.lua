@@ -391,9 +391,78 @@ function QAT.Aggregator_List_Relayout()
 	end
 end
 
+-- Async render state. During a busy fight the change callback fires often; binding
+-- every row each time is the frame-drop culprit. We build a cheap draw "plan" (layout
+-- only) synchronously, then spread the actual control binding across frames with
+-- LibAsync. A render already in flight is not cancel-thrashed: further requests set a
+-- pending flag and re-render once on completion, so a fight can never starve the list.
+local rendering, rerenderPending, renderTask = false, false, nil
+
+-- Bind one planned item (header or row) to a pooled control.
+local function bindPlanItem(item)
+	local content = QAT.aggregator.listContent
+	if item.kind == "hdr" then
+		local hc = W.PoolGet(headerPool, "hdr_" .. item.bucket, function()
+			return makeHeader(content, "QAT_AggHdr_" .. item.bucket)
+		end)
+		bindHeader(hc, item.bucket, item.n, item.y)
+	else
+		local rc = W.PoolGet(rowPool, item.row.key, function()
+			return makeRow(content, "QAT_AggRow_" .. NonContiguousCount(rowPool.cache))
+		end)
+		bindRow(rc, item.row, item.y)
+	end
+end
+
+-- Close a render pass: hide untouched pooled controls and size the scroll child.
+local function finishPlan(totalH)
+	W.PoolEnd(headerPool)
+	W.PoolEnd(rowPool)
+	local content = QAT.aggregator.listContent
+	if content then
+		content:SetHeight(totalH)
+	end
+end
+
+-- Bind a draw plan, spread across frames when LibAsync is present (falls back to a
+-- single synchronous pass otherwise).
+local function startRender(plan, totalH)
+	W.PoolBegin(headerPool)
+	W.PoolBegin(rowPool)
+	local lib = _G.LibAsync
+	if not lib then
+		for i = 1, #plan do
+			bindPlanItem(plan[i])
+		end
+		finishPlan(totalH)
+		return
+	end
+	rendering = true
+	renderTask = renderTask or lib:Create("QAT_AggListRender")
+	renderTask:Cancel()
+	renderTask
+		:For(1, #plan)
+		:Do(function(i)
+			bindPlanItem(plan[i])
+		end)
+		:Then(function()
+			finishPlan(totalH)
+			rendering = false
+			if rerenderPending then
+				rerenderPending = false
+				QAT.Aggregator_List_Render()
+			end
+		end)
+end
+
 function QAT.Aggregator_List_Render()
 	local a = QAT.aggregator
 	if not a.listContent then
+		return
+	end
+	-- Coalesce onto the in-flight render instead of restarting it every callback.
+	if rendering then
+		rerenderPending = true
 		return
 	end
 	-- Refresh the loadout lookup so the scribed marker + Focus sorting reflect the
@@ -438,36 +507,28 @@ function QAT.Aggregator_List_Render()
 		table.sort(g, cmp)
 	end
 
-	W.PoolBegin(headerPool)
-	W.PoolBegin(rowPool)
-	local y = 0
+	-- Build the flat draw plan (layout math only — no control ops, so it's cheap even
+	-- for a big catch). The binding happens later, spread across frames.
+	local plan, y = {}, 0
 	for _, bucket in ipairs(BUCKET_ORDER) do
 		local g = groups[bucket]
 		if g and #g > 0 then
-			local hc = W.PoolGet(headerPool, "hdr_" .. bucket, function()
-				return makeHeader(a.listContent, "QAT_AggHdr_" .. bucket)
-			end)
-			bindHeader(hc, bucket, #g, y)
+			plan[#plan + 1] = { kind = "hdr", bucket = bucket, n = #g, y = y }
 			y = y + HEADER_H + 2
 			if bucket == "ss" or not a.collapsed[bucket] then
 				for _, row in ipairs(g) do
-					local rc = W.PoolGet(rowPool, row.key, function()
-						return makeRow(a.listContent, "QAT_AggRow_" .. NonContiguousCount(rowPool.cache))
-					end)
-					bindRow(rc, row, y)
+					plan[#plan + 1] = { kind = "row", row = row, y = y }
 					y = y + ROW_H + 2
 				end
 			end
 			y = y + 8 -- gap between sections
 		end
 	end
-	W.PoolEnd(headerPool)
-	W.PoolEnd(rowPool)
-	a.listContent:SetHeight(y)
 
-	-- Toolbar count.
-	local text = shown .. " effect" .. (shown == 1 and "" or "s")
+	-- Toolbar count (immediate; doesn't wait on the async bind).
 	if a.listCountLabel then
-		a.listCountLabel:SetText(text)
+		a.listCountLabel:SetText(shown .. " effect" .. (shown == 1 and "" or "s"))
 	end
+
+	startRender(plan, y)
 end
