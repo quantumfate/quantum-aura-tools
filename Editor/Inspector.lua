@@ -167,6 +167,55 @@ function QAT.Editor_AddLayer(def)
 	QAT.Editor_AddPhase(def, maxLayer + 1)
 end
 
+-- Transplant another tracker def's phases into `target` as a brand-new parallel layer
+-- (one layer above the current maximum). Phase ids are made unique and their in-layer
+-- transitions remapped, so the incoming state machine keeps working alongside the
+-- existing layers. The source's starting phase becomes the new layer's initial. Used by
+-- the aggregator's "add to existing tracker" action. Returns the new layer index.
+function QAT.Editor_AddDefAsLayer(target, sourceDef)
+	if not target or not sourceDef or not sourceDef.phases or #sourceDef.phases == 0 then
+		return
+	end
+	local newLayer = 0
+	for _, p in ipairs(target.phases) do
+		newLayer = math.max(newLayer, p.layer or 0)
+	end
+	newLayer = newLayer + 1
+
+	-- Keep the incoming phase ids as-is where they don't clash with the target's; a
+	-- clash just gets a "_2"/"_3" suffix (never a layer-number suffix, which leaked the
+	-- internal mechanism into user-facing names).
+	local used = {}
+	for _, p in ipairs(target.phases) do
+		used[p.id] = true
+	end
+	local remap = {}
+	for _, p in ipairs(sourceDef.phases) do
+		remap[p.id] = QAT.util.UniqueSlug(p.id, "phase", used)
+	end
+	for _, p in ipairs(sourceDef.phases) do
+		local np = QAT.util.DeepCopy(p)
+		np.id = remap[p.id]
+		np.layer = newLayer
+		for _, tr in ipairs(np.transitions or {}) do
+			if tr.to and remap[tr.to] then
+				tr.to = remap[tr.to]
+			end
+		end
+		target.phases[#target.phases + 1] = np
+	end
+
+	local srcInit = (sourceDef.layerInitial and sourceDef.layerInitial[0])
+		or sourceDef.initial
+		or sourceDef.phases[1].id
+	target.layerInitial = target.layerInitial or {}
+	target.layerInitial[newLayer] = remap[srcInit] or remap[sourceDef.phases[1].id]
+
+	QAT.CanonicalizeDef(target)
+	QAT.widgets.NotifyTrackerChanged(target.id)
+	return newLayer
+end
+
 function QAT.Editor_SetInitialPhase(def, phaseId)
 	-- "Initial" is per layer: set this phase as its layer's start. Layer 0 also drives
 	-- def.initial (the canonical layer-0 start).

@@ -2,6 +2,31 @@
 
 QAT.util = {}
 
+-- Turn a display string into a stable snake_case id slug (lowercase, non-alphanumeric
+-- runs collapsed to "_", trimmed). Empty input yields `fallback`. This is the one place
+-- phase ids are coined, so generated names read the same everywhere (aggregator builds,
+-- switch trackers, add-to-layer). Uniqueness is the caller's job (see UniqueSlug).
+function QAT.util.Slug(text, fallback)
+	local s = tostring(text or ""):lower():gsub("[^%w]+", "_"):gsub("^_+", ""):gsub("_+$", "")
+	if s == "" then
+		s = fallback or "phase"
+	end
+	return s
+end
+
+-- Slug `text`, then disambiguate against `used` (a set of taken ids) by appending
+-- "_2", "_3", … The chosen id is marked used. Keeps generated ids collision-free
+-- without leaking internal counters like layer numbers.
+function QAT.util.UniqueSlug(text, fallback, used)
+	local base = QAT.util.Slug(text, fallback)
+	local id, n = base, 2
+	while used[id] do
+		id, n = base .. "_" .. n, n + 1
+	end
+	used[id] = true
+	return id
+end
+
 -- Deep copy a plain-data table (no metatables / no cycles — fine for tracker defs).
 function QAT.util.DeepCopy(t)
 	if type(t) ~= "table" then

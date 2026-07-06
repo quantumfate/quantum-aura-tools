@@ -263,9 +263,12 @@ local function buildControlBar(f)
 	status:SetAnchor(LEFT, tag, RIGHT, 10, 0)
 	QAT.aggregator.statusLabel = status
 
-	-- Clear catch (right).
-	local clear = W.TextButton(bar, "QAT_Agg_Clear", "Clear catch", function()
-		QAT.Capture_Clear()
+	-- Clear data (right): forget the whole captured library (persisted + in-memory), not
+	-- just the live view. Confirmed, since it's destructive and irreversible.
+	local clear = W.TextButton(bar, "QAT_Agg_Clear", "Clear data", function()
+		QAT.Editor_ConfirmDelete("all captured effect data", function()
+			QAT.Capture_ForgetLibrary()
+		end)
 	end)
 	clear:SetAnchor(RIGHT, bar, RIGHT, -10, 0)
 	QAT.aggregator.clearBtn = clear
@@ -708,48 +711,70 @@ end
 -- Build Tracker: seed a minimal single-effect tracker from a row and hand off to
 -- the Editor. Deliberately thin — the Editor owns real authoring (phases, load).
 local buildCounter = 0
-function QAT.Aggregator_BuildTracker(row)
-	if not row then
-		return
-	end
+
+-- Construct (but do not insert) a minimal single-effect tracker def from a row. The
+-- visible phase is named after the effect (a readable slug id, e.g. "major_maim") so it
+-- stays meaningful when merged into another tracker's layer — never a generic "active".
+local function rowToDef(row)
 	buildCounter = buildCounter + 1
-	local def = QAT.CanonicalizeDef({
+	local name = row.name or ("#" .. row.abilityId)
+	local phaseId = QAT.util.Slug(name, "ability_" .. row.abilityId)
+	-- Self→me watches the player; anything on the boss defaults to the target.
+	local unit = (row.targetRole == "me") and "player" or "reticleover"
+	-- Passive effect (no duration) -> track by presence, no timer chrome.
+	local duration = row.timed and { type = "effect", abilityIds = { row.abilityId }, unit = unit } or { type = "none" }
+	return QAT.CanonicalizeDef({
 		id = "tracker_agg_" .. GetTimeStamp() .. "_" .. buildCounter,
 		kind = "tracker",
-		display = "icon",
-		name = row.name or ("#" .. row.abilityId),
-		icon = row.icon,
-		abilityIds = { row.abilityId },
-		-- Self→me watches the player; anything on the boss defaults to the target.
-		unit = (row.targetRole == "me") and "player" or "reticleover",
+		name = name,
+		unit = unit,
+		initial = "idle",
+		phases = {
+			{
+				id = "idle",
+				look = { display = "none" },
+				duration = { type = "none" },
+				transitions = {
+					{
+						when = { kind = "effect", result = "gained", abilityIds = { row.abilityId }, unit = unit },
+						to = phaseId,
+					},
+				},
+			},
+			{
+				id = phaseId,
+				look = { display = "icon", name = name, icon = row.icon, showTime = row.timed and nil or false },
+				duration = duration,
+				transitions = {},
+			},
+		},
 		x = math.floor(GuiRoot:GetWidth() / 2 - 32),
 		y = math.floor(GuiRoot:GetHeight() / 2 - 32),
 		enabled = true,
 	})
+end
 
-	-- Passive effect (no duration) -> track by presence, no timer chrome.
-	if not row.timed then
-		for _, phase in ipairs(def.phases) do
-			if phase.id == "active" then
-				phase.duration = { type = "none" }
-				phase.look.showTime = false
-			end
-		end
-	end
-
-	table.insert(QAT.sv.trackers, def)
-	QAT.log.capture:Info("build-tracker: '%s' from #%d", def.id, row.abilityId)
+-- Open the Editor (if hidden) and land on the given node id.
+local function openEditorOn(id)
 	if QAT.widgets.NotifyTrackerChanged then
 		QAT.widgets.NotifyTrackerChanged()
 	end
-
-	-- Open the Editor (if hidden) and land on the new tracker.
 	if QAT.editor and QAT.editor.frame and QAT.editor.frame:IsHidden() and QAT.Editor_Toggle then
 		QAT.Editor_Toggle()
 	end
 	if QAT.Editor_SelectNode then
-		QAT.Editor_SelectNode(def.id)
+		QAT.Editor_SelectNode(id)
 	end
+end
+
+function QAT.Aggregator_BuildTracker(row)
+	if not row then
+		return
+	end
+	local def = rowToDef(row)
+	table.insert(QAT.sv.trackers, def)
+	QAT.log.capture:Info("build-tracker: '%s' from #%d", def.id, row.abilityId)
+	openEditorOn(def.id)
 	d(
 		string.format(
 			"%s: built tracker for %s (#%d) — opened in the Editor.",
@@ -842,24 +867,29 @@ end
 -- The build action's single source of truth: 1 effect -> a simple tracker, 2+ ->
 -- one switch tracker (shows whichever of the chosen effects is active). Selection
 -- order is stage order. Exits select mode and opens the Editor on the result.
-function QAT.Aggregator_BuildFromSelection()
-	local a = QAT.aggregator
+-- The selected rows, in pick order.
+local function selectionRows()
 	local rows = {}
-	for _, key in ipairs(a.selected or {}) do
+	for _, key in ipairs(QAT.aggregator.selected or {}) do
 		local r = QAT.capture.store[key]
 		if r then
 			rows[#rows + 1] = r
 		end
 	end
+	return rows
+end
+
+-- Construct (but do not insert) a def from the current selection: 1 effect -> a simple
+-- tracker, 2+ -> one switch (mutex) tracker. Returns def, effectCount, or nil.
+local function selectionToDef()
+	local a = QAT.aggregator
+	local rows = selectionRows()
 	if #rows == 0 then
-		return
+		return nil
 	end
 	if #rows == 1 then
-		QAT.Aggregator_BuildTracker(rows[1])
-		QAT.Aggregator_SetSelecting(false)
-		return
+		return rowToDef(rows[1]), 1
 	end
-
 	local effects = {}
 	for _, r in ipairs(rows) do
 		-- Watch each effect on the unit it actually lives on: a self→self buff on the
@@ -872,30 +902,73 @@ function QAT.Aggregator_BuildFromSelection()
 		}
 	end
 	buildCounter = buildCounter + 1
+	-- Generic name the user renames; guessing from the effects read arbitrary.
 	local def = QAT.BuildMutexTrackerDef({
-		name = "Stages",
+		name = "New Multi Tracker",
 		effects = effects,
 		manual = a.builderManual,
 		x = math.floor(GuiRoot:GetWidth() / 2 - 110),
 		y = math.floor(GuiRoot:GetHeight() / 2 - 20),
 		suffix = buildCounter,
 	})
+	return def, #effects
+end
+
+function QAT.Aggregator_BuildFromSelection()
+	local def, n = selectionToDef()
 	if not def then
 		return
 	end
 	table.insert(QAT.sv.trackers, def)
-	QAT.log.capture:Info("build-switch: '%s' from %d selected effect(s)", def.id, #effects)
-	if QAT.widgets.NotifyTrackerChanged then
-		QAT.widgets.NotifyTrackerChanged()
-	end
-	if QAT.editor and QAT.editor.frame and QAT.editor.frame:IsHidden() and QAT.Editor_Toggle then
-		QAT.Editor_Toggle()
-	end
-	if QAT.Editor_SelectNode then
-		QAT.Editor_SelectNode(def.id)
-	end
-	d(string.format("%s: built a switch tracker from %d effects — opened in the Editor.", QAT.displayName, #effects))
+	QAT.log.capture:Info("build-switch: '%s' from %d selected effect(s)", def.id, n)
+	openEditorOn(def.id)
+	d(string.format("%s: built a tracker from %d effect(s) — opened in the Editor.", QAT.displayName, n))
 	QAT.Aggregator_SetSelecting(false)
+end
+
+-- Add-to-layer: build the same phases, but graft them onto an existing tracker as a new
+-- parallel layer instead of a standalone tracker. Opens a picker, then merges.
+local function addDefAsLayer(def, target, describe)
+	if not def or not target then
+		return
+	end
+	local newLayer = QAT.Editor_AddDefAsLayer(target, def)
+	if not newLayer then
+		return
+	end
+	QAT.log.capture:Info("add-to-layer: %s -> '%s' as layer %d", describe or "?", target.id, newLayer)
+	openEditorOn(target.id)
+	d(
+		string.format(
+			"%s: added %s to '%s' as layer %d — opened in the Editor.",
+			QAT.displayName,
+			describe or "effects",
+			target.name or target.id,
+			newLayer
+		)
+	)
+end
+
+-- Single-row detail: add this one effect to an existing tracker's new layer.
+function QAT.Aggregator_AddRowToLayer(row)
+	if not row then
+		return
+	end
+	QAT.ShowTrackerPicker("Add to which tracker?", function(target)
+		addDefAsLayer(rowToDef(row), target, row.name or ("#" .. row.abilityId))
+	end)
+end
+
+-- Builder (multi-select): add the built phases to an existing tracker's new layer.
+function QAT.Aggregator_AddSelectionToLayer()
+	local def, n = selectionToDef()
+	if not def then
+		return
+	end
+	QAT.ShowTrackerPicker("Add to which tracker?", function(target)
+		addDefAsLayer(def, target, n .. " effect" .. (n == 1 and "" or "s"))
+		QAT.Aggregator_SetSelecting(false)
+	end)
 end
 
 function QAT.Aggregator_Toggle()

@@ -93,10 +93,10 @@ local function Normalize(def)
 	for _, p in ipairs(def.phases) do
 		local look = p.look
 		local ls = (def.layerSettings and def.layerSettings[p.layer or 0]) or {}
-		-- Icon- and bar-display phases without an explicit icon fall back to the
-		-- tracked ability's icon (bars show it on the left).
+		-- Every icon-capable kind falls back to the tracked ability's icon when the
+		-- phase carries no explicit override, so authors never hunt .dds paths.
 		local icon = look.icon
-		if (look.display == "icon" or look.display == "bar") and (not icon or icon == "") then
+		if not icon or icon == "" then
 			icon = QAT.util.PhaseIcon(p)
 		end
 		local displayDef = {
@@ -113,7 +113,7 @@ local function Normalize(def)
 			fontSizes = look.fontSizes,
 			colors = look.colors,
 			borderThickness = look.borderThickness,
-			iconBehind = look.iconBehind,
+			borderStyle = look.borderStyle,
 			lowThreshold = look.lowThreshold,
 			lowColor = look.lowColor,
 			lowPulse = look.lowPulse,
@@ -121,6 +121,7 @@ local function Normalize(def)
 			barAnchor = look.barAnchor,
 			sweepDir = look.sweepDir,
 			sweepColor = look.sweepColor,
+			graphic = look.graphic,
 			-- Higher layers draw above lower ones so a transparent frame can overlay
 			-- an icon phase in the same tracker.
 			drawLevel = p.layer or 0,

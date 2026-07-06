@@ -106,6 +106,31 @@ QAT.migrations = {
 			sv.account.persistCapture = true
 		end
 	end,
+
+	-- schema 9 -> 10: the icon is now a single per-phase concept with one unified
+	-- "show icon" gate; the border kind's old `iconBehind` flag folds into it. Preserve
+	-- the prior look: a border phase only showed its icon when iconBehind was set, so
+	-- carry that across; every other kind keeps the new default-on showIcon.
+	[9] = function(sv)
+		local function walk(defs)
+			for _, def in ipairs(defs or {}) do
+				if def.kind == "folder" then
+					walk(def.children)
+				elseif def.phases then
+					for _, p in ipairs(def.phases) do
+						local look = p.look
+						if type(look) == "table" then
+							if look.display == "border" then
+								look.showIcon = look.iconBehind == true
+							end
+							look.iconBehind = nil
+						end
+					end
+				end
+			end
+		end
+		walk(sv.trackers)
+	end,
 }
 
 function QAT.RunMigrations(sv)

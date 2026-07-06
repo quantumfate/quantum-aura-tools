@@ -347,6 +347,17 @@ local function ensureDot(row, name)
 	return dot
 end
 
+-- A small phase-icon texture cached on its owning row, shown on the right edge.
+local function ensurePhaseIcon(row, name)
+	local ic = row.phaseIcon
+	if not ic then
+		ic = WM:CreateControl(name, row, CT_TEXTURE)
+		ic:SetDimensions(16, 16)
+		row.phaseIcon = ic
+	end
+	return ic
+end
+
 -- Row width, tracking the scroll viewport (set each build). Rows are fixed-width
 -- and left-anchored so the scroll child can resize-to-fit vertically without a
 -- circular width dependency.
@@ -691,6 +702,18 @@ local function makePhaseRow(parent, def, phase, depth, y)
 		badge:SetAnchor(LEFT, label, RIGHT, 8, 0)
 	else
 		badge:SetHidden(true)
+	end
+
+	-- The phase's resolved icon on the right edge (auto from the tracked ability, or an
+	-- override); hidden when the phase has no icon to show.
+	local pic = ensurePhaseIcon(row, name .. "_Icon")
+	local tex = QAT.util.PhaseIcon(phase)
+	pic:SetHidden(tex == nil)
+	if tex then
+		pic:SetTexture(tex)
+		pic:SetDesaturation(hidden and 1 or 0)
+		pic:ClearAnchors()
+		pic:SetAnchor(RIGHT, row, RIGHT, -10, 0)
 	end
 
 	return ROW_H

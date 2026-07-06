@@ -83,9 +83,9 @@ function QAT.display.Create(def)
 	-- The bar kind carries an optional square icon on the left. When shown, the bar
 	-- shares the row with it (starts after it) rather than sitting behind it.
 	local showLeftIcon = (kind == "bar") and def.showIcon ~= false and def.icon ~= nil and def.icon ~= ""
-	-- The border kind is a frame-only overlay: transparent background, and the icon
-	-- only appears if the author opts to place it behind the draining frame.
-	local iconBehind = (kind == "border") and def.iconBehind and def.icon ~= nil and def.icon ~= ""
+	-- The border kind is a frame-only overlay: transparent background, with the icon
+	-- shown behind the draining frame when the unified "show icon" gate is on.
+	local iconBehind = (kind == "border") and def.showIcon ~= false and def.icon ~= nil and def.icon ~= ""
 
 	-- Top-left origin: pos.x/pos.y are the control's top-left corner from the screen's
 	-- top-left (x right, y down), matching the editor's Position fields.
@@ -161,18 +161,37 @@ function QAT.display.Create(def)
 		bg:SetEdgeTexture("", borderT, borderT, borderT) -- empty texture => solid colour edge of this thickness
 	end
 
-	local showIcon = (kind == "icon") or (kind == "gradient") or showLeftIcon or iconBehind
+	-- The gradient icon honours the same unified gate; the graphic kind is itself a
+	-- full-fill texture (its image is chosen live in SetState from def.graphic).
+	local gradientIcon = (kind == "gradient") and def.showIcon ~= false
+	local fullIcon = (kind == "icon") or (kind == "graphic") or gradientIcon or iconBehind
+	local showIcon = fullIcon or showLeftIcon
+	local graphicSpec = (kind == "graphic") and def.graphic or nil
 	local icon = reuse(name .. "_Icon", function()
 		return WM:CreateControl(name .. "_Icon", tlw, CT_TEXTURE)
 	end)
 	icon:ClearAnchors()
-	if kind == "icon" or kind == "gradient" or iconBehind then
+	if kind == "graphic" then
+		-- Keep the texture's 1:1 ratio: a square sized to the shorter side (no stretch on
+		-- a wide/short tracker), placed left / center / right.
+		local side = math.min(w, h)
+		icon:SetDimensions(side, side)
+		local align = graphicSpec and graphicSpec.align or "center"
+		if align == "left" then
+			icon:SetAnchor(LEFT, tlw, LEFT, 0, 0)
+		elseif align == "right" then
+			icon:SetAnchor(RIGHT, tlw, RIGHT, 0, 0)
+		else
+			icon:SetAnchor(CENTER, tlw, CENTER, 0, 0)
+		end
+	elseif fullIcon then
 		icon:SetAnchorFill() -- the icon IS the display (border kind: it sits behind the frame)
 	else
 		icon:SetDimensions(h, h)
 		icon:SetAnchor(LEFT, tlw, LEFT, 0, 0)
 	end
-	icon:SetTexture(def.icon or "/esoui/art/icons/icon_missing.dds")
+	local baseTexture = (graphicSpec and graphicSpec.default) or def.icon or "/esoui/art/icons/icon_missing.dds"
+	icon:SetTexture(baseTexture)
 	icon:SetColor(1, 1, 1, 1)
 	icon:SetHidden(not showIcon)
 
@@ -262,7 +281,7 @@ function QAT.display.Create(def)
 	nameLabel:ClearAnchors()
 	timeLabel:ClearAnchors()
 	stacksLabel:ClearAnchors()
-	if kind == "icon" or kind == "border" or kind == "gradient" then
+	if kind == "icon" or kind == "border" or kind == "gradient" or kind == "graphic" then
 		nameLabel:SetHidden(true)
 	else
 		nameLabel:SetHidden(false)
@@ -298,6 +317,7 @@ function QAT.display.Create(def)
 		bg = bg,
 		bar = (kind == "bar") and bar or nil,
 		edges = (kind == "border") and edges or nil,
+		borderStyle = def.borderStyle or "drain",
 		sweep = (kind == "gradient") and sweep or nil,
 		sweepColor = def.sweepColor,
 		borderT = borderT,
@@ -305,6 +325,8 @@ function QAT.display.Create(def)
 		lowColor = def.lowColor,
 		lowPulse = def.lowPulse or false,
 		icon = showIcon and icon or nil,
+		graphic = graphicSpec, -- graphic kind: { default, rules } for live texture swaps
+		graphicBase = baseTexture,
 		nameLabel = nameLabel,
 		timeLabel = timeLabel,
 		stacksLabel = stacksLabel,
@@ -352,6 +374,34 @@ function QAT.display.Create(def)
 	function control:Reposition(x, y)
 		self.tlw:ClearAnchors()
 		self.tlw:SetAnchor(TOPLEFT, GuiRoot, TOPLEFT, x, y)
+	end
+
+	-- Resolve the graphic-kind texture for the current state: the first rule whose
+	-- threshold holds wins, else the default. Rule stats mirror the transition
+	-- vocabulary (remaining seconds, stack count).
+	local function ruleHolds(op, a, b)
+		if op == "<=" then
+			return a <= b
+		elseif op == "<" then
+			return a < b
+		elseif op == ">=" then
+			return a >= b
+		elseif op == ">" then
+			return a > b
+		elseif op == "==" then
+			return a == b
+		end
+		return false
+	end
+	function control:graphicTexture(remaining, stacks)
+		local g = self.graphic
+		for _, r in ipairs(g.rules or {}) do
+			local cur = (r.stat == "stacks") and (stacks or 0) or (remaining or 0)
+			if ruleHolds(r.op or "<=", cur, r.value or 0) then
+				return r.texture
+			end
+		end
+		return self.graphicBase
 	end
 
 	-- Reset every element to its authored base color. SetState calls this first so a
@@ -512,7 +562,9 @@ function QAT.display.Create(def)
 		end
 
 		if self.kind == "border" then
-			self:setBorderFraction(frac, remaining)
+			-- "fill" grows the frame as the timer progresses (inverse of the drain).
+			local bf = (self.borderStyle == "fill") and (1 - frac) or frac
+			self:setBorderFraction(bf, remaining)
 		elseif self.kind == "gradient" then
 			self:setGradient(frac, remaining, hasTimer)
 		end
@@ -523,7 +575,7 @@ function QAT.display.Create(def)
 		self.timeLabel:SetHidden(not showTime)
 		self.stacksLabel:SetHidden(not showStacks)
 
-		if self.kind == "icon" or self.kind == "border" or self.kind == "gradient" then
+		if self.kind == "icon" or self.kind == "border" or self.kind == "gradient" or self.kind == "graphic" then
 			self:placeIconNumbers(showTime, showStacks)
 		end
 
@@ -532,6 +584,12 @@ function QAT.display.Create(def)
 		if self.icon then
 			local onCooldown = hasTimer and remaining and remaining <= 0
 			self.icon:SetDesaturation(onCooldown and 1 or 0)
+		end
+
+		-- Graphic kind: pick the texture live — the first rule whose stat threshold
+		-- holds against the current remaining time / stacks, else the default.
+		if self.graphic and self.icon then
+			self.icon:SetTexture(self:graphicTexture(remaining, stacks))
 		end
 	end
 

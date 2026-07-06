@@ -645,8 +645,11 @@ function QAT.widgets.Dropdown(parent, name, width, options, current, onSelect)
 				opt = QAT.widgets.Clickable(list, name .. "_Opt" .. i, { 0, 0, 0, 0 })
 				opt:SetDimensions(width, 24)
 				opt:SetAnchor(TOPLEFT, list, TOPLEFT, 0, (i - 1) * 24)
+				-- Optional per-option thumbnail, shown when the option carries `.icon`.
+				opt.icon = WM:CreateControl(name .. "_Opt" .. i .. "_I", opt, CT_TEXTURE)
+				opt.icon:SetDimensions(18, 18)
+				opt.icon:SetAnchor(LEFT, opt, LEFT, 6, 0)
 				opt.label = QAT.widgets.Label(opt, name .. "_Opt" .. i .. "_L", "")
-				opt.label:SetAnchor(LEFT, opt, LEFT, 8, 0)
 				opt.label:SetAnchor(RIGHT, opt, RIGHT, -6, 0)
 				opt.label:SetMaxLineCount(1)
 				opt:SetHandler("OnMouseEnter", function(self2)
@@ -675,6 +678,18 @@ function QAT.widgets.Dropdown(parent, name, width, options, current, onSelect)
 			end
 			opt.optValue = o.value
 			opt.label:SetText(o.label)
+			if o.icon then
+				opt.icon:SetTexture(o.icon)
+				opt.icon:SetHidden(false)
+				opt.label:ClearAnchors()
+				opt.label:SetAnchor(LEFT, opt.icon, RIGHT, 6, 0)
+				opt.label:SetAnchor(RIGHT, opt, RIGHT, -6, 0)
+			else
+				opt.icon:SetHidden(true)
+				opt.label:ClearAnchors()
+				opt.label:SetAnchor(LEFT, opt, LEFT, 8, 0)
+				opt.label:SetAnchor(RIGHT, opt, RIGHT, -6, 0)
+			end
 			opt:SetHidden(false)
 		end
 		for i = #self.options + 1, #optControls do

@@ -56,7 +56,10 @@ local DISPLAY_KINDS = {
 	audio = true,
 	border = true,
 	gradient = true,
+	graphic = true,
 }
+-- Stats a graphic-kind texture rule can switch on (same vocabulary as transitions).
+local GRAPHIC_RULE_STATS = { remaining = true, stacks = true }
 local COLOR_KEYS = { "background", "bar", "border", "stacks", "text", "timer", "cooldown" }
 
 -- The 9-point alignment a parallel layer uses to sit within the tracker's box (its
@@ -72,6 +75,32 @@ QAT.LAYER_ALIGNS = {
 	bottom = true,
 	bottomright = true,
 }
+
+-- Normalize the graphic-kind texture spec: a default texture plus ordered rules that
+-- swap it while a stat threshold holds (first match wins, evaluated at draw time).
+local function canonicalGraphic(src)
+	src = src or {}
+	local rules = {}
+	for _, r in ipairs(src.rules or {}) do
+		if type(r) == "table" and GRAPHIC_RULE_STATS[r.stat] and r.texture and r.texture ~= "" then
+			rules[#rules + 1] = {
+				stat = r.stat,
+				op = r.op or "<=",
+				value = tonumber(r.value) or 0,
+				texture = r.texture,
+			}
+		end
+	end
+	local align = src.align
+	if align ~= "left" and align ~= "right" then
+		align = "center"
+	end
+	return {
+		default = (src.default ~= nil and src.default ~= "") and src.default or nil,
+		align = align, -- horizontal placement of the aspect-kept texture
+		rules = rules,
+	}
+end
 
 local function canonicalLook(src)
 	src = src or {}
@@ -101,13 +130,14 @@ local function canonicalLook(src)
 		decimals = src.decimals,
 		showStacks = src.showStacks or false,
 		showTime = src.showTime ~= false, -- default on; the time number is the common readout
-		showIcon = src.showIcon ~= false, -- bar kind: show the left icon (default on)
+		showIcon = src.showIcon ~= false, -- unified icon gate for all icon-capable kinds (default on)
 		font = src.font, -- optional LibMediaProvider font family name (nil = default face)
 		fontSizes = { label = f.label, time = f.time, stacks = f.stacks },
 		colors = colors,
 		borderThickness = src.borderThickness, -- nil = default 1px
-		-- border-kind options
-		iconBehind = src.iconBehind or false, -- show the icon behind the draining frame
+		-- border-kind options (the icon behind the frame is now the unified showIcon).
+		-- borderStyle: "drain" empties the frame as time runs out; "fill" grows it.
+		borderStyle = src.borderStyle == "fill" and "fill" or "drain",
 		lowThreshold = src.lowThreshold, -- seconds; below this the frame recolors/pulses (nil = off)
 		lowColor = src.lowColor, -- rgba for the low-time state
 		lowPulse = src.lowPulse or false, -- also pulse the frame alpha while low
@@ -118,6 +148,8 @@ local function canonicalLook(src)
 		-- direction it drains from is configurable.
 		sweepDir = src.sweepDir or "rtl", -- "ltr" | "rtl" | "ttb" | "btt"
 		sweepColor = src.sweepColor, -- optional rgba tint for the translucent fill
+		-- graphic-kind: a curated/custom texture with optional stat-driven swaps.
+		graphic = canonicalGraphic(src.graphic),
 	}
 end
 
@@ -504,16 +536,7 @@ function QAT.BuildMutexTrackerDef(opts)
 	-- by a stable key (never a localized display string at match time).
 	local used = {}
 	local function slug(text, fallback)
-		local s = tostring(text or ""):lower():gsub("[^%w]+", "_"):gsub("^_+", ""):gsub("_+$", "")
-		if s == "" then
-			s = fallback
-		end
-		local base, n = s, 2
-		while used[s] do
-			s, n = base .. "_" .. n, n + 1
-		end
-		used[s] = true
-		return s
+		return QAT.util.UniqueSlug(text, fallback, used)
 	end
 
 	local fallbackName = opts.fallbackName or "Inactive"

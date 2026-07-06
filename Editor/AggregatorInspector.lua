@@ -233,6 +233,14 @@ function QAT.Aggregator_Inspector_Build(pane)
 	build:SetMinWidth(INNER_W)
 	I.buildBtn = build
 
+	-- Add this effect to an existing tracker as a new parallel layer (picks the target).
+	I.addLayerBtn = W.TextButton(body, "QAT_AggIns_AddLayer", "Add to existing tracker…", function()
+		QAT.Aggregator_AddRowToLayer(I.row)
+	end)
+	I.addLayerBtn:SetHeight(28)
+	I.addLayerBtn:SetMinWidth(INNER_W)
+	I.addLayerBtn:SetAnchor(TOPLEFT, build, BOTTOMLEFT, 0, 8)
+
 	I.favBtn = W.TextButton(body, "QAT_AggIns_Fav", "Favourite", function()
 		if not I.row then
 			return
@@ -252,7 +260,7 @@ function QAT.Aggregator_Inspector_Build(pane)
 		QAT.Aggregator_List_Render()
 	end)
 	I.favBtn:SetHeight(30)
-	I.favBtn:SetAnchor(TOPLEFT, build, BOTTOMLEFT, 0, 8)
+	I.favBtn:SetAnchor(TOPLEFT, I.addLayerBtn, BOTTOMLEFT, 0, 8)
 
 	I.copyBtn = W.TextButton(body, "QAT_AggIns_Copy", "Copy id", function()
 		if I.row then
@@ -360,13 +368,22 @@ function QAT.Aggregator_Inspector_Build(pane)
 	I.bBuild:SetHeight(32)
 	I.bBuild:SetMinWidth(INNER_W)
 	I.bBuild:SetAnchor(TOPLEFT, body, TOPLEFT, PAD, PAD + 58)
+
+	-- Add the built phases to an existing tracker as a new parallel layer (picks target).
+	I.bAddLayer = W.TextButton(body, "QAT_AggIns_BAddLayer", "Add to existing tracker…", function()
+		QAT.Aggregator_AddSelectionToLayer()
+	end)
+	I.bAddLayer:SetHeight(28)
+	I.bAddLayer:SetMinWidth(INNER_W)
+	I.bAddLayer:SetAnchor(TOPLEFT, body, TOPLEFT, PAD, PAD + 94)
+
 	I.bBuildNote = W.Label(body, "QAT_AggIns_BBNote", "", "$(MEDIUM_FONT)|14|soft-shadow-thin")
 	I.bBuildNote:SetColor(0.5, 0.58, 0.68, 1)
-	I.bBuildNote:SetAnchor(TOPLEFT, body, TOPLEFT, PAD, PAD + 96)
+	I.bBuildNote:SetAnchor(TOPLEFT, body, TOPLEFT, PAD, PAD + 130)
 
 	I.bInfo = W.Card(body, "QAT_AggIns_BInfo", "Builds a simple tracker")
 	I.bInfo:SetWidth(INNER_W)
-	I.bInfo:SetAnchor(TOPLEFT, body, TOPLEFT, PAD, PAD + 122)
+	I.bInfo:SetAnchor(TOPLEFT, body, TOPLEFT, PAD, PAD + 156)
 	I.bInfoText = W.Label(I.bInfo, "QAT_AggIns_BInfoT", "", "$(MEDIUM_FONT)|15|soft-shadow-thin")
 	I.bInfoText:SetColor(0.68, 0.75, 0.83, 1)
 	I.bInfoText:SetAnchor(TOPLEFT, I.bInfo, TOPLEFT, PAD, I.bInfo.contentY)
@@ -405,8 +422,19 @@ function QAT.Aggregator_Inspector_Build(pane)
 		I.bRawByField[field] = val
 	end
 
-	I.builder =
-		{ I.bTitle, I.bSub, I.bDone, I.bBuild, I.bBuildNote, I.bInfo, I.bManualChk, I.bManualLbl, I.bSelHdr, I.bRawHdr }
+	I.builder = {
+		I.bTitle,
+		I.bSub,
+		I.bDone,
+		I.bBuild,
+		I.bAddLayer,
+		I.bBuildNote,
+		I.bInfo,
+		I.bManualChk,
+		I.bManualLbl,
+		I.bSelHdr,
+		I.bRawHdr,
+	}
 	for _, r in ipairs(I.bRawRows) do
 		I.builder[#I.builder + 1] = r.lab
 		I.builder[#I.builder + 1] = r.val
@@ -421,6 +449,7 @@ function QAT.Aggregator_Inspector_Build(pane)
 		I.timeBadge,
 		I.relBadge,
 		build,
+		I.addLayerBtn,
 		I.favBtn,
 		I.copyBtn,
 		I.ignoreBtn,
@@ -573,9 +602,10 @@ function QAT.Aggregator_Inspector_RenderBuilder()
 	local th = I.bInfoText:GetTextHeight() or 40
 	I.bInfo:SetHeight(I.bInfo.contentY + math.max(28, th) + 12)
 	I.bBuild:SetMouseEnabled(n > 0)
+	I.bAddLayer:SetMouseEnabled(n > 0)
 
 	-- Flowing section below the fixed header/build/info block.
-	local y = (PAD + 122) + I.bInfo:GetHeight() + 14
+	local y = (PAD + 156) + I.bInfo:GetHeight() + 14
 
 	-- Manual opt-out (switch trackers only): build phases without the auto-mesh.
 	I.bManualChk:SetChecked(a.builderManual)

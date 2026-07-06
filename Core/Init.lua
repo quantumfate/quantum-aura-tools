@@ -9,7 +9,7 @@ QAT = {
 	-- Internal data-schema version. Independent of the ZO_SavedVars version
 	-- (which we keep pinned at 1 so it never wipes data); migrations below own
 	-- all schema evolution. See Core/Migrations.lua.
-	schemaVersion = 9,
+	schemaVersion = 10,
 	slash = "/qat",
 }
 
@@ -24,6 +24,7 @@ QAT.defaults = {
 		capturePopupSeen = false, -- whether the one-time capture popup has been dismissed
 		examplesSeeded = false, -- whether starter example trackers were seeded once
 		addTrackerHintSeen = false, -- whether the "trackers start hidden" hint was dismissed for good
+		customTextures = {}, -- user-added { label, path } entries for the Graphic-kind picker
 	},
 	trackers = {}, -- tree of tracker and folder defs
 	userLibrary = {}, -- user-captured ability ids, kept separate from the bundled library

@@ -114,6 +114,31 @@ function QAT.Settings_Register()
 				end
 			end,
 		},
+		{
+			type = "header",
+			name = "Graphic textures",
+		},
+		{
+			type = "description",
+			text = "Add your own textures to the Graphic display kind's picker. One per "
+				.. 'line as "Label = /path/to/texture.dds" (a line with no "=" is treated '
+				.. "as a bare path). These appear in the Texture dropdown alongside the "
+				.. "built-in set.",
+		},
+		{
+			type = "editbox",
+			name = "Custom textures",
+			tooltip = 'One "Label = path" per line.',
+			isMultiline = true,
+			isExtraWide = true,
+			getFunc = function()
+				return QAT.CustomTextures_Serialize()
+			end,
+			setFunc = function(text)
+				QAT.CustomTextures_Parse(text)
+			end,
+			default = "",
+		},
 	}
 
 	LAM:RegisterOptionControls(QAT.name .. "Panel", optionsData)
