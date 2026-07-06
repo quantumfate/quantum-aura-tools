@@ -601,4 +601,22 @@ function QAT.Editor_RenderGridCard(container, def)
 	spacer:SetAnchor(TOPLEFT, container, TOPLEFT, OUT, y + 8)
 
 	QAT.widgets.PoolEnd(pool)
+
+	-- First-open fixup: the horizontal layout chains on label/button text widths, which
+	-- ESO reports as 0 on the frame a control is created — collapsing the top rows into
+	-- an overlap. Re-lay once on the next frame, when the widths have measured. One-shot
+	-- per container: on later opens the controls are pooled and already sized.
+	if not container.qatGridMeasured then
+		container.qatGridMeasured = true
+		zo_callLater(function()
+			if
+				not container:IsHidden()
+				and QAT.editor
+				and QAT.editor.selectedScope == "grid"
+				and QAT.editor.selectedId == def.id
+			then
+				QAT.Editor_RenderGridCard(container, def)
+			end
+		end, 0)
+	end
 end

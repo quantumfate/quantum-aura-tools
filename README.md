@@ -95,6 +95,8 @@ API 101050.
 - **Named-boss targeting.** Scope a tracker to a specific boss (e.g. only Z'Maja);
   the engine resolves the live boss slot, backed by a boss/zone name catalogue.
 - **Searchable set / ability picker** and an in-addon **raid-mechanic library**.
+- **Dynamic skill cast blocking** based on buff duration/cooldown with **LibSkillBlocker**
+  which can be used to prevent over-casting
 
 > Overhead-group and shared trackers only benefit groupmates who also run the
 > add-on — non-users show nothing.

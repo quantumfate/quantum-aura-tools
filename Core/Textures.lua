@@ -15,6 +15,29 @@ QAT.textures = {
 	{ path = "EsoUI/Art/ActionBar/abilityHighlightAnimation.dds", label = "Proc glow" },
 }
 
+-- Textures reserved by ESO that must never be used as a tracker graphic — chiefly the
+-- Customer Service / Gamemaster "circle" (chat_cs_*), which the game shows beside real
+-- GMs. Impersonating it is a bannable offence, so we refuse it wherever a path enters.
+-- Keys are normalized (see NormalizeTexturePath).
+local BANNED = {
+	["esoui/art/chatwindow/chat_cs_up.dds"] = true,
+	["esoui/art/chatwindow/chat_cs_down.dds"] = true,
+	["esoui/art/chatwindow/chat_cs_over.dds"] = true,
+	["esoui/art/chatwindow/chat_cs_echo.dds"] = true,
+	["esoui/art/chatwindow/chat_cs_glow.dds"] = true,
+}
+
+-- Normalize a texture path for comparison: lowercase, backslashes to forward, no
+-- leading slash. (ESO treats these as equivalent, so a blocklist must too.)
+local function NormalizeTexturePath(path)
+	return tostring(path or ""):lower():gsub("\\", "/"):gsub("^/+", "")
+end
+
+-- Is this texture path banned from use as a tracker graphic?
+function QAT.TextureBanned(path)
+	return BANNED[NormalizeTexturePath(path)] == true
+end
+
 -- User-added textures (managed in the settings panel) extend the picker. Each entry is
 -- { label, path }; stored on the account SavedVars so they persist per install.
 function QAT.CustomTextures_List()
@@ -28,7 +51,7 @@ function QAT.AllTextures()
 		all[#all + 1] = t
 	end
 	for _, t in ipairs(QAT.CustomTextures_List()) do
-		if t.path and t.path ~= "" then
+		if t.path and t.path ~= "" and not QAT.TextureBanned(t.path) then
 			all[#all + 1] = { path = t.path, label = (t.label ~= nil and t.label ~= "") and t.label or t.path }
 		end
 	end
@@ -53,7 +76,7 @@ function QAT.CustomTextures_Parse(text)
 		if not path then
 			label, path = nil, line:match("^%s*(.-)%s*$")
 		end
-		if path and path ~= "" then
+		if path and path ~= "" and not QAT.TextureBanned(path) then
 			list[#list + 1] = { label = (label ~= nil and label ~= "") and label or path, path = path }
 		end
 	end

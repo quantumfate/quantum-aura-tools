@@ -174,10 +174,15 @@ local function makeRow(parent, name)
 		if QAT.aggregator.selecting then
 			QAT.Aggregator_ToggleSelected(self.rowKey)
 		else
+			-- Resolve the clicked row directly. List_Render binds rows asynchronously
+			-- (LibAsync), so a.selectedRow isn't updated yet this frame — reading it here
+			-- would render the previously selected effect (a selection desync).
+			local row = QAT.capture.store[self.rowKey]
 			QAT.aggregator.selectedKey = self.rowKey
+			QAT.aggregator.selectedRow = row
 			QAT.Aggregator_List_Render()
 			if QAT.Aggregator_Inspector_Render then
-				QAT.Aggregator_Inspector_Render(QAT.aggregator.selectedRow)
+				QAT.Aggregator_Inspector_Render(row)
 			end
 		end
 	end)

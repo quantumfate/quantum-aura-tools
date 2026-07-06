@@ -82,7 +82,13 @@ local function canonicalGraphic(src)
 	src = src or {}
 	local rules = {}
 	for _, r in ipairs(src.rules or {}) do
-		if type(r) == "table" and GRAPHIC_RULE_STATS[r.stat] and r.texture and r.texture ~= "" then
+		if
+			type(r) == "table"
+			and GRAPHIC_RULE_STATS[r.stat]
+			and r.texture
+			and r.texture ~= ""
+			and not (QAT.TextureBanned and QAT.TextureBanned(r.texture))
+		then
 			rules[#rules + 1] = {
 				stat = r.stat,
 				op = r.op or "<=",
@@ -91,12 +97,16 @@ local function canonicalGraphic(src)
 			}
 		end
 	end
+	local default = (src.default ~= nil and src.default ~= "") and src.default or nil
+	if default and QAT.TextureBanned and QAT.TextureBanned(default) then
+		default = nil
+	end
 	local align = src.align
 	if align ~= "left" and align ~= "right" then
 		align = "center"
 	end
 	return {
-		default = (src.default ~= nil and src.default ~= "") and src.default or nil,
+		default = default,
 		align = align, -- horizontal placement of the aspect-kept texture
 		rules = rules,
 	}
@@ -123,10 +133,14 @@ local function canonicalLook(src)
 	end
 
 	local f = src.fontSizes or {}
+	local icon = src.icon
+	if icon and QAT.TextureBanned and QAT.TextureBanned(icon) then
+		icon = nil -- refuse a reserved texture (e.g. the GM circle) as an icon override
+	end
 	return {
 		display = display,
 		name = src.name,
-		icon = src.icon,
+		icon = icon,
 		decimals = src.decimals,
 		showStacks = src.showStacks or false,
 		showTime = src.showTime ~= false, -- default on; the time number is the common readout
