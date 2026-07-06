@@ -80,8 +80,8 @@ Controls → Keybindings.
 
 ## Requirements
 
-**LibAddonMenu-2.0**, **LibSets**, **LibMediaProvider** (optional: LibDebugLogger).
-API 101050.
+**LibAddonMenu-2.0**, **LibSets**, **LibMediaProvider**, **LibAsync**, **LibGroupBroadcast**
+(optional: LibDebugLogger). API 101050.
 
 ## Planned
 

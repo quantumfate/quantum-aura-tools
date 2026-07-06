@@ -2,8 +2,8 @@
 
 ESO addon. Phase-based aura / uptime / raid-mechanic tracker. Clean-room rewrite of
 HyperTools (no shared code). Namespace `QAT`, SavedVars `QuantumAuraToolsSV`, slash
-`/qat`, API `101050`, MIT. Deps: LibAddonMenu-2.0, LibSets, LibMediaProvider
-(optional LibDebugLogger). Lua 5.1.
+`/qat`, API `101050`, MIT. Deps: LibAddonMenu-2.0, LibSets, LibMediaProvider,
+LibAsync, LibGroupBroadcast (optional LibDebugLogger). Lua 5.1.
 
 Deep docs: `DESIGN.md` (architecture/plan), `EDITOR.md` (editor design),
 `AGGREGATOR.md` (M5 effect-aggregator data model + Claude-design brief). Cross-

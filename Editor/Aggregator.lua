@@ -25,6 +25,7 @@ local RELATIONSHIPS = {
 	{ value = "bs", label = "Boss→Self" },
 	{ value = "sb", label = "Self→Boss" },
 	{ value = "xb", label = "Other→Boss" },
+	{ value = "sg", label = "Self→Group" },
 	{ value = "gs", label = "Group→Self" },
 	{ value = "ss", label = "Self→Self" },
 }
@@ -33,6 +34,7 @@ local RELATIONSHIPS = {
 local COL = {
 	bs = { 0.851, 0.541, 0.416 },
 	sb = { 0.310, 0.690, 0.627 },
+	sg = { 0.463, 0.780, 0.627 },
 	gs = { 0.435, 0.604, 0.816 },
 	ss = { 0.490, 0.557, 0.627 },
 	live = { 0.486, 0.753, 0.416 },
@@ -155,7 +157,7 @@ end
 
 -- Per-bucket counts (respecting the rest of the filter) for the segment labels.
 local function bucketCounts(fq)
-	local counts = { all = 0, bs = 0, sb = 0, xb = 0, gs = 0, ss = 0 }
+	local counts = { all = 0, bs = 0, sb = 0, xb = 0, sg = 0, gs = 0, ss = 0 }
 	for _, row in ipairs(QAT.capture.list) do
 		if passesNonRelationship(row, fq) then
 			if counts[row.bucket] ~= nil then

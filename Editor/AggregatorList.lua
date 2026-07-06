@@ -14,7 +14,7 @@ local HEADER_H = 26
 local ROW_H = 46
 
 -- Section order + copy. Boss→Self leads (the money bucket); Self→Self trails (noise).
-local BUCKET_ORDER = { "bs", "sb", "xb", "gs", "os", "ss", "xx" }
+local BUCKET_ORDER = { "bs", "sb", "xb", "sg", "gg", "xg", "gs", "os", "ss", "xx" }
 local BUCKET_META = {
 	bs = { label = "Boss → Self", hint = "incoming boss mechanics", color = { 0.851, 0.541, 0.416 } },
 	sb = { label = "Self → Boss", hint = "your debuffs on the boss", color = { 0.310, 0.690, 0.627 } },
@@ -23,6 +23,9 @@ local BUCKET_META = {
 		hint = "on the target, not by you (its own states / dummy debuffs)",
 		color = { 0.780, 0.639, 0.400 },
 	},
+	sg = { label = "Self → Group", hint = "auras / buffs you apply to your group", color = { 0.463, 0.780, 0.627 } },
+	gg = { label = "Group → Group", hint = "a groupmate buffing the group", color = { 0.435, 0.604, 0.816 } },
+	xg = { label = "Other → Group", hint = "on a groupmate, not by you", color = { 0.55, 0.60, 0.68 } },
 	gs = { label = "Group → Self", hint = "buffs from your group", color = { 0.435, 0.604, 0.816 } },
 	os = { label = "Other → Self", hint = "from adds / environment", color = { 0.55, 0.60, 0.68 } },
 	ss = { label = "Self → Self", hint = "your passives", color = { 0.490, 0.557, 0.627 } },

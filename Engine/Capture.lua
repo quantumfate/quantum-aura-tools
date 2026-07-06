@@ -51,12 +51,31 @@ local function targetRoleOf(tag)
 	if tag and tag:find("^boss%d") then
 		return "boss"
 	end
+	if tag and tag:find("^group%d") then
+		return "group"
+	end
 	-- Your current target when it isn't on a boss frame (e.g. a trial dummy): count
 	-- it as the "boss" for bucketing, but only when it's an attackable enemy.
 	if tag == "reticleover" and DoesUnitExist("reticleover") and IsUnitAttackable("reticleover") then
 		return "boss"
 	end
 	return "other"
+end
+
+-- Resolve a name to a friendly group unit tag (group1-12), excluding the player's own
+-- slot. Group-applied auras (e.g. a buff you put on your group) surface only through the
+-- combat feed, where the player is the source — the effect feed can't read allies' buffs.
+local function groupTagForName(name)
+	if not name or name == "" then
+		return nil
+	end
+	for i = 1, GetGroupSize() do
+		local t = "group" .. i
+		if DoesUnitExist(t) and not AreUnitsEqual(t, "player") and GetUnitName(t) == name then
+			return t
+		end
+	end
+	return nil
 end
 
 -- Does this name currently belong to a boss frame? (Distinguishes the boss from a
@@ -133,6 +152,14 @@ local function bucketOf(sourceRole, targetRole)
 			return "sb"
 		end -- Self → Boss (your debuffs)
 		return "xb" -- anything else → Boss
+	elseif targetRole == "group" then
+		if sourceRole == "self" then
+			return "sg"
+		end -- Self → Group (auras/buffs you apply to your group)
+		if sourceRole == "group" then
+			return "gg"
+		end -- Group → Group (a groupmate buffing the group)
+		return "xg" -- anything else → Group
 	end
 	return "xx"
 end
@@ -240,7 +267,7 @@ local function ingest(obs)
 
 	local targetRole = targetRoleOf(obs.targetTag)
 	if targetRole == "other" then
-		return -- out of intake scope (self + bosses only for now)
+		return -- out of intake scope (self, bosses, and group members)
 	end
 
 	-- Resolve the target's stable name once (never the shuffling slot tag).
@@ -361,6 +388,10 @@ local function onCombatEvent(_, _, _, _, _, _, sourceName, sourceType, targetNam
 				targetTag = bt
 				break
 			end
+		end
+		-- A groupmate you applied the effect to (e.g. a group buff / aura).
+		if not targetTag then
+			targetTag = groupTagForName(targetName)
 		end
 		-- Fall back to the current target (dummy / non-frame enemy).
 		if not targetTag and DoesUnitExist("reticleover") and GetUnitName("reticleover") == targetName then
