@@ -1,10 +1,12 @@
 -- Effect Aggregator — grouped list (left pane).
 --
 -- Renders the capture store into collapsible relationship sections of two-line rows.
--- Rows are pooled by their stable row.key so the same control is reused across
--- renders (cheap, and selection/scroll survive). Live refresh is a full re-render;
--- the window's change callback skips it while the view is frozen, so reading a busy
--- fight is stable (Freeze view is the intended escape hatch).
+-- The catch can hold well over a thousand rows, so the list is virtualized: a render
+-- builds a layout-only draw plan for every item, but only the slice inside the scroll
+-- viewport is bound to controls. Pooled controls are keyed by slot index, so ~one
+-- screenful of controls is recycled as the user scrolls — the per-frame draw cost stays
+-- flat regardless of catch size. Live refresh rebuilds the plan; the window's change
+-- callback skips it while the view is frozen (Freeze view is the intended escape hatch).
 
 local WM = GetWindowManager()
 local W = QAT.widgets
@@ -54,6 +56,7 @@ local SORTS = {
 
 local headerPool, rowPool
 local rowW = 360
+local onScrollUpdate -- forward decl (Build wires it as the scroll OnUpdate handler)
 
 -- "2s ago" / "5m ago" from a timestamp.
 local function ago(ts)
@@ -386,10 +389,14 @@ function QAT.Aggregator_List_Build(pane)
 	sc:SetAnchor(TOPLEFT, pane, TOPLEFT, 0, TOOLBAR_H + 6)
 	sc:SetAnchor(BOTTOMRIGHT, pane, BOTTOMRIGHT, 0, 0)
 	local content = GetControl(sc, "ScrollChild")
-	content:SetResizeToFitDescendents(true)
-	content:SetResizeToFitPadding(0, 8)
+	-- Windowing sets the child height explicitly (only visible rows are bound, so
+	-- resize-to-fit would collapse it) — keep the scrollbar range correct manually.
+	content:SetResizeToFitDescendents(false)
 	QAT.aggregator.listScroll = sc
+	QAT.aggregator.listScrollRegion = GetControl(sc, "Scroll")
 	QAT.aggregator.listContent = content
+	-- Re-window the visible slice as the user scrolls (cheap per-frame position check).
+	QAT.aggregator.listScrollRegion:SetHandler("OnUpdate", onScrollUpdate)
 end
 
 function QAT.Aggregator_List_Relayout()
@@ -399,78 +406,111 @@ function QAT.Aggregator_List_Relayout()
 	end
 end
 
--- Async render state. During a busy fight the change callback fires often; binding
--- every row each time is the frame-drop culprit. We build a cheap draw "plan" (layout
--- only) synchronously, then spread the actual control binding across frames with
--- LibAsync. A render already in flight is not cancel-thrashed: further requests set a
--- pending flag and re-render once on completion, so a fight can never starve the list.
-local rendering, rerenderPending, renderTask = false, false, nil
+-- Viewport windowing. The catch can hold a thousand-plus rows; ZO_ScrollContainer
+-- clips but does not cull, so binding every row leaves that many live controls the UI
+-- must process every frame — a per-frame draw cost that scales with row count and
+-- tanks FPS. Instead we build a cheap layout-only draw "plan" (all items with their y
+-- positions) and only bind the slice inside the visible viewport (plus a small buffer).
+-- Pooled controls are keyed by a stable slot (the item's ordinal within the plan,
+-- modulo a fixed slot count), not row identity. A row keeps the same slot for as long as
+-- it stays visible, so the control set is bounded (~one plan's worth of slots reused) AND
+-- a slot already holding the right row for this render can be skipped entirely — see the
+-- generation check below.
+local BUFFER_ROWS = 6 -- rows kept live above/below the viewport for smooth scrolling
+-- Bound rows are children of the scrolling content, so they slide with the view without
+-- any rebind. We only need a fresh windowBind once the view has travelled far enough to
+-- start eating into the buffer — rebinding every frame is wasted work. Rebind every few
+-- rows of travel; the buffer (above) hides the seam.
+local REBIND_STEP = (BUFFER_ROWS - 2) * (ROW_H + 2)
+-- Distinct pooled slots. Must exceed the most rows/headers ever on screen at once
+-- (viewport + both buffers); comfortably clears that even on a tall 4K window.
+local ROW_SLOTS, HDR_SLOTS = 128, 24
+local planItems = {}
+local lastScrollTop = -1
+-- Bumped on every full render so windowBind knows which slot bindings are stale. A slot
+-- whose control already holds this row at this generation needs no rebind (its data and
+-- anchor are already current), which is what makes scrolling cheap.
+local renderGen = 0
 
--- Bind one planned item (header or row) to a pooled control.
-local function bindPlanItem(item)
+-- Bind only the plan items whose vertical span intersects the visible window. Called on
+-- every render and on scroll; cheap because it touches ~one screenful of controls and
+-- skips slots already bound to the right row this generation.
+local function windowBind()
+	local a = QAT.aggregator
+	local content = a.listContent
+	local scroll = a.listScrollRegion
+	if not content or not scroll then
+		return
+	end
+	-- Amount scrolled down = how far the child's top sits above the viewport's top.
+	local top = scroll:GetTop() - content:GetTop()
+	local viewH = scroll:GetHeight()
+	local pad = BUFFER_ROWS * (ROW_H + 2)
+	local visTop, visBot = top - pad, top + viewH + pad
+
+	W.PoolBegin(headerPool)
+	W.PoolBegin(rowPool)
+	local hOrd, rOrd = 0, 0 -- stable ordinals over ALL items (visible or not)
+	for i = 1, #planItems do
+		local item = planItems[i]
+		if item.kind == "hdr" then
+			if item.y + HEADER_H >= visTop and item.y <= visBot then
+				local slot = hOrd % HDR_SLOTS
+				local hc = W.PoolGet(headerPool, slot, function()
+					return makeHeader(content, "QAT_AggHdr_" .. slot)
+				end)
+				bindHeader(hc, item.bucket, item.n, item.y)
+			end
+			hOrd = hOrd + 1
+		else
+			if item.y + ROW_H >= visTop and item.y <= visBot then
+				local slot = rOrd % ROW_SLOTS
+				local rc = W.PoolGet(rowPool, slot, function()
+					return makeRow(content, "QAT_AggRow_" .. slot)
+				end)
+				-- Skip the ~20 control ops when this slot already shows this row for the
+				-- current render (unchanged data + anchor). This is the scroll fast path.
+				if rc._boundKey ~= item.row.key or rc._boundGen ~= renderGen then
+					bindRow(rc, item.row, item.y)
+					rc._boundKey, rc._boundGen = item.row.key, renderGen
+				end
+			end
+			rOrd = rOrd + 1
+		end
+	end
+	W.PoolEnd(headerPool)
+	W.PoolEnd(rowPool)
+end
+
+-- OnUpdate hook: re-window when the scroll position has moved. Comparing one number
+-- per frame is free; the rebind only fires on actual movement.
+function onScrollUpdate()
 	local content = QAT.aggregator.listContent
-	if item.kind == "hdr" then
-		local hc = W.PoolGet(headerPool, "hdr_" .. item.bucket, function()
-			return makeHeader(content, "QAT_AggHdr_" .. item.bucket)
-		end)
-		bindHeader(hc, item.bucket, item.n, item.y)
-	else
-		local rc = W.PoolGet(rowPool, item.row.key, function()
-			return makeRow(content, "QAT_AggRow_" .. NonContiguousCount(rowPool.cache))
-		end)
-		bindRow(rc, item.row, item.y)
+	local scroll = QAT.aggregator.listScrollRegion
+	if not content or not scroll then
+		return
+	end
+	local top = scroll:GetTop() - content:GetTop()
+	if math.abs(top - lastScrollTop) >= REBIND_STEP then
+		lastScrollTop = top
+		windowBind()
 	end
 end
 
--- Close a render pass: hide untouched pooled controls and size the scroll child.
-local function finishPlan(totalH)
-	W.PoolEnd(headerPool)
-	W.PoolEnd(rowPool)
+local function startRender(plan, totalH)
+	planItems = plan
+	renderGen = renderGen + 1 -- invalidate all slot bindings; data may have changed
 	local content = QAT.aggregator.listContent
 	if content then
 		content:SetHeight(totalH)
 	end
-end
-
--- Bind a draw plan, spread across frames when LibAsync is present (falls back to a
--- single synchronous pass otherwise).
-local function startRender(plan, totalH)
-	W.PoolBegin(headerPool)
-	W.PoolBegin(rowPool)
-	local lib = _G.LibAsync
-	if not lib then
-		for i = 1, #plan do
-			bindPlanItem(plan[i])
-		end
-		finishPlan(totalH)
-		return
-	end
-	rendering = true
-	renderTask = renderTask or lib:Create("QAT_AggListRender")
-	renderTask:Cancel()
-	renderTask
-		:For(1, #plan)
-		:Do(function(i)
-			bindPlanItem(plan[i])
-		end)
-		:Then(function()
-			finishPlan(totalH)
-			rendering = false
-			if rerenderPending then
-				rerenderPending = false
-				QAT.Aggregator_List_Render()
-			end
-		end)
+	lastScrollTop = -1 -- force a rebind (content height/anchors may have shifted)
+	windowBind()
 end
 
 function QAT.Aggregator_List_Render()
 	local a = QAT.aggregator
 	if not a.listContent then
-		return
-	end
-	-- Coalesce onto the in-flight render instead of restarting it every callback.
-	if rendering then
-		rerenderPending = true
 		return
 	end
 	-- Refresh the loadout lookup so the scribed marker + Focus sorting reflect the

@@ -131,6 +131,52 @@ QAT.migrations = {
 		end
 		walk(sv.trackers)
 	end,
+
+	-- schema 10 -> 11: groups gain a screen anchor and members become RELATIVE to it
+	-- (so moving a group moves its members as one unit). Existing member coordinates are
+	-- absolute; convert them: a folder's anchor becomes the top-left of its contents
+	-- (or its grid origin), and every child's position is rebased to that anchor.
+	-- Processed bottom-up so a nested folder's computed anchor is treated as its absolute
+	-- position by its parent. Top-level trackers are unchanged (their anchor is 0,0).
+	[10] = function(sv)
+		local function migrate(folder)
+			local children = folder.children or {}
+			for _, c in ipairs(children) do
+				if c.kind == "folder" then
+					migrate(c)
+				end
+			end
+			-- Anchor: a grid keeps its drawn origin; a plain folder takes the top-left of
+			-- its contents' absolute positions. (Ignore any 0,0 injected by an earlier build
+			-- of this feature — recompute the real top-left for non-grid folders.)
+			local ax, ay
+			if folder.grid and folder.grid.enabled and folder.pos and folder.pos.x then
+				ax, ay = folder.pos.x, folder.pos.y
+			else
+				ax, ay = math.huge, math.huge
+				for _, c in ipairs(children) do
+					local p = c.pos
+					if p and p.x then
+						ax, ay = math.min(ax, p.x), math.min(ay, p.y)
+					end
+				end
+				if ax == math.huge then
+					ax, ay = 0, 0
+				end
+			end
+			for _, c in ipairs(children) do
+				c.pos = c.pos or { x = 0, y = 0 }
+				c.pos.x = (c.pos.x or 0) - ax
+				c.pos.y = (c.pos.y or 0) - ay
+			end
+			folder.pos = { x = ax, y = ay }
+		end
+		for _, def in ipairs(sv.trackers or {}) do
+			if def.kind == "folder" then
+				migrate(def)
+			end
+		end
+	end,
 }
 
 function QAT.RunMigrations(sv)

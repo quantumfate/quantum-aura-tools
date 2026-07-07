@@ -69,6 +69,9 @@ function QAT.gridDisplay.Cell(groupId, x, y, w, h, bg, border, borderW)
 	local box = getControl(e, name, function()
 		return QAT.widgets.Panel(e.tlw, name, bg, border)
 	end)
+	-- Size first, then (re)assert the edge: a CT_BACKDROP's edge textures don't reliably
+	-- redraw when a pooled control is resized unless the edge is set after SetDimensions.
+	box:SetDimensions(w, h)
 	box:SetCenterColor(unpack(bg))
 	local bw = snapBorder(borderW)
 	if bw == 0 then
@@ -78,7 +81,6 @@ function QAT.gridDisplay.Cell(groupId, x, y, w, h, bg, border, borderW)
 		box:SetEdgeColor(unpack(border))
 		box:SetEdgeTexture("", bw, bw, bw)
 	end
-	box:SetDimensions(w, h)
 	box:ClearAnchors()
 	box:SetAnchor(TOPLEFT, e.tlw, TOPLEFT, x, y)
 end
@@ -91,6 +93,9 @@ function QAT.gridDisplay.Header(groupId, x, y, w, h, text, bg, border, borderW, 
 	local box = getControl(e, name, function()
 		return QAT.widgets.Panel(e.tlw, name, bg, border)
 	end)
+	-- Size first, then (re)assert the edge (see Cell: backdrop edges don't redraw on a
+	-- resize otherwise).
+	box:SetDimensions(w, h)
 	box:SetCenterColor(unpack(bg))
 	local bw = snapBorder(borderW)
 	if bw == 0 then
@@ -100,7 +105,6 @@ function QAT.gridDisplay.Header(groupId, x, y, w, h, text, bg, border, borderW, 
 		box:SetEdgeColor(unpack(border))
 		box:SetEdgeTexture("", bw, bw, bw)
 	end
-	box:SetDimensions(w, h)
 	box:ClearAnchors()
 	box:SetAnchor(TOPLEFT, e.tlw, TOPLEFT, x, y)
 

@@ -99,12 +99,14 @@ function QAT.display.Create(def)
 	-- above a lower one (e.g. the duration icon) sharing the tracker's position.
 	tlw:SetDrawLevel(def.drawLevel or 0)
 	tlw.qatTrackerId = def.trackerId
-	-- Custom drag (only while the editor is open, gated by QAT.trackersMovable):
+	-- Custom drag (only while the editor is open AND this is the selected node):
 	-- ESO's SetMovable rewrites the anchor mid-drag, so GetLeft/GetTop read back
 	-- garbage. Instead we drive the anchor ourselves from the mouse, keeping the
 	-- whole control in one coordinate space (UI mouse pos == anchor offset == the
-	-- editor's clamp), so positions are exact top-left pixels.
-	tlw:SetMouseEnabled(QAT.trackersMovable or false)
+	-- editor's clamp), so positions are exact top-left pixels. Mouse arming is owned
+	-- by QAT.Runtime_ApplyDragSelection (only the selected tracker is grabbable), so a
+	-- freshly (re)built control starts disabled.
+	tlw:SetMouseEnabled(false)
 	tlw:SetHandler("OnMouseDown", function(self, button)
 		if button ~= MOUSE_BUTTON_INDEX_LEFT or not QAT.trackersMovable then
 			return
