@@ -9,7 +9,7 @@ QAT = {
 	-- Internal data-schema version. Independent of the ZO_SavedVars version
 	-- (which we keep pinned at 1 so it never wipes data); migrations below own
 	-- all schema evolution. See Core/Migrations.lua.
-	schemaVersion = 10,
+	schemaVersion = 11,
 	slash = "/qat",
 }
 
@@ -89,6 +89,42 @@ function QAT.RestoreExamples()
 	return n
 end
 
+-- Create the "Taunts" dynamic-grid group if it isn't already present: a single-column
+-- grid fed by the taunt target source, so every enemy the player has taunted shows as a
+-- name + remaining-time bar that packs/unpacks live. Minimal seed authoring for now —
+-- the group is a normal folder afterward (movable/editable in the editor).
+local TAUNT_GROUP_ID = "qat_taunt_grid"
+function QAT.SeedTauntGrid()
+	for _, def in ipairs(QAT.sv.trackers) do
+		if def.id == TAUNT_GROUP_ID then
+			d(QAT.displayName .. ": taunt tracker already exists (see the editor tree).")
+			return
+		end
+	end
+	local cx = math.floor((GuiRoot and GuiRoot:GetWidth() or 1920) / 2) - 110
+	local group = {
+		id = TAUNT_GROUP_ID,
+		kind = "folder",
+		name = "Taunts",
+		enabled = true,
+		children = {},
+		pos = { x = cx, y = 260 },
+		grid = {
+			enabled = true,
+			cols = 1,
+			rows = 8, -- capacity (max simultaneous taunts shown)
+			fill = { enabled = false }, -- dynamic source packs itself
+			dynamic = { source = "taunt", slot = { width = 220, height = 30 } },
+		},
+	}
+	QAT.CanonicalizeFolder(group)
+	table.insert(QAT.sv.trackers, group)
+	if QAT.widgets and QAT.widgets.NotifyTrackerChanged then
+		QAT.widgets.NotifyTrackerChanged()
+	end
+	d(QAT.displayName .. ": added the Taunts tracker. Taunt an enemy to see it fill.")
+end
+
 local function OnAddOnLoaded(_, addonName)
 	if addonName ~= QAT.name then
 		return
@@ -107,6 +143,7 @@ local function OnAddOnLoaded(_, addonName)
 	-- Each subsystem is guarded so a failure logs with context instead of
 	-- aborting the rest of load (critical while the UI is unverified in-game).
 	QAT.Safe("Settings_Register", QAT.Settings_Register)
+	QAT.Safe("Targeting_Init", QAT.Targeting_Init)
 	QAT.Safe("Runtime_Init", QAT.Runtime_Init)
 	QAT.Safe("Capture_Init", QAT.Capture_Init)
 	QAT.Safe("Editor_Init", QAT.Editor_Init)
@@ -147,12 +184,22 @@ local function HandleSlash(args)
 		QAT.RestoreExamples()
 		return
 	end
+	if args == "taunt" or args == "taunts" then
+		QAT.SeedTauntGrid()
+		return
+	end
+	if args == "taunt test" then
+		QAT.Targeting_TestTaunts(3)
+		d(QAT.displayName .. ": injected 3 test taunts (expire in ~12-20s).")
+		return
+	end
 	-- "on / off" not "on|off": the pipe is ESO's colour-escape char and is eaten.
 	d(QAT.displayName .. " commands:")
 	d("  /qat                   open settings")
 	d("  /qat capture on / off  start / stop passive ID capture")
 	d("  /qat aggregator (agg)  open the effect aggregator window")
 	d("  /qat restore examples  re-add deleted example trackers")
+	d("  /qat taunt             add the dynamic taunt tracker group")
 end
 SLASH_COMMANDS["/qat"] = HandleSlash
 

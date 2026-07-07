@@ -32,6 +32,13 @@ Lane.__index = Lane
 -- hold the fallback phase flickers through the gap. Imperceptible on a real drop.
 local FALLBACK_GRACE = 0.25 -- seconds
 
+-- Whether a real, attackable reticle target exists right now. Used to tell "looking
+-- away from a target" (hold sticky target trackers, let them run out) apart from
+-- "acquired a new target" (re-evaluate the phase against it).
+local function targetLive()
+	return DoesUnitExist("reticleover") and IsUnitAttackable("reticleover")
+end
+
 -- Runtime-condition action -> the display element it recolors.
 local ACTION_ELEMENT = {
 	setBackgroundColor = "background",
@@ -93,6 +100,10 @@ local function Normalize(def)
 	for _, p in ipairs(def.phases) do
 		local look = p.look
 		local ls = (def.layerSettings and def.layerSettings[p.layer or 0]) or {}
+		-- A square layer (icon/border/gradient) can sit left/centre/right within a wider
+		-- box; this per-phase x offset is added to the tracker's relative position when
+		-- the control is placed (see Tracker:ApplyPosition).
+		local alignX = alignOffset(ls.align, look.display, pos.width, pos.height)
 		-- Every icon-capable kind falls back to the tracked ability's icon when the
 		-- phase carries no explicit override, so authors never hunt .dds paths.
 		local icon = look.icon
@@ -126,9 +137,10 @@ local function Normalize(def)
 			-- an icon phase in the same tracker.
 			drawLevel = p.layer or 0,
 			point = pos.point,
-			-- Layers stack at the shared origin; a 9-point alignment lets a smaller layer
-			-- (e.g. a square icon) sit within the tracker's box rather than only top-left.
-			x = pos.x + alignOffset(ls.align, look.display, pos.width, pos.height),
+			-- Created at the tracker's relative position (anchor added by ApplyPosition,
+			-- called right after Normalize). The align offset lets a smaller square layer
+			-- sit within the tracker's box rather than only top-left.
+			x = pos.x + alignX,
 			y = pos.y,
 			forceHidden = ls.visible == false,
 			width = pos.width,
@@ -142,6 +154,7 @@ local function Normalize(def)
 			transitions = p.transitions,
 			runtime = p.runtime,
 			cues = p.cues,
+			alignX = alignX, -- per-phase x offset within the box (see ApplyPosition)
 		}
 		table.insert(order, p.id)
 	end
@@ -151,8 +164,9 @@ end
 --- Construct a tracker from an authored def.
 ---@param def table authored tracker def
 ---@param loadChain table[] load defs (ancestor folders first, this tracker last)
+---@param anchor table|nil parent group's absolute screen anchor { x, y } (nil = origin)
 ---@return table tracker
-function QAT.Tracker.New(def, loadChain)
+function QAT.Tracker.New(def, loadChain, anchor)
 	QAT.CanonicalizeDef(def) -- idempotent; guarantees canonical shape
 	local self = setmetatable({}, QAT.Tracker)
 	self.def = def
@@ -160,6 +174,13 @@ function QAT.Tracker.New(def, loadChain)
 	self.phases, self.order = Normalize(def)
 	self.loadChain = loadChain or {}
 	self.loaded = false
+	-- Screen position = parent group anchor + this tracker's relative offset. A
+	-- top-level tracker has a zero anchor, so its offset is its absolute position.
+	self.anchorX = (anchor and anchor.x) or 0
+	self.anchorY = (anchor and anchor.y) or 0
+	self.relX = (def.pos and def.pos.x) or 0
+	self.relY = (def.pos and def.pos.y) or 0
+	self:ApplyPosition()
 
 	-- One lane per layer, each with its starting phase. def.layerInitial (canonical)
 	-- maps layer -> initial phase id and always contains layer 0.
@@ -171,6 +192,36 @@ function QAT.Tracker.New(def, loadChain)
 		return a.layer < b.layer
 	end)
 	return self
+end
+
+-- Place every phase control at its absolute screen position (parent anchor + this
+-- tracker's relative offset + the phase's align offset). Called on construction, when
+-- the relative position changes (inspector / drag), and when an ancestor group moves.
+function QAT.Tracker:ApplyPosition()
+	for _, phase in pairs(self.phases) do
+		phase.control:Reposition(self.anchorX + self.relX + (phase.alignX or 0), self.anchorY + self.relY)
+	end
+end
+
+-- Set the relative offset (from the parent group anchor) and re-place. `x`/`y` are the
+-- values stored in def.pos; the inspector and HUD drag both feed relative coordinates.
+function QAT.Tracker:SetRelativePosition(x, y)
+	self.relX, self.relY = x or 0, y or 0
+	self:ApplyPosition()
+end
+
+-- Update this tracker's parent anchor (an ancestor group moved) and re-place.
+function QAT.Tracker:SetAnchor(x, y)
+	self.anchorX, self.anchorY = x or 0, y or 0
+	self:ApplyPosition()
+end
+
+-- Place a phase control at an explicit absolute position, bypassing the anchor/offset
+-- math. Used by the grid layout pass, which computes cell positions in screen space.
+function QAT.Tracker:PlaceAbsolute(x, y)
+	for _, phase in pairs(self.phases) do
+		phase.control:Reposition(x + (phase.alignX or 0), y)
+	end
 end
 
 function Lane.New(tracker, layer, initial)
@@ -327,6 +378,12 @@ function Lane:OnEffect(unitTag, abilityId, result, beginTime, endTime, stackCoun
 	local d = cur.duration
 	if d.type == "effect" and d.unit == unitTag and contains(d.abilityIds, abilityId) then
 		if rstr == "faded" then
+			-- Sticky target: a "faded" with no live reticle target is the reticle leaving
+			-- the target, not the debuff ending. Ignore it so the phase keeps its timer and
+			-- runs out on its own; a newly-acquired target re-seeds via ScanBuffs.
+			if d.unit == "reticleover" and self.tracker.def.stickyTarget and not targetLive() then
+				return true
+			end
 			-- The effect keeping this phase alive ended. Before falling back, check
 			-- whether we actually advanced: if an outgoing effect-gained transition's
 			-- trigger buff is already live (a stage-up where the fade of the old stage
@@ -367,6 +424,11 @@ function Lane:ReconcilePresence(presentByUnit)
 		if present and present[id] then
 			return -- still up; nothing to reconcile
 		end
+	end
+	-- Sticky target: don't end just because the reticle is off a target; only
+	-- reconcile (and possibly clear) against a genuinely-acquired new target.
+	if d.unit == "reticleover" and self.tracker.def.stickyTarget and not targetLive() then
+		return
 	end
 	self:EndPhase()
 end
@@ -502,4 +564,36 @@ end
 -- Put the tracker into its starting state by evaluating load conditions.
 function QAT.Tracker:Start()
 	self:RefreshLoad()
+end
+
+-- ===== Dynamic-instance driving =====
+-- A dynamic-group instance is a normal tracker whose tracked effect is supplied by a
+-- Targeting source (per live target) rather than the game's event bus. The source feeds
+-- synthetic gained/faded events for the instance's reserved ability on QAT.DYN_UNIT; the
+-- phase machine (transitions, timers, cues, runtime conditions) then runs unchanged.
+
+-- Override the display name on every phase control (the bound target's name).
+function QAT.Tracker:SetDisplayName(name)
+	for _, phase in pairs(self.phases) do
+		phase.control.name = name or ""
+	end
+end
+
+-- Reset every lane to its hidden initial phase (used when a slot is (re)bound to a
+-- different target).
+function QAT.Tracker:ResetDynamic()
+	for _, lane in ipairs(self.lanes) do
+		lane:Enter(lane.initial)
+	end
+end
+
+-- Feed the source's effect for the bound target: present=true is a gained event with
+-- the target's timing, present=false a faded event (letting the fade phase play out).
+function QAT.Tracker:FeedDynamic(present, beginTime, endTime, stacks)
+	local ab = self.dynAbilityId
+	if not ab then
+		return
+	end
+	local result = present and EFFECT_RESULT_GAINED or EFFECT_RESULT_FADED
+	self:OnEffect(QAT.DYN_UNIT, ab, result, beginTime, endTime, stacks or 0)
 end

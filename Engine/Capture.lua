@@ -218,6 +218,8 @@ local function persistEnabled()
 	return not QAT.sv or QAT.sv.account.persistCapture ~= false
 end
 
+local seedRow -- forward decl: Capture_Unignore (below) re-seeds via it
+
 -- Rows touched since the last notify, flushed to the library in one batch on the
 -- coalesced tick (so a busy fight writes SavedVars once per cycle, not per event).
 local dirtyRows = {}
@@ -652,9 +654,10 @@ function QAT.Capture_Ignore(abilityId)
 	local kept = {}
 	for _, row in ipairs(QAT.capture.list) do
 		if row.abilityId == abilityId then
+			-- Drop from the live view only; the persisted record is kept so unignoring
+			-- restores it. Ingest already skips ignored abilities, so it won't re-accrue.
 			QAT.capture.store[row.key] = nil
 			QAT.capture.byAbilityTarget[atIndex(abilityId, row.targetName)] = nil
-			QAT.sv.capture.records[row.key] = nil -- purge from the persisted library too
 			dirtyRows[row] = nil
 		else
 			table.insert(kept, row)
@@ -666,15 +669,25 @@ function QAT.Capture_Ignore(abilityId)
 end
 
 function QAT.Capture_Unignore(abilityId)
-	if abilityId then
-		QAT.sv.capture.ignored[abilityId] = nil
-		notifyChanged()
+	if not abilityId then
+		return
 	end
+	QAT.sv.capture.ignored[abilityId] = nil
+	-- Restore the ability's persisted rows to the live view (seedRow now passes the
+	-- ignored gate). New sightings would re-add it anyway, but this brings it back
+	-- immediately and without a fresh cast.
+	local favs = QAT.sv.capture.favourites or {}
+	for key, saved in pairs(QAT.sv.capture.records or {}) do
+		if saved.abilityId == abilityId then
+			seedRow(key, saved, favs[key] ~= nil)
+		end
+	end
+	notifyChanged()
 end
 
 -- Insert one persisted record back into the live store as a library placeholder (until
 -- a live sighting upgrades it). No-op if already present or the ability is ignored.
-local function seedRow(key, saved, favourited)
+function seedRow(key, saved, favourited)
 	if QAT.capture.store[key] or QAT.sv.capture.ignored[saved.abilityId] then
 		return
 	end

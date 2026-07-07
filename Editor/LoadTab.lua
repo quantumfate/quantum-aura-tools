@@ -90,6 +90,112 @@ end
 -- Forward declaration so the Members card's remove button can re-render.
 local render
 
+-- The dynamic-source card (dynamic groups only): pick the emitter (source) that feeds
+-- the group and jump to the single template tracker that is stamped per live target.
+-- Replaces the Members card — a dynamic group binds one template to many targets, so
+-- there is no free-form member list. Returns the y for the load card below.
+local function renderDynamicSource(container, def, get, cw, OUT)
+	local card = get("dcard", function()
+		return QAT.widgets.Card(container, "QAT_Load_DCard", "Dynamic source")
+	end)
+	card:SetTitle("Dynamic source")
+	card:ClearAnchors()
+	card:SetAnchor(TOPLEFT, container, TOPLEFT, OUT, OUT)
+	local PAD = OUT + card.padX
+	local y = OUT + card.contentY
+
+	local sub = get("dSub", function()
+		return QAT.widgets.Label(container, "QAT_Load_DSub", "")
+	end)
+	sub:SetText("Fed live by an emitter. The template tracker below is stamped once per target it emits.")
+	sub:SetColor(0.55, 0.6, 0.7, 1)
+	sub:ClearAnchors()
+	sub:SetAnchor(TOPLEFT, container, TOPLEFT, PAD, y + 3)
+	y = y + 26
+
+	-- Source picker: one selectable button per registered target source.
+	local srcLbl = get("dSrcLbl", function()
+		return QAT.widgets.Label(container, "QAT_Load_DSrcLbl", "")
+	end)
+	srcLbl:SetText("Emitter")
+	srcLbl:SetColor(0.62, 0.68, 0.78, 1)
+	srcLbl:ClearAnchors()
+	srcLbl:SetAnchor(TOPLEFT, container, TOPLEFT, PAD, y + 4)
+	local sx = PAD + 70
+	local names = (QAT.Targeting and QAT.Targeting.SourceNames()) or {}
+	for i, nm in ipairs(names) do
+		local b = get("dSrc" .. i, function()
+			return QAT.widgets.TextButton(container, "QAT_Load_DSrc" .. i, "", nil)
+		end)
+		b:SetText(nm)
+		b:SetHeight(26)
+		b:SetSelected(def.grid.dynamic.source == nm)
+		b:ClearAnchors()
+		b:SetAnchor(TOPLEFT, container, TOPLEFT, sx, y)
+		b.onClick = function()
+			if QAT.Editor_GridSetDynamicSource then
+				QAT.Editor_GridSetDynamicSource(def, nm)
+			end
+		end
+		sx = sx + b:GetWidth() + 8
+	end
+	y = y + 34
+
+	-- Template link: the single child tracker used as the stamp.
+	local tmpl = (def.children or {})[1]
+	local tLbl = get("dTmplLbl", function()
+		return QAT.widgets.Label(container, "QAT_Load_DTmplLbl", "")
+	end)
+	tLbl:SetText("Template")
+	tLbl:SetColor(0.62, 0.68, 0.78, 1)
+	tLbl:ClearAnchors()
+	tLbl:SetAnchor(TOPLEFT, container, TOPLEFT, PAD, y + 4)
+	if tmpl then
+		local edit = get("dTmplBtn", function()
+			return QAT.widgets.TextButton(container, "QAT_Load_DTmplBtn", "", nil)
+		end)
+		edit:SetText("Edit " .. (tmpl.name or tmpl.id) .. " →")
+		edit:SetHeight(26)
+		edit:ClearAnchors()
+		edit:SetAnchor(TOPLEFT, container, TOPLEFT, PAD + 70, y)
+		edit.onClick = function()
+			if QAT.Editor_SelectNode then
+				QAT.Editor_SelectNode(tmpl.id)
+			end
+		end
+	else
+		local add = get("dTmplAdd", function()
+			return QAT.widgets.TextButton(container, "QAT_Load_DTmplAdd", "+ Add template", nil)
+		end)
+		add:SetHeight(26)
+		add:ClearAnchors()
+		add:SetAnchor(TOPLEFT, container, TOPLEFT, PAD + 70, y)
+		add.onClick = function()
+			if QAT.Editor_AddTrackerToGroup then
+				QAT.Editor_AddTrackerToGroup(def.id)
+			end
+		end
+	end
+	y = y + 34
+
+	-- Pointer to the arrangement scope (rows/cols/slot/flow live in Grid layout).
+	local arr = get("dArr", function()
+		return QAT.widgets.TextButton(container, "QAT_Load_DArr", "Open grid layout →", nil)
+	end)
+	arr:SetHeight(26)
+	arr:ClearAnchors()
+	arr:SetAnchor(TOPLEFT, container, TOPLEFT, PAD, y)
+	arr.onClick = function()
+		if QAT.Editor_SelectGrid then
+			QAT.Editor_SelectGrid(def.id)
+		end
+	end
+	y = y + 34
+
+	card:SetDimensions(cw - OUT * 2, (y - OUT) + 8)
+	return y + 22
+end
+
 -- The group Members card (folders only): a titled list of member trackers with a
 -- swatch, name and remove button, plus a "+ Add tracker" action. Returns the
 -- container-space y at which the load-conditions card below it should start.
@@ -609,7 +715,9 @@ render = function(container, def)
 	local OUT = 14
 	local isFolder = def.kind == "folder"
 	local loadTop = OUT
-	if isFolder then
+	if QAT.IsDynamicGroup(def) then
+		loadTop = renderDynamicSource(container, def, get, cw, OUT)
+	elseif isFolder then
 		loadTop = renderMembers(container, def, get, cw, OUT)
 	end
 

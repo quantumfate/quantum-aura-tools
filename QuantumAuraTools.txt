@@ -28,9 +28,11 @@ Engine/Conditions.lua
 Display/Display.lua
 Display/Cues.lua
 Display/Grid.lua
+Display/GroupOutline.lua
 Engine/Tracker.lua
 Engine/Runtime.lua
 Engine/GridLayout.lua
+Engine/Targeting.lua
 Engine/Capture.lua
 Examples/SampleTrackers.lua
 Editor/Widgets.lua

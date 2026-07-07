@@ -127,6 +127,16 @@ drawn table (`def.grid`) — rows×cols, headers, styled cells, fill/fake-growth
 per-tick layout `Engine/GridLayout.lua`. Retired per-layer x/y offsets → 9-point align.
 Spec: `DESIGN.md` "Group grid layout" + [[group-grid-layout]].
 
+**Track-on-target harness done** (`Engine/Targeting.lua`): track a buff/debuff on a
+*specific* target or an *unknown-count set*, beyond the fixed unit-tag model. A
+*TargetSource* yields ordered `{key,name,remaining,duration}` bindings; a grid folder
+with `g.dynamic = {source, slot}` is fed by a source instead of authored cells — the
+layout pass (`Engine/GridLayout.lua`) owns a pooled set of Display bars, packs the live
+set, grows/shrinks. First source = `taunt` (ACTION_RESULT_TAUNT, player, 15s; replaces
+Untaunted). `/qat taunt` seeds the group. Boss-name localization catalog deferred to a
+lib (seam in Targeting `OnTaunt`). Group-member sharing via LibGroupBroadcast is the
+next source. Full plan: [[track-on-target]].
+
 **Next: M6 raid library** + named-boss load condition (target a boss by name; engine
 resolves the live slot; dropdown fed by aggregator-harvested names). Backlog:
 searchable set/ability picker, categorize sets via `LibSets.GetSetInfo.setType`,

@@ -77,6 +77,44 @@ local function isInSubtree(node, id)
 	return false
 end
 
+-- Absolute screen anchor of the group directly containing `id` (0,0 if top-level).
+-- A node's stored position is relative to this, so reparenting must re-base it.
+local function parentAnchorOf(id)
+	local function walk(defs, ax, ay)
+		for _, def in ipairs(defs or {}) do
+			if def.id == id then
+				return ax, ay, true
+			end
+			if def.kind == "folder" then
+				local p = def.pos or { x = 0, y = 0 }
+				local rx, ry, found = walk(def.children, ax + (p.x or 0), ay + (p.y or 0))
+				if found then
+					return rx, ry, true
+				end
+			end
+		end
+		return ax, ay, false
+	end
+	local x, y = walk(QAT.sv.trackers, 0, 0)
+	return x or 0, y or 0
+end
+
+-- Snapshot a node's absolute screen position before a reparent.
+local function absPosOf(node, id)
+	local ax, ay = parentAnchorOf(id)
+	local p = node.pos or { x = 0, y = 0 }
+	return ax + (p.x or 0), ay + (p.y or 0)
+end
+
+-- After a reparent, rewrite the node's relative position so it stays on screen exactly
+-- where it was (its new parent anchor may differ from the old one).
+local function rebaseAfterReparent(node, id, absx, absy)
+	local nax, nay = parentAnchorOf(id)
+	node.pos = node.pos or {}
+	node.pos.x = absx - nax
+	node.pos.y = absy - nay
+end
+
 -- Move a node by drag-drop: onto a folder nests it inside; onto a tracker makes it
 -- a sibling next to it; onto empty space moves it to the top level.
 local function dropNode(dragId, targetDef)
@@ -90,6 +128,9 @@ local function dropNode(dragId, targetDef)
 	if targetDef and isInSubtree(dragged, targetDef.id) then
 		return -- can't move a group into its own descendant
 	end
+	-- Preserve the node's on-screen position across the reparent (its position is
+	-- relative to its parent group's anchor, which is about to change).
+	local absx, absy = absPosOf(dragged, dragId)
 	removeById(QAT.sv.trackers, dragId)
 	if targetDef and targetDef.kind == "folder" then
 		targetDef.children = targetDef.children or {}
@@ -104,6 +145,7 @@ local function dropNode(dragId, targetDef)
 	else
 		table.insert(QAT.sv.trackers, dragged) -- dropped on empty space
 	end
+	rebaseAfterReparent(dragged, dragId, absx, absy)
 	QAT.CanonicalizeTree(QAT.sv.trackers)
 	QAT.widgets.NotifyTrackerChanged() -- load chain changed; rebuild runtime + views
 	QAT.Editor_Tree_Build()
@@ -190,6 +232,34 @@ local function newTrackerDef()
 	})
 end
 
+-- A template tracker for a dynamic group: its first phase subscribes to the group's
+-- emitter (source), so the state machine runs once per emitted element.
+local function sourceTemplateDef()
+	return QAT.CanonicalizeDef({
+		id = newId("tracker_"),
+		kind = "tracker",
+		name = "Template",
+		unit = QAT.DYN_UNIT,
+		enabled = true,
+		pos = { x = 0, y = 0, width = 220, height = 30 },
+		initial = "idle",
+		phases = {
+			{
+				id = "idle",
+				look = { display = "none" },
+				duration = { type = "none" },
+				transitions = { { when = { kind = "source", result = "gained" }, to = "active" } },
+			},
+			{
+				id = "active",
+				look = { display = "bar", showTime = true },
+				duration = { type = "source" },
+				transitions = {},
+			},
+		},
+	})
+end
+
 local function addTracker()
 	local def = newTrackerDef()
 	table.insert(QAT.sv.trackers, def)
@@ -208,6 +278,34 @@ local function addGroup()
 	selectNode(def.id)
 end
 
+-- Add a dynamic group: a table fed by a target source (emitter), pre-seeded with one
+-- template tracker whose first phase subscribes to that source. The template is stamped
+-- once per emitted element at runtime.
+local function addDynamicGroup()
+	local source = (QAT.Targeting and QAT.Targeting.SourceNames() or {})[1]
+	local cx = math.floor(GuiRoot:GetWidth() / 2 - 110)
+	local def = {
+		id = newId("group_"),
+		kind = "folder",
+		name = "Dynamic Group",
+		enabled = true,
+		children = { sourceTemplateDef() },
+		pos = { x = cx, y = 300 },
+		grid = {
+			enabled = true,
+			cols = 1,
+			rows = 8,
+			fill = { enabled = false },
+			dynamic = { source = source, slot = { width = 220, height = 30 } },
+		},
+	}
+	table.insert(QAT.sv.trackers, def)
+	QAT.CanonicalizeTree(QAT.sv.trackers)
+	QAT.log.editor:Debug("added dynamic group '%s' (source=%s)", def.id, tostring(source))
+	QAT.widgets.NotifyTrackerChanged()
+	selectNode(def.id)
+end
+
 -- Add a fresh tracker straight into a group and land on it. Called by the group's
 -- "+ add tracker" tree row and its Members card button.
 function QAT.Editor_AddTrackerToGroup(groupId)
@@ -216,8 +314,15 @@ function QAT.Editor_AddTrackerToGroup(groupId)
 		return
 	end
 	g.children = g.children or {}
-	local def = newTrackerDef()
+	-- A dynamic group's members are templates: pre-wire the new tracker's first phase to
+	-- the group's emitter so it works as a stamp out of the box.
+	local isDynamic = g.grid and g.grid.dynamic and g.grid.dynamic.source
+	local def = isDynamic and sourceTemplateDef() or newTrackerDef()
+	-- newTrackerDef centres on screen in absolute coords; re-base to the group anchor so
+	-- it lands centred rather than offset by the group's position.
+	local absx, absy = (def.pos and def.pos.x) or 0, (def.pos and def.pos.y) or 0
 	table.insert(g.children, def)
+	rebaseAfterReparent(def, def.id, absx, absy)
 	QAT.editor.collapsed[groupId] = nil -- keep the group open so the new row shows
 	QAT.log.editor:Debug("added tracker '%s' to group '%s'", def.id, groupId)
 	QAT.CanonicalizeTree(QAT.sv.trackers)
@@ -233,8 +338,12 @@ function QAT.Editor_UnparentTracker(trackerId)
 	if not dragged then
 		return
 	end
+	-- Keep it where it is on screen: its absolute position becomes its new top-level
+	-- position (top-level anchor is the origin).
+	local absx, absy = absPosOf(dragged, trackerId)
 	removeById(QAT.sv.trackers, trackerId)
 	table.insert(QAT.sv.trackers, dragged)
+	rebaseAfterReparent(dragged, trackerId, absx, absy)
 	QAT.log.editor:Debug("unparented tracker '%s' to top level", trackerId)
 	QAT.CanonicalizeTree(QAT.sv.trackers)
 	QAT.widgets.NotifyTrackerChanged() -- load chain changed; rebuild runtime + views
@@ -603,7 +712,7 @@ local function makeLoadRow(parent, def, depth, y)
 	label:SetAnchor(LEFT, row, LEFT, 8 + depth * INDENT, 0)
 
 	local badge = ensureBadge(row, name .. "_Badge", 0.62, 0.72, 0.90)
-	badge:SetText(isFolder and "GROUP" or "AURA")
+	badge:SetText(QAT.IsDynamicGroup(def) and "DYNAMIC" or (isFolder and "GROUP" or "AURA"))
 	badge:SetHidden(false)
 	badge:ClearAnchors()
 	badge:SetAnchor(LEFT, label, RIGHT, 8, 0)
@@ -924,9 +1033,18 @@ function QAT.Editor_Tree_Build(pane)
 		addG:SetHeight(TOOLBAR_H - 6)
 		addG:SetAnchor(LEFT, addT, RIGHT, GAP, 0)
 		QAT.widgets.Tooltip(addG, "Add a group (folder). Its Load conditions cascade to the trackers inside it.")
+		local addD = QAT.widgets.TextButton(tb, "QAT_Tree_Btn_AddDynamic", "+ Dynamic", addDynamicGroup)
+		addD:SetHeight(TOOLBAR_H - 6)
+		addD:SetAnchor(LEFT, addG, RIGHT, GAP, 0)
+		QAT.widgets.Tooltip(
+			addD,
+			"Add a dynamic group: a table fed by an emitter (e.g. taunts). Its template tracker is stamped once per live target."
+		)
+		-- Delete is pinned to the toolbar's right edge so the three add buttons never push
+		-- it off the pane / over the content header.
 		local delBtn = QAT.widgets.TextButton(tb, "QAT_Tree_Btn_Delete", "Delete", deleteSelected)
 		delBtn:SetHeight(TOOLBAR_H - 6)
-		delBtn:SetAnchor(LEFT, addG, RIGHT, GAP, 0)
+		delBtn:SetAnchor(RIGHT, tb, RIGHT, -GAP, 0)
 		QAT.widgets.Tooltip(delBtn, "Delete the selected tracker or group.")
 
 		-- Scroll viewport filling the pane below the toolbar: a ZO_ScrollContainer so

@@ -13,6 +13,12 @@ QAT.runtime.grids = QAT.runtime.grids or {}
 local HHDR_ROW, HHDR_COL = 24, 90
 local DEFAULT_W, DEFAULT_H = 150, 34
 
+-- Dynamic groups own a pool of full template-tracker INSTANCES (one per cell), each a
+-- clone of the group's template, driven per-target by a Targeting source instead of the
+-- global event bus. Kept module-level so instance controls persist (reused by name)
+-- across runtime rebuilds.
+local dynSlots = {} -- groupId -> { instances = { Tracker, ... }, slotW, slotH, ability }
+
 -- A member tracker's footprint on the HUD. Square-only trackers (icon/border/gradient
 -- with no bar/text phase) are height-wide; anything with a bar/text phase uses the
 -- authored box width.
@@ -77,7 +83,9 @@ local function layoutGroup(entry)
 	local s = g.style
 	local gap = s.gap
 	local origin = def.pos or { x = 400, y = 300 }
-	local ox, oy = origin.x or 400, origin.y or 300
+	-- Absolute screen origin: the parent anchor (nested groups) plus this group's pos.
+	local anchor = entry.anchor or { x = 0, y = 0 }
+	local ox, oy = (anchor.x or 0) + (origin.x or 400), (anchor.y or 0) + (origin.y or 300)
 
 	-- Frozen sizes: column width = widest assigned member in the column; row height =
 	-- tallest in the row. Empty columns/rows fall back to a default so the frame reads.
@@ -164,9 +172,13 @@ local function layoutGroup(entry)
 			local kid = memberDef(def, tid)
 			if kid then
 				local w, h = footprint(kid)
-				local mx = colX[c] + math.floor((colW[c] - w) / 2)
+				-- Horizontal placement within the cell follows the grid's align setting;
+				-- vertical is always centered.
+				local slackX = colW[c] - w
+				local ox2 = (g.align == "left") and 0 or (g.align == "right") and slackX or math.floor(slackX / 2)
+				local mx = colX[c] + ox2
 				local my = rowY[r] + math.floor((rowH[r] - h) / 2)
-				QAT.Runtime_RepositionTracker(tid, mx, my)
+				QAT.Runtime_PlaceTrackerAbsolute(tid, mx, my)
 			end
 		end
 	end
@@ -215,12 +227,245 @@ local function layoutGroup(entry)
 	QAT.gridDisplay.End(id)
 end
 
+-- The group's single non-folder child is its template tracker (authored like any
+-- tracker); nil = use a synthesized default.
+local function templateChild(def)
+	for _, c in ipairs(def.children or {}) do
+		if c.kind ~= "folder" then
+			return c
+		end
+	end
+	return nil
+end
+
+-- Default template when a dynamic group has no authored one: hidden idle plus a bar
+-- shown while the source effect is live (name + remaining). Reproduces the pre-template
+-- behaviour so an empty dynamic group still renders.
+local function defaultTemplate(slotW, slotH)
+	return {
+		kind = "tracker",
+		unit = QAT.DYN_UNIT,
+		phases = {
+			{
+				id = "idle",
+				look = { display = "none" },
+				duration = { type = "none" },
+				transitions = { { when = { kind = "source", result = "gained" }, to = "active" } },
+			},
+			{
+				id = "active",
+				look = { display = "bar", showTime = true },
+				duration = { type = "source" },
+				transitions = {},
+			},
+		},
+		initial = "idle",
+		pos = { width = slotW, height = slotH },
+	}
+end
+
+-- Clone the template into one pooled instance def, resolving its explicit `source`
+-- subscriptions (a `source` duration or transition trigger) into a concrete effect on
+-- the reserved dynamic unit + ability — so the source can drive the phase machine
+-- directly (a real EVENT_EFFECT_CHANGED never fires for these). Everything else
+-- (appearance, real-effect phases the author wrote, transitions) is left untouched.
+local function instanceDef(template, groupId, i, srcAbilityId, slotW, slotH)
+	local def = QAT.util.DeepCopy(template)
+	def.id = groupId .. "_slot" .. i
+	def.kind = "tracker"
+	def.enabled = true
+	def.load = nil -- the group's load chain gates the whole grid, not each instance
+	def.pos = {
+		x = 0,
+		y = 0,
+		width = (template.pos and template.pos.width) or slotW,
+		height = (template.pos and template.pos.height) or slotH,
+	}
+	for _, p in ipairs(def.phases or {}) do
+		if p.duration and p.duration.type == "source" then
+			p.duration = { type = "effect", abilityIds = { srcAbilityId }, unit = QAT.DYN_UNIT }
+		end
+		for _, tr in ipairs(p.transitions or {}) do
+			if tr.when and tr.when.kind == "source" then
+				tr.when = {
+					kind = "effect",
+					result = tr.when.result or "gained",
+					abilityIds = { srcAbilityId },
+					unit = QAT.DYN_UNIT,
+				}
+			end
+		end
+	end
+	QAT.CanonicalizeDef(def)
+	return def
+end
+
+-- (Re)build a dynamic group's instance pool: rows*cols full template-tracker instances,
+-- each a clone of the template with a stable per-slot id (so Display controls are reused
+-- by name across rebuilds). Instances are driven by the source, not the global event bus.
+local function buildPool(def, anchor)
+	local g = def.grid
+	local cap = g.rows * g.cols
+	local srcAbilityId = QAT.Targeting.PrimaryAbilityId(g.dynamic.source)
+	local slotW, slotH = g.dynamic.slot.width, g.dynamic.slot.height
+	local template = templateChild(def) or defaultTemplate(slotW, slotH)
+	local fw = (template.pos and template.pos.width) or slotW
+	local fh = (template.pos and template.pos.height) or slotH
+
+	local pool = { instances = {}, slotW = fw, slotH = fh, ability = srcAbilityId }
+	dynSlots[def.id] = pool
+	for i = 1, cap do
+		local idef = instanceDef(template, def.id, i, srcAbilityId, slotW, slotH)
+		local inst = QAT.Tracker.New(idef, {}, anchor or { x = 0, y = 0 })
+		inst.dynAbilityId = srcAbilityId
+		inst.loaded = true
+		inst:ResetDynamic() -- start every lane in its hidden initial phase
+		pool.instances[i] = inst
+	end
+	return pool
+end
+QAT.GridLayout_BuildDynamicPool = buildPool
+
+-- Hide every instance control of every dynamic pool (rebuild / disable).
+local function hideAllSlots()
+	for _, pool in pairs(dynSlots) do
+		for _, inst in ipairs(pool.instances or {}) do
+			for _, phase in pairs(inst.phases) do
+				phase.control:SetState(false)
+			end
+		end
+	end
+end
+
+-- Is an instance drawing anything right now (any phase control visible)?
+local function instPresent(inst)
+	for _, phase in pairs(inst.phases) do
+		if phase.control.tlw and not phase.control.tlw:IsHidden() then
+			return true
+		end
+	end
+	return false
+end
+
+-- Lay out one dynamic group: bind the source's live targets to pooled template
+-- instances (stable per key so a re-sorted snapshot doesn't churn the machines), tick
+-- each machine, then pack the visible ones into cells sorted soonest-expiry-first — so
+-- the table grows and shrinks with the live set. `entry` is { def, loadChain, anchor }.
+local function layoutDynamic(entry)
+	local def = entry.def
+	local g = def.grid
+	local id = def.id
+	local pool = dynSlots[id]
+	if not (g and g.enabled and g.dynamic and pool) then
+		QAT.gridDisplay.Hide(id)
+		return
+	end
+	local now = GetFrameTimeSeconds()
+	if entry.loadChain and not QAT.conditions.EvaluateLoad(entry.loadChain) then
+		QAT.gridDisplay.Hide(id)
+		for _, inst in ipairs(pool.instances) do
+			for _, phase in pairs(inst.phases) do
+				phase.control:SetState(false)
+			end
+		end
+		return
+	end
+
+	local snap = QAT.Targeting.Snapshot(g.dynamic.source, now)
+	local cap = g.rows * g.cols
+	local insts = pool.instances
+
+	-- Release instances whose bound target left the set (lets the fade phase play out).
+	local current = {}
+	for _, b in ipairs(snap) do
+		current[b.key] = b
+	end
+	for i = 1, cap do
+		local inst = insts[i]
+		if inst.boundKey and not current[inst.boundKey] then
+			inst:FeedDynamic(false)
+			inst.boundKey, inst.boundEnd = nil, nil
+		end
+	end
+	-- Assign each live target to an instance (refresh if already bound, else a free slot).
+	for _, b in ipairs(snap) do
+		local bound
+		for i = 1, cap do
+			if insts[i].boundKey == b.key then
+				bound = insts[i]
+				break
+			end
+		end
+		if bound then
+			if bound.boundEnd ~= b.endTime then
+				bound:FeedDynamic(true, b.beginTime, b.endTime, b.stacks) -- re-applied (e.g. re-taunt)
+				bound.boundEnd = b.endTime
+			end
+		else
+			for i = 1, cap do
+				local inst = insts[i]
+				if not inst.boundKey then
+					inst:ResetDynamic()
+					inst:SetDisplayName(b.name)
+					inst:FeedDynamic(true, b.beginTime, b.endTime, b.stacks)
+					inst.boundKey, inst.boundEnd = b.key, b.endTime
+					break
+				end
+			end
+		end
+	end
+	-- Advance every machine (bound counts down; released ones finish their fade).
+	for i = 1, #insts do
+		insts[i]:Tick(now)
+	end
+
+	-- Pack the visible instances, soonest-expiry-first.
+	local s = g.style
+	local gap = s.gap
+	local slotW, slotH = pool.slotW, pool.slotH
+	local origin = def.pos or { x = 400, y = 300 }
+	local anchor = entry.anchor or { x = 0, y = 0 }
+	local ox, oy = (anchor.x or 0) + (origin.x or 400), (anchor.y or 0) + (origin.y or 300)
+	local byCols = g.fill and g.fill.axis == "cols"
+
+	local present = {}
+	for i = 1, cap do
+		if instPresent(insts[i]) then
+			present[#present + 1] = insts[i]
+		end
+	end
+	table.sort(present, function(a, b)
+		return (a.boundEnd or math.huge) < (b.boundEnd or math.huge)
+	end)
+
+	-- No cell chrome: the template instance owns its own background/border, so a dynamic
+	-- group draws only the instances (Begin/End still clears any stale pooled chrome).
+	QAT.gridDisplay.Begin(id)
+	for idx, inst in ipairs(present) do
+		local n = idx - 1
+		local r, c
+		if byCols then
+			r, c = (n % g.rows) + 1, math.floor(n / g.rows) + 1
+		else
+			r, c = math.floor(n / g.cols) + 1, (n % g.cols) + 1
+		end
+		local x = ox + (c - 1) * (slotW + gap)
+		local y = oy + (r - 1) * (slotH + gap)
+		inst:PlaceAbsolute(x, y)
+	end
+	QAT.gridDisplay.End(id)
+end
+
 -- Reposition + redraw every live grid group. Called each render tick after trackers
 -- have ticked (so member visibility is current).
 function QAT.GridLayout_Update()
 	for _, entry in ipairs(QAT.runtime.grids) do
 		QAT.Safe("grid layout " .. tostring(entry.def.id), function()
-			layoutGroup(entry)
+			if entry.def.grid and entry.def.grid.dynamic then
+				layoutDynamic(entry)
+			else
+				layoutGroup(entry)
+			end
 		end)
 	end
 end
@@ -230,10 +475,18 @@ function QAT.GridLayout_Reset()
 	for _, entry in ipairs(QAT.runtime.grids) do
 		QAT.gridDisplay.Hide(entry.def.id)
 	end
+	hideAllSlots() -- dynamic-grid slot controls (persist by name; just hide them)
 	QAT.runtime.grids = {}
 end
 
--- Register a grid group discovered during BuildTrackers.
-function QAT.GridLayout_Register(def, loadChain)
-	QAT.runtime.grids[#QAT.runtime.grids + 1] = { def = def, loadChain = loadChain }
+-- Register a grid group discovered during BuildTrackers. `anchor` is the parent's
+-- absolute screen anchor (the group's own pos is added on top in layoutGroup). A dynamic
+-- group also builds its template-instance pool here.
+function QAT.GridLayout_Register(def, loadChain, anchor)
+	QAT.runtime.grids[#QAT.runtime.grids + 1] = { def = def, loadChain = loadChain, anchor = anchor }
+	if def.grid and def.grid.dynamic and def.grid.dynamic.source then
+		QAT.Safe("build dynamic pool " .. tostring(def.id), function()
+			buildPool(def, anchor)
+		end)
+	end
 end

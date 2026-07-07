@@ -624,6 +624,15 @@ function QAT.Aggregator_Refresh()
 
 	refreshZoneOptions()
 
+	-- Ignored button carries the count of ignored abilities.
+	if a.ignoredBtn then
+		local n = 0
+		for _ in pairs(QAT.sv.capture.ignored) do
+			n = n + 1
+		end
+		a.ignoredBtn:SetText(n > 0 and ("Ignored  " .. n) or "Ignored")
+	end
+
 	-- Freeze holds the LIST still for reading; the control bar keeps updating so the
 	-- FROZEN state is visible and capture is clearly still running.
 	if QAT.Aggregator_List_Render and not cap.frozen then
