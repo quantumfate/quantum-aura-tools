@@ -392,13 +392,46 @@ local function render(container, def)
 	end
 
 	rowLabel(src, "Id", "Phase id", sy)
-	local idLbl = get("idLbl", function()
-		return QAT.widgets.Label(src, "QAT_App_IdLbl", "")
+	local idBox = get("idBox", function()
+		return QAT.widgets.EditBox(src, "QAT_App_IdBox", 100, ROW_H)
 	end)
-	idLbl:SetText(phase.id)
-	idLbl:SetColor(0.55, 0.62, 0.72, 1)
-	idLbl:ClearAnchors()
-	idLbl:SetAnchor(TOPLEFT, src, TOPLEFT, sLX, vy(sy, ROW_H))
+	idBox.onChange = function(text)
+		text = zo_strtrim(text)
+		if text ~= "" and text ~= phase.id then
+			for _, p in ipairs(def.phases) do
+				if p.id == text then
+					idBox:SetText(phase.id)
+					return
+				end
+			end
+			local was = phase.id
+			phase.id = text
+			if def.initial == was then
+				def.initial = text
+			end
+			if def.layerInitial then
+				for layer, id in pairs(def.layerInitial) do
+					if id == was then
+						def.layerInitial[layer] = text
+					end
+				end
+			end
+			for _, p in ipairs(def.phases) do
+				for _, tr in ipairs(p.transitions) do
+					if tr.to == was then
+						tr.to = text
+					end
+				end
+			end
+			QAT.editor.selectedPhaseId = text
+			commit(def)
+			QAT.Editor_Inspector_Refresh()
+		end
+	end
+	idBox:SetDimensions(sFieldW, ROW_H)
+	idBox:SetText(phase.id)
+	idBox:ClearAnchors()
+	idBox:SetAnchor(TOPLEFT, src, TOPLEFT, sLX, vy(sy, ROW_H))
 	sy = sy + RH
 
 	rowLabel(src, "Kind", "Kind", sy)
