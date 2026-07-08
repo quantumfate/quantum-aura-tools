@@ -54,7 +54,7 @@ function QAT.Editor_AddPhase(def, layer)
 	end
 	table.insert(
 		def.phases,
-		{ id = id, layer = layer or 0, look = { display = "bar" }, duration = { type = "none" }, transitions = {} }
+		{ id = id, layer = layer or 0, look = { display = "none" }, duration = { type = "none" }, transitions = {} }
 	)
 	QAT.editor.selectedPhaseId = id
 	QAT.editor.selectedScope = "phase"
@@ -165,6 +165,25 @@ function QAT.Editor_AddLayer(def)
 		end
 	end
 	QAT.Editor_AddPhase(def, maxLayer + 1)
+end
+
+function QAT.Editor_DeleteLayer(def, layer)
+	layer = layer or 0
+	local kept = {}
+	for i, p in ipairs(def.phases) do
+		if (p.layer or 0) ~= layer then
+			kept[#kept + 1] = p
+		end
+	end
+	if #kept == #def.phases then
+		return -- layer not found or would remove everything
+	end
+	if #kept == 0 then
+		return -- cannot delete the last phase
+	end
+	def.phases = kept
+	QAT.CanonicalizeDef(def)
+	QAT.widgets.NotifyTrackerChanged(def.id)
 end
 
 -- Transplant another tracker def's phases into `target` as a brand-new parallel layer
@@ -373,17 +392,34 @@ function QAT.Editor_Inspector_Build(pane)
 		return function(text)
 			local n = tonumber(text)
 			local def = curDef()
-			if def and n then
-				local pos = def.pos or {}
-				local maxv = (field == "x") and (GuiRoot:GetWidth() - (pos.width or 220))
-					or (GuiRoot:GetHeight() - (pos.height or 30))
-				n = zo_clamp(zo_round(n), 0, maxv)
-				def.pos = def.pos or {}
-				def.pos[field] = n
-				box:SetText(tostring(n)) -- reflect the clamped value
-				if QAT.Runtime_RepositionTracker then
-					QAT.Runtime_RepositionTracker(def.id, def.pos.x or 0, def.pos.y or 0)
+			if not (def and n) then
+				return
+			end
+			def.pos = def.pos or {}
+			if def.kind == "folder" then
+				-- A group's position is its anchor; members are relative and follow. Clamp
+				-- so the whole group stays on screen, then reflect the clamped anchor.
+				def.pos[field] = zo_round(n)
+				if QAT.GroupOutline_ClampToScreen then
+					QAT.GroupOutline_ClampToScreen(def.id)
 				end
+				if insp.posXBox then
+					insp.posXBox:SetText(tostring(def.pos.x or 0))
+					insp.posYBox:SetText(tostring(def.pos.y or 0))
+				end
+				if QAT.Runtime_ReanchorAll then
+					QAT.Runtime_ReanchorAll()
+				end
+				return
+			end
+			-- A tracker's position is relative to its parent group anchor (absolute for a
+			-- top-level tracker). Not screen-clamped: a member can sit at a negative offset.
+			local pos = def.pos
+			n = zo_round(n)
+			pos[field] = n
+			box:SetText(tostring(n))
+			if QAT.Runtime_RepositionTracker then
+				QAT.Runtime_RepositionTracker(def.id, pos.x or 0, pos.y or 0)
 			end
 		end
 	end
@@ -402,16 +438,40 @@ function QAT.Editor_Inspector_Build(pane)
 		"Position of the top-left corner from the screen's top-left (x right, y down), clamped to the screen. Drag the tracker on the HUD for fine control."
 	)
 
-	-- Row 1 right group: Center (recentre the tracker on screen).
+	-- Row 1 right group: Center (recentre the tracker or group anchor on screen).
 	insp.move = QAT.widgets.TextButton(row1, "QAT_Insp_Move", "Center", function()
 		local def = curDef()
 		if def then
 			local pos = def.pos or {}
 			def.pos = pos
-			pos.x = zo_round(GuiRoot:GetWidth() / 2 - (pos.width or 220) / 2)
-			pos.y = zo_round(GuiRoot:GetHeight() / 2 - (pos.height or 30) / 2)
-			if QAT.Runtime_RepositionTracker then
-				QAT.Runtime_RepositionTracker(def.id, pos.x, pos.y)
+			if def.kind == "folder" then
+				-- Shift the group's anchor so its members' bounding box is screen-centered
+				-- (centering the anchor point alone would push large offsets off-screen).
+				local x, y, w, h
+				if QAT.GroupOutline_Rect then
+					x, y, w, h = QAT.GroupOutline_Rect(def.id)
+				end
+				if x then
+					local cx = GuiRoot:GetWidth() / 2 - w / 2
+					local cy = GuiRoot:GetHeight() / 2 - h / 2
+					pos.x = zo_round((pos.x or 0) + (cx - x))
+					pos.y = zo_round((pos.y or 0) + (cy - y))
+				else
+					pos.x = zo_round(GuiRoot:GetWidth() / 2 - 110)
+					pos.y = zo_round(GuiRoot:GetHeight() / 2 - 15)
+				end
+				if QAT.GroupOutline_ClampToScreen then
+					QAT.GroupOutline_ClampToScreen(def.id)
+				end
+				if QAT.Runtime_ReanchorAll then
+					QAT.Runtime_ReanchorAll()
+				end
+			else
+				pos.x = zo_round(GuiRoot:GetWidth() / 2 - (pos.width or 220) / 2)
+				pos.y = zo_round(GuiRoot:GetHeight() / 2 - (pos.height or 30) / 2)
+				if QAT.Runtime_RepositionTracker then
+					QAT.Runtime_RepositionTracker(def.id, pos.x, pos.y)
+				end
 			end
 			QAT.Editor_Inspector_Show(insp.currentId) -- refresh the X/Y boxes
 		end
@@ -428,9 +488,14 @@ function QAT.Editor_Inspector_Build(pane)
 	crumb:SetHeight(22)
 	insp.crumb = crumb
 
+	insp.crumbIcon = WM:CreateControl("QAT_Insp_CrumbIcon", crumb, CT_TEXTURE)
+	insp.crumbIcon:SetDimensions(20, 20)
+	insp.crumbIcon:SetAnchor(LEFT, crumb, LEFT, 0, 0)
+	insp.crumbIcon:SetHidden(true)
+
 	insp.crumbRoot = QAT.widgets.Label(crumb, "QAT_Insp_CrumbRoot", "")
 	insp.crumbRoot:SetColor(0.55, 0.62, 0.74, 1)
-	insp.crumbRoot:SetAnchor(LEFT, crumb, LEFT, 0, 0)
+	insp.crumbRoot:SetAnchor(LEFT, insp.crumbIcon, RIGHT, 6, 0)
 	insp.crumbRoot:SetMouseEnabled(true)
 	insp.crumbRoot:SetHandler("OnMouseUp", function(_, button, upInside)
 		if upInside and button == MOUSE_BUTTON_INDEX_LEFT and insp.currentId then
@@ -461,6 +526,16 @@ function QAT.Editor_Inspector_Build(pane)
 	insp.delPhaseBtn:SetHeight(22)
 	insp.delPhaseBtn:SetAnchor(RIGHT, crumb, RIGHT, 0, 0)
 	QAT.widgets.Tooltip(insp.delPhaseBtn, "Delete the selected phase.")
+
+	insp.delLayerBtn = QAT.widgets.TextButton(crumb, "QAT_Insp_DelLayer", "Delete layer", function()
+		local def = curDef()
+		if def then
+			QAT.Editor_DeleteLayer(def, QAT.editor.selectedLayer or 0)
+		end
+	end)
+	insp.delLayerBtn:SetHeight(22)
+	insp.delLayerBtn:SetAnchor(RIGHT, crumb, RIGHT, 0, 0)
+	QAT.widgets.Tooltip(insp.delLayerBtn, "Delete the selected layer and all its phases.")
 
 	insp.setInitBtn = QAT.widgets.TextButton(crumb, "QAT_Insp_SetInit", "Set initial", function()
 		local def = curDef()
@@ -515,37 +590,69 @@ end
 
 QAT.editor.tabRenderers = QAT.editor.tabRenderers or {}
 
+-- Resolve the best icon to show beside the tracker name in the breadcrumb.
+local function crumbIcon(def)
+	if def.icon and def.icon ~= "" then
+		return def.icon
+	end
+	if def.kind == "dynamic" and def.source then
+		local srcIcon = QAT.Targeting and QAT.Targeting.GetIcon(def.source)
+		if srcIcon then
+			return srcIcon
+		end
+	end
+	for _, p in ipairs(def.phases or {}) do
+		local ic = QAT.util.PhaseIcon(p, def)
+		if ic then
+			return ic
+		end
+	end
+	return nil
+end
+
 -- Update the breadcrumb + phase-action buttons for the current selection.
 local function renderCrumb(def)
 	local insp = QAT.editor.inspector
 	local isFolder = def.kind == "folder"
+	local isDynamic = def.kind == "dynamic"
 	local scope = QAT.editor.selectedScope or "load"
+	local ic = crumbIcon(def)
+	if ic then
+		insp.crumbIcon:SetTexture(ic)
+		insp.crumbIcon:SetHidden(false)
+	else
+		insp.crumbIcon:SetHidden(true)
+	end
 	insp.crumbRoot:SetText(def.name or def.id)
 	if scope == "phase" and not isFolder then
 		insp.crumbLeaf:SetText(QAT.editor.selectedPhaseId or "")
 		local isInitial = QAT.Editor_IsInitialPhase(def, QAT.editor.selectedPhaseId)
 		insp.crumbBadge:SetText("INITIAL")
 		insp.crumbBadge:SetHidden(not isInitial)
-		insp.setInitBtn:SetHidden(false)
-		insp.setInitBtn:SetSelected(isInitial)
+		-- Dynamic trackers: allow delete but not Set initial (locked to source).
+		insp.setInitBtn:SetHidden(isDynamic)
 		insp.delPhaseBtn:SetHidden(false)
+		insp.delLayerBtn:SetHidden(true)
 	elseif scope == "layer" and not isFolder then
 		insp.crumbLeaf:SetText("Layer " .. ((QAT.editor.selectedLayer or 0) + 1))
 		insp.crumbBadge:SetHidden(true)
 		insp.setInitBtn:SetHidden(true)
 		insp.delPhaseBtn:SetHidden(true)
+		insp.delLayerBtn:SetHidden(false)
 	elseif scope == "grid" and isFolder then
 		insp.crumbLeaf:SetText("Grid layout")
 		insp.crumbBadge:SetText("GROUP")
 		insp.crumbBadge:SetHidden(false)
 		insp.setInitBtn:SetHidden(true)
 		insp.delPhaseBtn:SetHidden(true)
+		insp.delLayerBtn:SetHidden(true)
 	else
 		insp.crumbLeaf:SetText("Load")
-		insp.crumbBadge:SetText(isFolder and "GROUP" or "AURA")
+		insp.crumbBadge:SetText(isDynamic and "DYNAMIC" or (isFolder and "GROUP" or "AURA"))
 		insp.crumbBadge:SetHidden(false)
 		insp.setInitBtn:SetHidden(true)
 		insp.delPhaseBtn:SetHidden(true)
+		insp.delLayerBtn:SetHidden(true)
 	end
 end
 
@@ -802,66 +909,101 @@ function QAT.Editor_Inspector_Show(id)
 	insp.nameCaption:SetHidden(not def)
 	insp.nameBox:SetHidden(not def)
 	insp.move:SetHidden(not def)
-	-- Size + position apply to a drawn tracker; folders have neither.
 	local isFolder = def ~= nil and def.kind == "folder"
-	local showTracker = def ~= nil and not isFolder
-	for _, c in ipairs({
-		insp.sizeCaption,
-		insp.widthBox,
-		insp.sizeX,
-		insp.heightBox,
-		insp.posCaption,
-		insp.posXBox,
-		insp.posX,
-		insp.posYBox,
-	}) do
-		c:SetHidden(not showTracker)
+	-- A grid member's position is owned by the table layout, so it is not settable.
+	local isGridMember = def ~= nil and not isFolder and QAT.Runtime_IsGridMember and QAT.Runtime_IsGridMember(def.id)
+	-- Size applies to a drawn tracker (defines its box / grid footprint). Position
+	-- applies to a tracker OR a group (its anchor), but never to a grid member.
+	local showSize = def ~= nil and not isFolder
+	local showPos = def ~= nil and not isGridMember
+	for _, c in ipairs({ insp.sizeCaption, insp.widthBox, insp.sizeX, insp.heightBox }) do
+		c:SetHidden(not showSize)
 	end
-	insp.groupNote:SetHidden(not isFolder)
-	if isFolder then
-		insp.groupNote:SetText("Group container · positions are set per member aura")
+	for _, c in ipairs({ insp.posCaption, insp.posXBox, insp.posX, insp.posYBox }) do
+		c:SetHidden(not showPos)
+	end
+	insp.posCaption:SetText(isFolder and "Anchor" or "Position")
+	-- A group hides Size, so anchor the position fields straight after the name to close
+	-- the gap; a tracker keeps them after the (visible) size fields.
+	insp.posCaption:ClearAnchors()
+	insp.posCaption:SetAnchor(LEFT, isFolder and insp.nameBox or insp.heightBox, RIGHT, 18, 0)
+	-- The note only appears for grid members (which have no position fields to collide
+	-- with); a group's Anchor fields plus its self-labeled HUD outline say enough.
+	insp.groupNote:SetHidden(not isGridMember)
+	if isGridMember then
+		insp.groupNote:SetText("In a grid · position is set by the table layout")
+	elseif isFolder then
+		insp.groupNote:SetText("Group · drag its outline on the HUD to move all members together")
 	end
 
 	if def then
 		insp.nameBox:SetText(def.name or def.id)
-		if showTracker then
-			local pos = def.pos or {}
+		local pos = def.pos or {}
+		if showSize then
 			insp.widthBox:SetText(tostring(pos.width or 220))
 			insp.heightBox:SetText(tostring(pos.height or 30))
+		end
+		if showPos then
 			insp.posXBox:SetText(tostring(pos.x or 0))
 			insp.posYBox:SetText(tostring(pos.y or 0))
 		end
 	end
 	refreshBody()
+	-- Re-arm HUD dragging for the newly selected node (only it is grabbable).
+	if QAT.Runtime_ApplyDragSelection then
+		QAT.Runtime_ApplyDragSelection()
+	end
 end
 
--- Live update while a tracker is being dragged on the HUD: persist the top-left
+-- The drag reports an ABSOLUTE top-left; def.pos stores a position RELATIVE to the
+-- parent group anchor. Subtract the tracker's live anchor to convert.
+local function absToRel(id, x, y)
+	local t = QAT.runtime and QAT.runtime.trackers and QAT.runtime.trackers[id]
+	if t then
+		return x - (t.anchorX or 0), y - (t.anchorY or 0)
+	end
+	return x, y
+end
+
+-- Live update while a tracker is being dragged on the HUD: persist the relative
 -- position and reflect it in the X/Y boxes, without a full inspector rebuild.
 function QAT.Editor_SetTrackerPosLive(id, x, y)
 	local def = findDef(QAT.sv.trackers, id)
 	if not def then
 		return
 	end
+	local rx, ry = absToRel(id, x, y)
 	def.pos = def.pos or {}
-	def.pos.x, def.pos.y = x, y
+	def.pos.x, def.pos.y = rx, ry
 	local insp = QAT.editor.inspector
 	if insp and insp.currentId == id and insp.posXBox then
-		insp.posXBox:SetText(tostring(x))
-		insp.posYBox:SetText(tostring(y))
+		insp.posXBox:SetText(tostring(rx))
+		insp.posYBox:SetText(tostring(ry))
 	end
 end
 
--- Called by Display when a drag ends: persist the final top-left position and
+-- Live update while a group's outline is dragged on the HUD: reflect the group's
+-- anchor in the inspector's X/Y boxes (def.pos is written by the outline handler).
+function QAT.Editor_SetGroupPosLive(id, x, y)
+	local insp = QAT.editor.inspector
+	if insp and insp.currentId == id and insp.posXBox then
+		insp.posXBox:SetText(tostring(zo_round(x)))
+		insp.posYBox:SetText(tostring(zo_round(y)))
+	end
+end
+
+-- Called by Display when a drag ends: persist the final relative position and
 -- refresh the inspector so its X/Y boxes track the drag.
 function QAT.Editor_OnTrackerDragged(id, x, y)
 	local def = findDef(QAT.sv.trackers, id)
 	if not def then
 		return
 	end
+	local rx, ry = absToRel(id, x, y)
 	def.pos = def.pos or {}
-	def.pos.x, def.pos.y = x, y
+	def.pos.x, def.pos.y = rx, ry
 	if QAT.Runtime_RepositionTracker then
-		QAT.Runtime_RepositionTracker(id, x, y) -- re-anchor all phases cleanly
+		QAT.Runtime_RepositionTracker(id, rx, ry) -- re-anchor all phases cleanly
 	end
 	local insp = QAT.editor.inspector
 	if insp and insp.currentId == id then

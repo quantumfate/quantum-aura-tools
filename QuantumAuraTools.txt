@@ -1,7 +1,7 @@
 ## Title: Quantum's Aura Tools
 ## Author: |cFF66CC@quantumfate|r
-## Version: 0.2.0-beta7
-## AddOnVersion: 206
+## Version: 0.2.0-beta8
+## AddOnVersion: 208
 ## APIVersion: 101050
 ## Description: Phase-based aura, uptime and raid-mechanic tracker. Build trackers for buffs, debuffs, procs and cooldowns.
 ## SavedVariables: QuantumAuraToolsSV
@@ -28,9 +28,11 @@ Engine/Conditions.lua
 Display/Display.lua
 Display/Cues.lua
 Display/Grid.lua
+Display/GroupOutline.lua
 Engine/Tracker.lua
 Engine/Runtime.lua
 Engine/GridLayout.lua
+Engine/Targeting.lua
 Engine/Capture.lua
 Examples/SampleTrackers.lua
 Editor/Widgets.lua

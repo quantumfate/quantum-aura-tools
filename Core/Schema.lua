@@ -175,6 +175,11 @@ local function canonicalWhen(when, defUnit)
 		when.result = when.result or "gained"
 		when.abilityIds = when.abilityIds or {}
 		when.unit = when.unit or defUnit
+	elseif kind == "source" then
+		-- Emitter subscription (dynamic groups): the phase reacts to the group's source
+		-- emitting/dropping an element. Resolved to a concrete effect per instance at
+		-- build time (see Engine/GridLayout instanceDef); has no ability id here.
+		when.result = when.result or "gained"
 	elseif kind == "stacks" or kind == "remaining" then
 		when.op = when.op or ">="
 		when.value = when.value or 0
@@ -328,6 +333,11 @@ function QAT.CanonicalizeDef(def)
 		phaseIds[phase.id] = true
 	end
 
+	-- Keep a target debuff on screen after the reticle leaves the target: the phase
+	-- holds and runs out on its own timer instead of vanishing, updating only when a
+	-- new target is acquired (see Engine/Tracker.lua). Opt-in, aura-wide.
+	def.stickyTarget = def.stickyTarget and true or false
+
 	-- Normalize every phase: look defaults, duration/trigger units default to the
 	-- tracker unit, transitions and runtime are present and normalized. Transitions
 	-- whose target phase no longer exists are dropped.
@@ -342,7 +352,7 @@ function QAT.CanonicalizeDef(def)
 		phase.transitions = phase.transitions or {}
 		local kept = {}
 		for _, tr in ipairs(phase.transitions) do
-			if phaseIds[tr.to] then
+			if not tr.to or phaseIds[tr.to] then
 				tr.when = canonicalWhen(tr.when, def.unit)
 				kept[#kept + 1] = tr
 			end
@@ -431,6 +441,51 @@ local function copyColor(c, fallback)
 	return { fallback[1], fallback[2], fallback[3], fallback[4] }
 end
 
+--- Is this def a dynamic group — a folder fed by a target source (emitter) that stamps
+--- its single template child once per live target? A distinct kind of group: it is
+--- always a grid, binds 1:many (template → targets), and has no free-form members.
+---@param def table|nil
+---@return boolean
+function QAT.IsDynamicGroup(def)
+	return def ~= nil
+		and def.kind == "folder"
+		and def.grid ~= nil
+		and def.grid.dynamic ~= nil
+		and def.grid.dynamic.source ~= nil
+end
+
+--- Is this def a dynamic tracker — a first-class kind that feeds its own phases as a
+--- template to a source emitter, stamping one instance per live target?
+---@param def table|nil
+---@return boolean
+function QAT.IsDynamicDef(def)
+	return def ~= nil and def.kind == "dynamic"
+end
+
+--- Normalize a dynamic tracker def in place. Seeds defaults for source, columns, fill
+--- direction, and slot dimensions.
+---@param def table dynamic def
+function QAT.CanonicalizeDynamicDef(def)
+	local sources = QAT.Targeting and QAT.Targeting.SourceNames() or {}
+	def.source = def.source or sources[1]
+	def.columns = math.max(1, math.floor(tonumber(def.columns) or 2))
+	def.fill = def.fill or {}
+	def.fill.enabled = true
+	if def.fill.axis ~= "cols" then
+		def.fill.axis = "rows"
+	end
+	if def.fill.from ~= "right" and def.fill.from ~= "top" and def.fill.from ~= "bottom" then
+		def.fill.from = "left"
+	end
+	def.maxRows = tonumber(def.maxRows) or nil
+	def.sortBy = def.sortBy or "timeLeft"
+	def.sortDir = def.sortDir or "asc"
+	def.pos = def.pos or {}
+	def.pos.width = math.max(16, math.floor(tonumber(def.pos.width) or 220))
+	def.pos.height = math.max(8, math.floor(tonumber(def.pos.height) or 30))
+	def.slot = nil
+end
+
 --- Normalize a folder's optional grid (table-layout) block in place. Absent grid =
 --- the folder is a plain logical group. Prunes label arrays to the row/column count,
 --- drops cell assignments that point outside the grid or at a non-member tracker,
@@ -507,11 +562,48 @@ function QAT.CanonicalizeGrid(def)
 	s.striped = s.striped == true
 	g.style = s
 
-	-- Origin: the grid draws as one movable unit from a top-left corner. A plain folder
-	-- has no position; a grid one gains it here (seeded near screen-centre).
-	if g.enabled then
-		def.pos = def.pos or { x = math.floor((GuiRoot and GuiRoot:GetWidth() or 1920) / 2) - 120, y = 300 }
+	-- Horizontal placement of each member within its cell (vertical stays centered).
+	if g.align ~= "left" and g.align ~= "right" then
+		g.align = "center"
 	end
+
+	-- Dynamic mode: instead of authored cell->member assignments, the grid is fed by a
+	-- named target source (see Engine/Targeting) that yields an unknown-count set of live
+	-- entries; the layout pass packs them into cells using a reusable slot pool. `slot` is
+	-- each entry's footprint. Absent `source` = plain (authored) grid.
+	if g.dynamic then
+		local d = g.dynamic
+		if type(d) ~= "table" or not d.source or d.source == "" then
+			g.dynamic = nil
+		else
+			local slot = d.slot or {}
+			g.dynamic = {
+				source = d.source,
+				slot = {
+					width = math.max(16, math.floor(tonumber(slot.width) or 220)),
+					height = math.max(8, math.floor(tonumber(slot.height) or 30)),
+				},
+			}
+		end
+	end
+
+	-- Origin: the grid draws as one movable unit from a top-left corner. Seed a grid
+	-- near screen-centre the first time it is enabled (plain folders default to the
+	-- origin in CanonicalizeFolder so existing member coordinates render unchanged).
+	if g.enabled and not def.pos then
+		def.pos = { x = math.floor((GuiRoot and GuiRoot:GetWidth() or 1920) / 2) - 120, y = 300 }
+	end
+end
+
+--- Normalize a group/folder def: guarantee a screen anchor (its top-left corner).
+--- Members are positioned relative to this anchor, so a plain folder defaults to the
+--- origin — existing absolute member coordinates then render exactly where they were.
+---@param def table folder def
+function QAT.CanonicalizeFolder(def)
+	QAT.CanonicalizeGrid(def) -- seeds a grid origin when grid mode is on
+	def.pos = def.pos or { x = 0, y = 0 }
+	def.pos.x = tonumber(def.pos.x) or 0
+	def.pos.y = tonumber(def.pos.y) or 0
 end
 
 --- Canonicalize a whole tracker tree in place (recurses into folder children).
@@ -521,7 +613,10 @@ function QAT.CanonicalizeTree(defs)
 		if def.kind == "folder" then
 			def.children = def.children or {}
 			QAT.CanonicalizeTree(def.children)
-			QAT.CanonicalizeGrid(def) -- after children, so member-id pruning sees them
+			QAT.CanonicalizeFolder(def) -- after children, so member-id pruning sees them
+		elseif def.kind == "dynamic" then
+			QAT.CanonicalizeDef(def)
+			QAT.CanonicalizeDynamicDef(def)
 		else
 			QAT.CanonicalizeDef(def)
 		end

@@ -119,8 +119,10 @@ local function RegisterEffectFilters()
 end
 
 -- Build Tracker objects from a list of defs. Folders are pass-through containers
--- (no display); their load defs cascade to children via the loadChain.
-local function BuildTrackers(defs, parentLoads)
+-- (no display) that carry a screen anchor; their members are positioned relative to
+-- it, and their load defs cascade to children via the loadChain.
+local function BuildTrackers(defs, parentLoads, anchor)
+	anchor = anchor or { x = 0, y = 0 }
 	for _, def in ipairs(defs or {}) do
 		if def.enabled == false then
 			-- A disabled tracker or folder is skipped entirely (a disabled folder
@@ -130,19 +132,39 @@ local function BuildTrackers(defs, parentLoads)
 			if def.load then
 				table.insert(childLoads, def.load)
 			end
+			-- A group's own anchor is its position relative to its parent; children
+			-- inherit the accumulated absolute anchor.
+			local gp = def.pos or { x = 0, y = 0 }
+			local childAnchor = { x = anchor.x + (gp.x or 0), y = anchor.y + (gp.y or 0) }
 			-- A group arranged as a table registers its grid so the layout pass can draw
-			-- the chrome and place members. The same chain gates the whole table.
+			-- the chrome and place members. The same chain gates the whole table; the
+			-- anchor gives the table its absolute screen origin.
+			local isDynamic = def.grid and def.grid.enabled and def.grid.dynamic and def.grid.dynamic.source
 			if def.grid and def.grid.enabled and QAT.GridLayout_Register then
-				QAT.GridLayout_Register(def, childLoads)
+				QAT.GridLayout_Register(def, childLoads, anchor)
 			end
-			BuildTrackers(def.children, childLoads)
+			-- A dynamic group's children are its template, not independent trackers: the
+			-- layout pass instances the template per live target, so don't build them here.
+			if not isDynamic then
+				BuildTrackers(def.children, childLoads, childAnchor)
+			end
+		elseif def.kind == "dynamic" then
+			-- Dynamic tracker: not a real Tracker object. Register with GridLayout so the
+			-- layout pass builds an instance pool and positions them per tick.
+			local childLoads = QAT.util.DeepCopy(parentLoads)
+			if def.load then
+				table.insert(childLoads, def.load)
+			end
+			if QAT.GridLayout_Register then
+				QAT.GridLayout_Register(def, childLoads, anchor)
+			end
 		else
 			local chain = QAT.util.DeepCopy(parentLoads)
 			if def.load then
 				table.insert(chain, def.load)
 			end
 
-			local tracker = QAT.Tracker.New(def, chain)
+			local tracker = QAT.Tracker.New(def, chain, anchor)
 			QAT.runtime.trackers[def.id] = tracker
 			table.insert(QAT.runtime.list, tracker)
 			for id in pairs(tracker:AbilityIds()) do
@@ -153,27 +175,124 @@ local function BuildTrackers(defs, parentLoads)
 	end
 end
 
--- Enable/disable on-HUD dragging for every live tracker control. Driven by the
--- editor's open/closed state so trackers don't eat the mouse during play.
-function QAT.Runtime_SetTrackersMovable(on)
-	QAT.trackersMovable = on and true or false
-	for _, tracker in ipairs(QAT.runtime.list) do
-		for _, phase in pairs(tracker.phases) do
-			phase.control.tlw:SetMouseEnabled(QAT.trackersMovable) -- custom drag; see Display
+-- Is a tracker a member of a grid-enabled group? Grid members are positioned by the
+-- layout pass, so they are never hand-draggable.
+local function isGridMember(id)
+	local function scan(defs, inGrid)
+		for _, def in ipairs(defs or {}) do
+			if def.kind == "folder" then
+				if scan(def.children, inGrid or (def.grid and def.grid.enabled)) then
+					return true
+				end
+			elseif def.id == id then
+				return inGrid or false
+			end
 		end
+		return false
+	end
+	return scan(QAT.sv.trackers, false)
+end
+QAT.Runtime_IsGridMember = isGridMember
+
+-- Only the tree-selected node is draggable on the HUD, so a stray click never moves
+-- the wrong tracker. This arms exactly the selected tracker's controls (or none, when
+-- a group / grid member / nothing is selected — a selected group is dragged via its
+-- editor outline handle instead; see Display/GroupOutline).
+function QAT.Runtime_ApplyDragSelection()
+	local movable = QAT.trackersMovable
+	local selId = movable and QAT.editor and QAT.editor.selectedId or nil
+	local selScope = QAT.editor and QAT.editor.selectedScope
+	-- A tracker is grabbable only when it (not a phase-sibling) is the selected node and
+	-- it is not laid out by a grid.
+	local dragId = nil
+	if selId and QAT.runtime.trackers[selId] and not isGridMember(selId) then
+		dragId = selId
+	end
+	for id, tracker in pairs(QAT.runtime.trackers) do
+		local on = movable and id == dragId
+		for _, phase in pairs(tracker.phases) do
+			phase.control.tlw:SetMouseEnabled(on)
+		end
+	end
+	-- Show the drag outline for a selected group (folder) or dynamic tracker, hide otherwise.
+	if QAT.GroupOutline_Show then
+		local outlineId = (movable and selScope ~= nil and selId and not QAT.runtime.trackers[selId]) and selId or nil
+		QAT.GroupOutline_Show(outlineId)
 	end
 end
 
--- Move a tracker's live controls to a new centre-relative offset, without a rebuild
--- (used by the editor's position sliders and the on-HUD drag).
+-- Enable/disable on-HUD dragging, driven by the editor's open/closed state so
+-- trackers don't eat the mouse during play. Actual per-control arming is delegated to
+-- the selection (only the selected node is movable).
+function QAT.Runtime_SetTrackersMovable(on)
+	QAT.trackersMovable = on and true or false
+	QAT.Runtime_ApplyDragSelection()
+end
+
+-- Move a tracker's live controls to a new position RELATIVE to its parent group
+-- anchor, without a rebuild (used by the editor's position fields and the on-HUD
+-- drag). Top-level trackers have a zero anchor, so this is their absolute position.
 function QAT.Runtime_RepositionTracker(id, x, y)
 	local tracker = QAT.runtime.trackers[id]
 	if not tracker then
 		return
 	end
-	for _, phase in pairs(tracker.phases) do
-		phase.control:Reposition(x, y)
+	tracker:SetRelativePosition(x, y)
+end
+
+-- Place a tracker's live controls at an absolute screen position, bypassing the
+-- anchor/offset math. Used by the grid layout pass (cell positions are screen-space).
+function QAT.Runtime_PlaceTrackerAbsolute(id, x, y)
+	local tracker = QAT.runtime.trackers[id]
+	if tracker then
+		tracker:PlaceAbsolute(x, y)
 	end
+end
+
+-- Recompute every live tracker's parent anchor from the current def tree and re-place
+-- it. Called after a group's position changes so all its members follow as one unit.
+local function reanchor(defs, ax, ay)
+	for _, def in ipairs(defs or {}) do
+		if def.enabled ~= false then
+			if def.kind == "folder" then
+				local p = def.pos or { x = 0, y = 0 }
+				reanchor(def.children, ax + (p.x or 0), ay + (p.y or 0))
+			else
+				local t = QAT.runtime.trackers[def.id]
+				if t then
+					t:SetAnchor(ax, ay)
+				end
+			end
+		end
+	end
+end
+
+function QAT.Runtime_ReanchorAll()
+	reanchor(QAT.sv.trackers, 0, 0)
+end
+
+-- Pull every top-level group back on screen if it (or its members) drifted off. Only
+-- top-level groups need clamping — their box encloses any nested content. Called once
+-- after the initial build so a group saved off-screen becomes reachable again.
+function QAT.Runtime_ClampAllGroups()
+	if not QAT.GroupOutline_ClampToScreen then
+		return
+	end
+	local moved = false
+	for _, def in ipairs(QAT.sv.trackers or {}) do
+		if def.kind == "folder" and QAT.GroupOutline_ClampToScreen(def.id) then
+			moved = true
+		end
+	end
+	if moved then
+		QAT.Runtime_ReanchorAll()
+	end
+end
+
+-- Move a group to a new position relative to its parent (its members follow). The
+-- def is updated by the caller; this just re-places the live controls.
+function QAT.Runtime_RepositionGroup(_, _, _)
+	QAT.Runtime_ReanchorAll()
 end
 
 -- Re-evaluate every tracker's load conditions.
@@ -201,6 +320,9 @@ end
 
 -- A target changed: re-seed target-unit effects (debuffs already on the new target).
 local function OnTargetChanged()
+	if QAT.Targeting and QAT.Targeting.UpdateReticle then
+		QAT.Targeting.UpdateReticle()
+	end
 	QAT.Safe("scan buffs (target)", QAT.Runtime_ScanBuffs)
 end
 
@@ -239,6 +361,7 @@ function QAT.Runtime_Init()
 		tracker:Start() -- evaluates load conditions, enters initial phase if loaded
 	end
 	QAT.Runtime_ScanBuffs() -- seed already-active effects
+	QAT.Runtime_ClampAllGroups() -- pull any off-screen group back into view
 
 	EVENT_MANAGER:UnregisterForUpdate(QAT.name .. "_tick")
 	EVENT_MANAGER:RegisterForUpdate(QAT.name .. "_tick", TICK_MS, OnUpdate)
@@ -286,6 +409,7 @@ local function rebuildAll()
 	end
 	QAT.Runtime_ScanBuffs()
 	QAT.runtime.suppressCues = false
+	QAT.Runtime_ApplyDragSelection() -- re-arm dragging for the selected node
 	QAT.log.runtime:Debug("runtime rebuilt: %d tracker(s)", #QAT.runtime.list)
 end
 

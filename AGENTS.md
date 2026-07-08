@@ -6,7 +6,7 @@ HyperTools (no shared code). Namespace `QAT`, SavedVars `QuantumAuraToolsSV`, sl
 LibAsync, LibGroupBroadcast (optional LibDebugLogger). Lua 5.1.
 
 Deep docs: `DESIGN.md` (architecture/plan), `EDITOR.md` (editor design),
-`AGGREGATOR.md` (M5 effect-aggregator data model + Claude-design brief). Cross-
+`AGGREGATOR.md` (M5 effect-aggregator data model + AI-design brief). Cross-
 session facts live in auto-memory (`MEMORY.md` index + files) — read those for the
 grilled specs; this file is the always-loaded quick reference.
 
@@ -14,11 +14,11 @@ grilled specs; this file is the always-loaded quick reference.
 
 - The user drives design and tests in-game; iterate in tight loops. Give a
   recommendation, not a survey. Relay outcomes plainly.
-- Responses are terse ("caveman" — a SessionStart hook, always on). Code, commits
+- Responses are terse ("caveman" — a `session.created` plugin event, always on). Code, commits
   and security/irreversible warnings are written normally.
 - Commit only when asked / when a feature is verified working in-game. On the
   default branch the user commits directly (their flow). Commit trailer:
-  `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`. Conventional-commit
+  `Co-Authored-By: OpenCode <noreply@opencode.ai>`. Conventional-commit
   style subjects.
 
 ## Golden rules
@@ -126,16 +126,6 @@ drawn table (`def.grid`) — rows×cols, headers, styled cells, fill/fake-growth
 `Editor/GridTab.lua` (scope "grid" on a "Grid layout" tree row), chrome `Display/Grid.lua`,
 per-tick layout `Engine/GridLayout.lua`. Retired per-layer x/y offsets → 9-point align.
 Spec: `DESIGN.md` "Group grid layout" + [[group-grid-layout]].
-
-**Track-on-target harness done** (`Engine/Targeting.lua`): track a buff/debuff on a
-*specific* target or an *unknown-count set*, beyond the fixed unit-tag model. A
-*TargetSource* yields ordered `{key,name,remaining,duration}` bindings; a grid folder
-with `g.dynamic = {source, slot}` is fed by a source instead of authored cells — the
-layout pass (`Engine/GridLayout.lua`) owns a pooled set of Display bars, packs the live
-set, grows/shrinks. First source = `taunt` (ACTION_RESULT_TAUNT, player, 15s; replaces
-Untaunted). `/qat taunt` seeds the group. Boss-name localization catalog deferred to a
-lib (seam in Targeting `OnTaunt`). Group-member sharing via LibGroupBroadcast is the
-next source. Full plan: [[track-on-target]].
 
 **Next: M6 raid library** + named-boss load condition (target a boss by name; engine
 resolves the live slot; dropdown fed by aggregator-harvested names). Backlog:

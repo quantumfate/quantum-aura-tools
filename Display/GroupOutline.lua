@@ -1,17 +1,16 @@
--- Group drag outline: an editor-only overlay that visualizes a selected group's
--- bounds and acts as its drag handle. A group has no drawn HUD presence of its own
--- (it's a logical anchor); this outline appears only while the editor is open and the
--- group is the selected tree node, so the whole group can be moved as one unit without
--- risking an accidental drag of a member tracker.
+-- Drag outline: an editor-only overlay for groups and dynamic trackers. It
+-- visualises the selected node's bounds and acts as its drag handle. Groups have no
+-- drawn HUD presence of their own (they are a logical anchor), and dynamic trackers
+-- are a runtime grid that isn't a single control — this overlay makes either
+-- repositionable on the HUD without needing to know the details.
 --
--- Dragging updates the group's def.pos (its anchor) and re-anchors every member via
--- QAT.Runtime_ReanchorAll, so members follow rigidly.
+-- Dragging updates the def.pos and re-anchors via QAT.Runtime_ReanchorAll.
 
 QAT.groupOutline = {}
 
 local WM = GetWindowManager()
 local MARGIN = 6 -- breathing room drawn around the member bounds
-local MINW, MINH = 60, 28 -- floor for an empty group so there's something to grab
+local MINW, MINH = 60, 28 -- floor for an empty group / dynamic tracker handle
 
 local outline -- lazily-created overlay { tlw, border, label }
 
@@ -29,6 +28,18 @@ local function folderAnchor(defs, id, ax, ay)
 			if found then
 				return rx, ry, found
 			end
+		end
+	end
+	return nil
+end
+
+-- Find a top-level `kind="dynamic"` def by id. Dynamic trackers live at the top
+-- level of QAT.sv.trackers (not inside folders). Returns (x, y, def).
+local function dynamicAnchor(id)
+	for _, def in ipairs(QAT.sv.trackers or {}) do
+		if def.kind == "dynamic" and def.id == id then
+			local p = def.pos or { x = 0, y = 0 }
+			return (p.x or 0), (p.y or 0), def
 		end
 	end
 	return nil
@@ -65,12 +76,21 @@ local function accumBounds(def, ax, ay, b)
 	end
 end
 
--- Screen rect (x, y, w, h) of a group and its member-covering bounds, plus the group
--- def. Falls back to a small box at the anchor when the group is empty.
+-- Screen rect (x, y, w, h) of a group or dynamic tracker, plus the def. For a
+-- group this covers all members; for dynamic trackers a small handle box is used.
+-- Returns nil when the id isn't found.
 local function groupRect(id)
 	local ax, ay, def = folderAnchor(QAT.sv.trackers, id, 0, 0)
 	if not def then
+		ax, ay, def = dynamicAnchor(id)
+	end
+	if not def then
 		return nil
+	end
+	if def.kind == "dynamic" then
+		local w = math.max(MINW, (def.pos and def.pos.width) or 60)
+		local h = math.max(MINH, (def.pos and def.pos.height) or 28)
+		return ax, ay, w, h, def
 	end
 	local b = { minx = math.huge, miny = math.huge, maxx = -math.huge, maxy = -math.huge, any = false }
 	accumBounds(def, ax, ay, b)
@@ -158,8 +178,12 @@ local function ensure()
 		def.pos = def.pos or { x = 0, y = 0 }
 		def.pos.x = self.startX + (mx - self.grabX)
 		def.pos.y = self.startY + (my - self.grabY)
-		QAT.GroupOutline_ClampToScreen(self.groupId) -- keep the whole group on screen
-		if QAT.Runtime_ReanchorAll then
+		QAT.GroupOutline_ClampToScreen(self.groupId) -- keep the whole node on screen
+		if def.kind == "dynamic" then
+			if QAT.GridLayout_Update then
+				QAT.GridLayout_Update()
+			end
+		elseif QAT.Runtime_ReanchorAll then
 			QAT.Runtime_ReanchorAll()
 		end
 		QAT.groupOutline.Reposition()
@@ -188,7 +212,8 @@ function QAT.groupOutline.Reposition()
 	o.tlw:ClearAnchors()
 	o.tlw:SetAnchor(TOPLEFT, GuiRoot, TOPLEFT, x, y)
 	o.tlw:SetDimensions(w, h)
-	o.label:SetText((def.name or "Group") .. "  (drag to move group)")
+	local label = (def.kind == "dynamic" and "Dynamic" or def.name or "Group")
+	o.label:SetText(label .. "  (drag to move)")
 end
 
 -- Show the outline for a group id, or hide it when id is nil.

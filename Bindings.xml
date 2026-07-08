@@ -7,6 +7,9 @@
             <Action name="QAT_TOGGLE_AGGREGATOR">
                 <Down>QAT_ToggleAggregator()</Down>
             </Action>
+            <Action name="QAT_TOGGLE_SOURCEMANAGER">
+                <Down>QAT_ToggleSourceManager()</Down>
+            </Action>
         </Category>
     </Layer>
 </Bindings>

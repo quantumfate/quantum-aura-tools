@@ -10,6 +10,7 @@ local GAP = 6
 local STAT_OPTS = {
 	{ label = "Time left", value = "remaining" },
 	{ label = "Stacks", value = "stacks" },
+	{ label = "Reticle on target", value = "reticle" },
 }
 local OP_OPTS = {
 	{ label = "<", value = "<" },
@@ -26,6 +27,7 @@ local ACTION_OPTS = {
 	{ label = "Set Stacks Color", value = "setStacksColor" },
 	{ label = "Set Text Color", value = "setTextColor" },
 	{ label = "Set Timer Color", value = "setTimerColor" },
+	{ label = "Set Sweep Color", value = "setSweepColor" }, -- gradient-kind translucent fill
 	{ label = "Show Proc", value = "showProc" },
 }
 
@@ -94,17 +96,19 @@ local function render(container, def)
 		local idx = i
 		local cx = PAD
 
+		local isReticle = cond.stat == "reticle"
 		local statDD = get("stat" .. i, function()
-			return QAT.widgets.Dropdown(container, "QAT_Cond_Stat" .. i, 100, STAT_OPTS, "remaining")
+			return QAT.widgets.Dropdown(container, "QAT_Cond_Stat" .. i, 136, STAT_OPTS, "remaining")
 		end)
 		statDD.onSelect = function(v)
 			cond.stat = v
 			commit(def)
+			render(container, def)
 		end
 		statDD:SetValue(cond.stat or "remaining")
 		statDD:ClearAnchors()
 		statDD:SetAnchor(TOPLEFT, container, TOPLEFT, cx, y)
-		cx = cx + 106
+		cx = cx + 142
 
 		local opDD = get("op" .. i, function()
 			return QAT.widgets.Dropdown(container, "QAT_Cond_Op" .. i, 54, OP_OPTS, "<")
@@ -116,7 +120,10 @@ local function render(container, def)
 		opDD:SetValue(cond.op or "<")
 		opDD:ClearAnchors()
 		opDD:SetAnchor(TOPLEFT, container, TOPLEFT, cx, y)
-		cx = cx + 60
+		opDD:SetHidden(isReticle)
+		if not isReticle then
+			cx = cx + 60
+		end
 
 		local valBox = get("val" .. i, function()
 			return QAT.widgets.EditBox(container, "QAT_Cond_Val" .. i, 56, ROW_H)
@@ -128,7 +135,10 @@ local function render(container, def)
 		valBox:SetText(tostring(cond.value or 0))
 		valBox:ClearAnchors()
 		valBox:SetAnchor(TOPLEFT, container, TOPLEFT, cx, y)
-		cx = cx + 62
+		valBox:SetHidden(isReticle)
+		if not isReticle then
+			cx = cx + 62
+		end
 
 		local arrow = get("arr" .. i, function()
 			return QAT.widgets.Label(container, "QAT_Cond_Arr" .. i, "->")

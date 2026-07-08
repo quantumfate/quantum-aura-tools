@@ -428,6 +428,13 @@ function QAT.display.Create(def)
 			self.bg:SetCenterColor(unpack(c))
 		elseif element == "border" then
 			self.bg:SetEdgeColor(unpack(c))
+			if self.edges then
+				for _, e in ipairs(self.edges) do
+					if not e:IsHidden() then
+						e:SetColor(c[1], c[2], c[3], c[4] or 1)
+					end
+				end
+			end
 		elseif element == "bar" and self.bar then
 			self.bar:SetColor(unpack(c))
 		elseif element == "text" then
@@ -436,6 +443,8 @@ function QAT.display.Create(def)
 			self.timeLabel:SetColor(unpack(c))
 		elseif element == "stacks" then
 			self.stacksLabel:SetColor(unpack(c))
+		elseif element == "sweep" and self.sweep then
+			self.sweep:SetColor(unpack(c)) -- gradient-kind translucent fill (ephemeral override)
 		end
 	end
 
@@ -553,13 +562,13 @@ function QAT.display.Create(def)
 		if self.bar then
 			self.bar:SetValue(frac)
 			-- Low-time recolor/pulse for the beside bar (matches the border kind).
-			if self.lowThreshold and remaining and remaining > 0 and remaining <= self.lowThreshold then
+			if self.lowThreshold and remaining and remaining > 0.05 and remaining <= self.lowThreshold then
 				local lc = self.lowColor or { 0.90, 0.20, 0.20, 1 }
-				local a = lc[4] or 1
 				if self.lowPulse then
-					a = a * (0.55 + 0.45 * (0.5 + 0.5 * math.sin(GetFrameTimeSeconds() * 6)))
+					local pulse = 0.65 + 0.35 * math.sin(GetFrameTimeSeconds() * 6)
+					lc = { lc[1] * pulse, lc[2] * pulse, lc[3] * pulse, lc[4] or 1 }
 				end
-				self.bar:SetColor(lc[1], lc[2], lc[3], a)
+				self.bar:SetColor(lc[1], lc[2], lc[3], lc[4] or 1)
 			end
 		end
 

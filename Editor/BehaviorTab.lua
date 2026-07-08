@@ -35,6 +35,8 @@ local UNIT_OPTS = {
 local function triggerValue(when)
 	if when.kind == "effect" then
 		return when.result or "gained"
+	elseif when.kind == "source" then
+		return (when.result == "faded") and "source_faded" or "source_gained"
 	end
 	return when.kind
 end
@@ -44,6 +46,10 @@ local function setTriggerKind(when, v)
 		when.kind = "effect"
 		when.result = v
 		when.abilityIds = when.abilityIds or {}
+	elseif v == "source_gained" or v == "source_faded" then
+		when.kind = "source"
+		when.result = (v == "source_faded") and "faded" or "gained"
+		when.abilityIds = nil
 	elseif v == "stacks" or v == "remaining" then
 		when.kind = v
 		when.op = when.op or ">="
@@ -74,10 +80,13 @@ local function selectedPhase(def)
 	return def.phases[1]
 end
 
-local function phaseOptions(def)
+local function phaseOptions(def, sourcePhase)
+	local layer = sourcePhase and (sourcePhase.layer or 0) or 0
 	local opts = { { label = "(hidden)", value = nil } }
 	for _, p in ipairs(def.phases) do
-		table.insert(opts, { label = p.id, value = p.id })
+		if p ~= sourcePhase and (p.layer or 0) == layer then
+			table.insert(opts, { label = p.id, value = p.id })
+		end
 	end
 	return opts
 end
@@ -162,6 +171,25 @@ local function render(container, def)
 		return
 	end
 
+	-- When this tracker is the template of a dynamic group, its phases can subscribe to
+	-- the group's emitter (source) as a duration / transition trigger. Offer those extra
+	-- options only then.
+	local dynSource = QAT.Editor_DynamicSourceFor and QAT.Editor_DynamicSourceFor(def.id)
+	local durOpts, trigOpts = DURATION_OPTS, TRIGGER_OPTS
+	if dynSource then
+		durOpts = { { label = "Emitter (" .. dynSource .. ")", value = "source" } }
+		for _, o in ipairs(DURATION_OPTS) do
+			durOpts[#durOpts + 1] = o
+		end
+		trigOpts = {
+			{ label = "Emitter appears", value = "source_gained" },
+			{ label = "Emitter fades", value = "source_faded" },
+		}
+		for _, o in ipairs(TRIGGER_OPTS) do
+			trigOpts[#trigOpts + 1] = o
+		end
+	end
+
 	-- Wrap the content in a titled card (created first, so it draws behind).
 	local cw = container.qatViewportW or container:GetWidth()
 	if cw < 240 then
@@ -199,10 +227,10 @@ local function render(container, def)
 	local durDD = get("durDD", function()
 		return QAT.widgets.Dropdown(container, "QAT_Beh_Dur", 180, DURATION_OPTS, "none")
 	end)
+	durDD:SetOptions(durOpts)
 	durDD.onSelect = function(v)
 		phase.duration.type = v
 		commit(def)
-		render(container, def)
 	end
 	durDD:SetValue(phase.duration.type or "none")
 	durDD:ClearAnchors()
@@ -250,6 +278,51 @@ local function render(container, def)
 		durIdBox:ClearAnchors()
 		durIdBox:SetAnchor(TOPLEFT, container, TOPLEFT, LX + 96, y)
 		y = y + ROW_H + GAP
+
+		-- Target debuffs vanish the instant the reticle leaves the target. Opt in to
+		-- keep the phase on screen (running out on its own timer), updating only when a
+		-- new target is acquired. Aura-wide, so it shows on any target-following phase.
+		if (phase.duration.unit or def.unit) == "reticleover" then
+			fieldLabel(
+				"lSticky",
+				"On target loss",
+				y,
+				"Keep this tracker on screen after your reticle leaves the target, letting it run out on its own timer. It updates only when you select a new target. Applies to the whole aura."
+			)
+			local stickyBox = get("stickyBox", function()
+				return QAT.widgets.Checkbox(container, "QAT_Beh_Sticky", false, nil)
+			end)
+			stickyBox.onToggle = function(v)
+				def.stickyTarget = v
+				commit(def)
+			end
+			stickyBox:SetChecked(def.stickyTarget and true or false)
+			stickyBox:ClearAnchors()
+			stickyBox:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y)
+			local hint = get("stickyHint", function()
+				return QAT.widgets.Label(container, "QAT_Beh_StickyHint", "")
+			end)
+			hint:SetText("keep showing & run out")
+			hint:SetColor(0.6, 0.65, 0.72, 1)
+			hint:ClearAnchors()
+			hint:SetAnchor(LEFT, stickyBox, RIGHT, 8, 0)
+			y = y + ROW_H + GAP
+		end
+	elseif phase.duration.type == "source" then
+		fieldLabel(
+			"lDurSrc",
+			"Emitter",
+			y,
+			"This phase is timed by the group's emitter: each emitted element's own timing drives one instance of this tracker."
+		)
+		local srcHint = get("durSrcHint", function()
+			return QAT.widgets.Label(container, "QAT_Beh_DurSrcHint", "")
+		end)
+		srcHint:SetText("timed by " .. (dynSource or "the source") .. " (per emitted element)")
+		srcHint:SetColor(0.6, 0.72, 0.66, 1)
+		srcHint:ClearAnchors()
+		srcHint:SetAnchor(TOPLEFT, container, TOPLEFT, LX, y + 3)
+		y = y + ROW_H + GAP
 	end
 
 	-- Transitions: an ordered list of exits; the engine takes the FIRST whose
@@ -285,17 +358,17 @@ local function render(container, def)
 
 		local x = PAD + 26
 		local trigDD = get("trTrig" .. i, function()
-			return QAT.widgets.Dropdown(container, "QAT_Beh_TrTrig" .. i, 134, TRIGGER_OPTS, "gained")
+			return QAT.widgets.Dropdown(container, "QAT_Beh_TrTrig" .. i, 170, TRIGGER_OPTS, "gained")
 		end)
+		trigDD:SetOptions(trigOpts)
 		trigDD.onSelect = function(v)
 			setTriggerKind(when, v)
 			commit(def)
-			render(container, def)
 		end
 		trigDD:SetValue(triggerValue(when))
 		trigDD:ClearAnchors()
 		trigDD:SetAnchor(TOPLEFT, container, TOPLEFT, x, y)
-		x = x + 140
+		x = x + 176
 
 		local unitDD = get("trUnit" .. i, function()
 			return QAT.widgets.Dropdown(container, "QAT_Beh_TrUnit" .. i, 86, UNIT_OPTS, "player")
@@ -369,7 +442,7 @@ local function render(container, def)
 		local toDD = get("trTo" .. i, function()
 			return QAT.widgets.Dropdown(container, "QAT_Beh_TrTo" .. i, 110, {}, nil)
 		end)
-		toDD:SetOptions(phaseOptions(def))
+		toDD:SetOptions(phaseOptions(def, phase))
 		toDD.onSelect = function(v)
 			tr.to = v
 			commit(def)
@@ -389,7 +462,6 @@ local function render(container, def)
 		del.onClick = function()
 			table.remove(phase.transitions, idx)
 			commit(def)
-			render(container, def)
 		end
 
 		y = y + ROW_H + GAP
@@ -405,7 +477,6 @@ local function render(container, def)
 	addTrans.onClick = function()
 		table.insert(phase.transitions, { when = { kind = "effect", result = "gained", abilityIds = {} }, to = nil })
 		commit(def)
-		render(container, def)
 	end
 	y = y + ROW_H + GAP
 
@@ -532,6 +603,8 @@ local function render(container, def)
 			durSegs[#durSegs + 1] = { t = "is " .. onUnit(d.unit) .. ".", color = MUTED }
 		elseif d.type == "fixed" then
 			durSegs = { { t = "Shown for " .. (d.seconds or 0) .. " seconds.", color = INK } }
+		elseif d.type == "source" then
+			durSegs = { { t = "Shown while the emitter's element is live (one per emitted element).", color = INK } }
 		else
 			durSegs = { { t = "Static — shown while this phase is active.", color = MUTED } }
 		end
@@ -552,6 +625,11 @@ local function render(container, def)
 				end
 				segs[#segs + 1] = {
 					t = (w.result == "faded") and ("drops " .. fromUnit(w.unit)) or ("appears " .. onUnit(w.unit)),
+					color = MUTED,
+				}
+			elseif w.kind == "source" then
+				segs[#segs + 1] = {
+					t = (w.result == "faded") and "the emitter drops an element" or "the emitter emits an element",
 					color = MUTED,
 				}
 			elseif w.kind == "stacks" then

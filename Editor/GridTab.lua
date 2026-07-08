@@ -41,6 +41,34 @@ local function memberById(def, id)
 	return nil
 end
 
+-- If `defId` is a dynamic tracker (kind="dynamic"), return its source name, so the
+-- Behavior tab can offer the "Emitter" trigger/duration. Also checks folder-based
+-- dynamic groups for backward compat (a template child's id).
+function QAT.Editor_DynamicSourceFor(defId)
+	local function scan(defs)
+		for _, d in ipairs(defs or {}) do
+			if d.kind == "dynamic" and d.id == defId then
+				return d.source
+			end
+			if d.kind == "folder" then
+				if d.grid and d.grid.dynamic and d.grid.dynamic.source then
+					for _, c in ipairs(d.children or {}) do
+						if c.kind ~= "folder" and c.id == defId then
+							return d.grid.dynamic.source
+						end
+					end
+				end
+				local nested = scan(d.children)
+				if nested then
+					return nested
+				end
+			end
+		end
+		return nil
+	end
+	return scan(QAT.sv.trackers)
+end
+
 -- ===== Mutations (canonicalize + notify after each, so tree/HUD/inspector follow) =====
 
 -- Ensure a grid block exists (enabling the group's table mode). Idempotent.
@@ -91,6 +119,13 @@ function QAT.Editor_GridSetFill(def, key, value)
 	local g = QAT.Editor_GridEnsure(def)
 	g.fill = g.fill or {}
 	g.fill[key] = value
+	commit(def)
+end
+
+-- Horizontal placement of members within their cells (left / center / right).
+function QAT.Editor_GridSetAlign(def, value)
+	local g = QAT.Editor_GridEnsure(def)
+	g.align = value
 	commit(def)
 end
 
@@ -309,6 +344,32 @@ function QAT.Editor_RenderGridCard(container, def)
 		y = y + 34
 	end
 
+	-- Cell alignment: where each member sits horizontally within its cell (vertical is
+	-- always centered). Replaces per-member screen positioning inside a table.
+	local alignLbl = get("alignLbl", function()
+		return QAT.widgets.Label(container, "QAT_Grid_AlignLbl", "")
+	end)
+	alignLbl:SetText("Align in cell")
+	alignLbl:SetColor(0.62, 0.68, 0.78, 1)
+	alignLbl:ClearAnchors()
+	alignLbl:SetAnchor(TOPLEFT, container, TOPLEFT, OUT, y + 4)
+	local axx = OUT + math.ceil(alignLbl:GetTextWidth()) + 12
+	for _, opt in ipairs({ { "left", "Left" }, { "center", "Center" }, { "right", "Right" } }) do
+		axx = toggleButton(
+			container,
+			get,
+			"align" .. opt[1],
+			opt[2],
+			axx,
+			y,
+			(g.align or "center") == opt[1],
+			function()
+				QAT.Editor_GridSetAlign(def, opt[1])
+			end
+		)
+	end
+	y = y + 34
+
 	-- TABLE STYLE card.
 	local s = g.style
 	local styleCard = get("styleCard", function()
@@ -356,241 +417,244 @@ function QAT.Editor_RenderGridCard(container, def)
 	styleCard:SetDimensions(cw - OUT * 2, (sy - y) + 8)
 	y = sy + 18
 
-	-- Place-mode banner: while placing a member, cells become drop targets.
-	local placingId = QAT.editor.gridPlacing
-	local placing = placingId and memberById(def, placingId)
-	if placing then
-		local banner = get("banner", function()
-			return QAT.widgets.Panel(container, "QAT_Grid_Banner", { 0.10, 0.14, 0.20, 1 }, { 0.24, 0.34, 0.48, 1 })
-		end)
-		banner:SetHidden(false)
-		banner:ClearAnchors()
-		banner:SetAnchor(TOPLEFT, container, TOPLEFT, OUT, y)
-		banner:SetDimensions(cw - OUT * 2, 30)
-		local bl = get("bannerL", function()
-			return QAT.widgets.Label(container, "QAT_Grid_BannerL", "")
-		end)
-		bl:SetText("Placing " .. (placing.name or placing.id) .. " — click an empty cell")
-		bl:SetColor(0.82, 0.88, 0.96, 1)
-		bl:ClearAnchors()
-		bl:SetAnchor(LEFT, banner, LEFT, 12, 0)
-		local cancel = get("bannerX", function()
-			return QAT.widgets.TextButton(container, "QAT_Grid_BannerX", "cancel", nil)
-		end)
-		cancel:SetHeight(22)
-		cancel:ClearAnchors()
-		cancel:SetAnchor(RIGHT, banner, RIGHT, -8, 0)
-		cancel.onClick = function()
-			QAT.editor.gridPlacing = nil
-			QAT.Editor_Inspector_Refresh()
-		end
-		y = y + 38
-	end
-
-	-- ===== Assignment table =====
-	-- Column header cells (skip the top-left corner spacer when both header kinds show).
-	local gridLeft = OUT + (g.rowHeaders and (RHDR_W + CGAP) or 0)
-	if g.colHeaders then
-		for c = 1, g.cols do
-			local hx = gridLeft + (c - 1) * (CELL_W + CGAP)
-			local hc = get("chdr" .. c, function()
-				return QAT.widgets.Panel(container, "QAT_Grid_CHdr" .. c, s.headerBg, s.border)
+	-- Authored-cell assignment UI (legacy dynamic groups skip this).
+	if not g.dynamic then
+		-- Place-mode banner: while placing a member, cells become drop targets.
+		local placingId = QAT.editor.gridPlacing
+		local placing = placingId and memberById(def, placingId)
+		if placing then
+			local banner = get("banner", function()
+				return QAT.widgets.Panel(container, "QAT_Grid_Banner", { 0.10, 0.14, 0.20, 1 }, { 0.24, 0.34, 0.48, 1 })
 			end)
-			hc:SetCenterColor(unpack(s.headerBg))
-			hc:SetEdgeColor(unpack(s.border))
-			hc:SetHidden(false)
-			hc:SetDimensions(CELL_W, CHDR_H)
-			hc:ClearAnchors()
-			hc:SetAnchor(TOPLEFT, container, TOPLEFT, hx, y)
-			local eb = get("chdrE" .. c, function()
-				return QAT.widgets.EditBox(container, "QAT_Grid_CHdrE" .. c, CELL_W - 8, 22, "", nil)
+			banner:SetHidden(false)
+			banner:ClearAnchors()
+			banner:SetAnchor(TOPLEFT, container, TOPLEFT, OUT, y)
+			banner:SetDimensions(cw - OUT * 2, 30)
+			local bl = get("bannerL", function()
+				return QAT.widgets.Label(container, "QAT_Grid_BannerL", "")
 			end)
-			eb:SetHidden(false)
-			eb:SetText(g.colLabels[c] or "")
-			eb:ClearAnchors()
-			eb:SetAnchor(CENTER, hc, CENTER, 0, 0)
-			eb.onChange = function(t)
-				QAT.Editor_GridSetLabel(def, "col", c, t)
+			bl:SetText("Placing " .. (placing.name or placing.id) .. " — click an empty cell")
+			bl:SetColor(0.82, 0.88, 0.96, 1)
+			bl:ClearAnchors()
+			bl:SetAnchor(LEFT, banner, LEFT, 12, 0)
+			local cancel = get("bannerX", function()
+				return QAT.widgets.TextButton(container, "QAT_Grid_BannerX", "cancel", nil)
+			end)
+			cancel:SetHeight(22)
+			cancel:ClearAnchors()
+			cancel:SetAnchor(RIGHT, banner, RIGHT, -8, 0)
+			cancel.onClick = function()
+				QAT.editor.gridPlacing = nil
+				QAT.Editor_Inspector_Refresh()
 			end
-		end
-		y = y + CHDR_H + CGAP
-	end
-
-	-- Body rows (with optional row-header cell on the left).
-	for r = 1, g.rows do
-		local ry = y + (r - 1) * (CELL_H + CGAP)
-		if g.rowHeaders then
-			local rh = get("rhdr" .. r, function()
-				return QAT.widgets.Panel(container, "QAT_Grid_RHdr" .. r, s.headerBg, s.border)
-			end)
-			rh:SetCenterColor(unpack(s.headerBg))
-			rh:SetEdgeColor(unpack(s.border))
-			rh:SetHidden(false)
-			rh:SetDimensions(RHDR_W, CELL_H)
-			rh:ClearAnchors()
-			rh:SetAnchor(TOPLEFT, container, TOPLEFT, OUT, ry)
-			local eb = get("rhdrE" .. r, function()
-				return QAT.widgets.EditBox(container, "QAT_Grid_RHdrE" .. r, RHDR_W - 8, 22, "", nil)
-			end)
-			eb:SetHidden(false)
-			eb:SetText(g.rowLabels[r] or "")
-			eb:ClearAnchors()
-			eb:SetAnchor(CENTER, rh, CENTER, 0, 0)
-			eb.onChange = function(t)
-				QAT.Editor_GridSetLabel(def, "row", r, t)
-			end
+			y = y + 38
 		end
 
-		for c = 1, g.cols do
-			local key = cellKey(r, c)
-			local cx = gridLeft + (c - 1) * (CELL_W + CGAP)
-			local tid = g.cells[key]
-			local kid = tid and memberById(def, tid)
-			local cell = get("cell" .. key, function()
-				return QAT.widgets.Clickable(container, "QAT_Grid_Cell" .. key, s.cellBg)
-			end)
-			cell:SetHidden(false)
-			cell.bg:SetCenterColor(unpack(kid and s.cellBg or { 0.05, 0.06, 0.08, 0.5 }))
-			cell.bg:SetEdgeColor(unpack(kid and s.border or { 0.14, 0.18, 0.24, 1 }))
-			cell.bg:SetEdgeTexture("", 1, 1, 1)
-			cell:SetDimensions(CELL_W, CELL_H)
-			cell:ClearAnchors()
-			cell:SetAnchor(TOPLEFT, container, TOPLEFT, cx, ry)
-			cell.onClickCell = function()
-				if QAT.editor.gridPlacing then
-					QAT.Editor_GridAssign(def, key, QAT.editor.gridPlacing)
+		-- ===== Assignment table =====
+		-- Column header cells (skip the top-left corner spacer when both header kinds show).
+		local gridLeft = OUT + (g.rowHeaders and (RHDR_W + CGAP) or 0)
+		if g.colHeaders then
+			for c = 1, g.cols do
+				local hx = gridLeft + (c - 1) * (CELL_W + CGAP)
+				local hc = get("chdr" .. c, function()
+					return QAT.widgets.Panel(container, "QAT_Grid_CHdr" .. c, s.headerBg, s.border)
+				end)
+				hc:SetCenterColor(unpack(s.headerBg))
+				hc:SetEdgeColor(unpack(s.border))
+				hc:SetHidden(false)
+				hc:SetDimensions(CELL_W, CHDR_H)
+				hc:ClearAnchors()
+				hc:SetAnchor(TOPLEFT, container, TOPLEFT, hx, y)
+				local eb = get("chdrE" .. c, function()
+					return QAT.widgets.EditBox(container, "QAT_Grid_CHdrE" .. c, CELL_W - 8, 22, "", nil)
+				end)
+				eb:SetHidden(false)
+				eb:SetText(g.colLabels[c] or "")
+				eb:ClearAnchors()
+				eb:SetAnchor(CENTER, hc, CENTER, 0, 0)
+				eb.onChange = function(t)
+					QAT.Editor_GridSetLabel(def, "col", c, t)
 				end
 			end
-			cell:SetHandler("OnMouseUp", function(self, button, upInside)
-				if upInside and button == MOUSE_BUTTON_INDEX_LEFT and self.onClickCell then
-					self.onClickCell()
-				end
-			end)
+			y = y + CHDR_H + CGAP
+		end
 
-			local cIcon = get("cellIc" .. key, function()
-				local t = WM:CreateControl("QAT_Grid_CellIc" .. key, container, CT_TEXTURE)
-				t:SetDimensions(20, 20)
-				return t
-			end)
-			local cLbl = get("cellLb" .. key, function()
-				return QAT.widgets.Label(container, "QAT_Grid_CellLb" .. key, "")
-			end)
-			local cDel = get("cellX" .. key, function()
-				return QAT.widgets.TextButton(container, "QAT_Grid_CellX" .. key, "×", nil)
-			end)
-			if kid then
-				cIcon:SetHidden(false)
-				cIcon:SetTexture(memberIcon(kid))
-				cIcon:ClearAnchors()
-				cIcon:SetAnchor(LEFT, cell, LEFT, 8, 0)
-				cLbl:SetHidden(false)
-				cLbl:SetText(kid.name or kid.id)
-				cLbl:SetColor(unpack(s.cellText))
-				cLbl:ClearAnchors()
-				cLbl:SetAnchor(LEFT, cIcon, RIGHT, 8, 0)
-				cLbl:SetAnchor(RIGHT, cell, RIGHT, -26, 0)
-				cLbl:SetMaxLineCount(1)
-				cDel:SetHidden(false)
-				cDel:SetHeight(22)
-				cDel:ClearAnchors()
-				cDel:SetAnchor(RIGHT, cell, RIGHT, -4, 0)
-				cDel.onClick = function()
-					QAT.Editor_GridUnassign(def, key)
+		-- Body rows (with optional row-header cell on the left).
+		for r = 1, g.rows do
+			local ry = y + (r - 1) * (CELL_H + CGAP)
+			if g.rowHeaders then
+				local rh = get("rhdr" .. r, function()
+					return QAT.widgets.Panel(container, "QAT_Grid_RHdr" .. r, s.headerBg, s.border)
+				end)
+				rh:SetCenterColor(unpack(s.headerBg))
+				rh:SetEdgeColor(unpack(s.border))
+				rh:SetHidden(false)
+				rh:SetDimensions(RHDR_W, CELL_H)
+				rh:ClearAnchors()
+				rh:SetAnchor(TOPLEFT, container, TOPLEFT, OUT, ry)
+				local eb = get("rhdrE" .. r, function()
+					return QAT.widgets.EditBox(container, "QAT_Grid_RHdrE" .. r, RHDR_W - 8, 22, "", nil)
+				end)
+				eb:SetHidden(false)
+				eb:SetText(g.rowLabels[r] or "")
+				eb:ClearAnchors()
+				eb:SetAnchor(CENTER, rh, CENTER, 0, 0)
+				eb.onChange = function(t)
+					QAT.Editor_GridSetLabel(def, "row", r, t)
 				end
-			else
-				cIcon:SetHidden(true)
-				cDel:SetHidden(true)
-				cLbl:SetHidden(false)
-				cLbl:SetText(placing and "click to place" or "+ assign")
-				cLbl:SetColor(0.45, 0.52, 0.62, 1)
-				cLbl:ClearAnchors()
-				cLbl:SetAnchor(CENTER, cell, CENTER, 0, 0)
-				cLbl:SetMaxLineCount(1)
+			end
+
+			for c = 1, g.cols do
+				local key = cellKey(r, c)
+				local cx = gridLeft + (c - 1) * (CELL_W + CGAP)
+				local tid = g.cells[key]
+				local kid = tid and memberById(def, tid)
+				local cell = get("cell" .. key, function()
+					return QAT.widgets.Clickable(container, "QAT_Grid_Cell" .. key, s.cellBg)
+				end)
+				cell:SetHidden(false)
+				cell.bg:SetCenterColor(unpack(kid and s.cellBg or { 0.05, 0.06, 0.08, 0.5 }))
+				cell.bg:SetEdgeColor(unpack(kid and s.border or { 0.14, 0.18, 0.24, 1 }))
+				cell.bg:SetEdgeTexture("", 1, 1, 1)
+				cell:SetDimensions(CELL_W, CELL_H)
+				cell:ClearAnchors()
+				cell:SetAnchor(TOPLEFT, container, TOPLEFT, cx, ry)
+				cell.onClickCell = function()
+					if QAT.editor.gridPlacing then
+						QAT.Editor_GridAssign(def, key, QAT.editor.gridPlacing)
+					end
+				end
+				cell:SetHandler("OnMouseUp", function(self, button, upInside)
+					if upInside and button == MOUSE_BUTTON_INDEX_LEFT and self.onClickCell then
+						self.onClickCell()
+					end
+				end)
+
+				local cIcon = get("cellIc" .. key, function()
+					local t = WM:CreateControl("QAT_Grid_CellIc" .. key, container, CT_TEXTURE)
+					t:SetDimensions(20, 20)
+					return t
+				end)
+				local cLbl = get("cellLb" .. key, function()
+					return QAT.widgets.Label(container, "QAT_Grid_CellLb" .. key, "")
+				end)
+				local cDel = get("cellX" .. key, function()
+					return QAT.widgets.TextButton(container, "QAT_Grid_CellX" .. key, "×", nil)
+				end)
+				if kid then
+					cIcon:SetHidden(false)
+					cIcon:SetTexture(memberIcon(kid))
+					cIcon:ClearAnchors()
+					cIcon:SetAnchor(LEFT, cell, LEFT, 8, 0)
+					cLbl:SetHidden(false)
+					cLbl:SetText(kid.name or kid.id)
+					cLbl:SetColor(unpack(s.cellText))
+					cLbl:ClearAnchors()
+					cLbl:SetAnchor(LEFT, cIcon, RIGHT, 8, 0)
+					cLbl:SetAnchor(RIGHT, cell, RIGHT, -26, 0)
+					cLbl:SetMaxLineCount(1)
+					cDel:SetHidden(false)
+					cDel:SetHeight(22)
+					cDel:ClearAnchors()
+					cDel:SetAnchor(RIGHT, cell, RIGHT, -4, 0)
+					cDel.onClick = function()
+						QAT.Editor_GridUnassign(def, key)
+					end
+				else
+					cIcon:SetHidden(true)
+					cDel:SetHidden(true)
+					cLbl:SetHidden(false)
+					cLbl:SetText(placing and "click to place" or "+ assign")
+					cLbl:SetColor(0.45, 0.52, 0.62, 1)
+					cLbl:ClearAnchors()
+					cLbl:SetAnchor(CENTER, cell, CENTER, 0, 0)
+					cLbl:SetMaxLineCount(1)
+				end
 			end
 		end
-	end
-	y = y + g.rows * (CELL_H + CGAP) + 12
+		y = y + g.rows * (CELL_H + CGAP) + 12
 
-	-- ===== Unplaced tray =====
-	local unplaced = {}
-	do
-		local inCell = {}
-		for _, tid in pairs(g.cells) do
-			inCell[tid] = true
-		end
-		for _, kid in ipairs(members(def)) do
-			if not inCell[kid.id] then
-				unplaced[#unplaced + 1] = kid
+		-- ===== Unplaced tray =====
+		local unplaced = {}
+		do
+			local inCell = {}
+			for _, tid in pairs(g.cells) do
+				inCell[tid] = true
+			end
+			for _, kid in ipairs(members(def)) do
+				if not inCell[kid.id] then
+					unplaced[#unplaced + 1] = kid
+				end
 			end
 		end
-	end
-	local uHead = get("uHead", function()
-		return QAT.widgets.Label(container, "QAT_Grid_UHead", "", "$(BOLD_FONT)|13|soft-shadow-thin")
-	end)
-	uHead:SetText("UNPLACED TRACKERS")
-	uHead:SetColor(0.5, 0.57, 0.68, 1)
-	uHead:ClearAnchors()
-	uHead:SetAnchor(TOPLEFT, container, TOPLEFT, OUT, y)
-	y = y + 22
-
-	if #unplaced == 0 then
-		local none = get("uNone", function()
-			return QAT.widgets.Label(container, "QAT_Grid_UNone", "")
+		local uHead = get("uHead", function()
+			return QAT.widgets.Label(container, "QAT_Grid_UHead", "", "$(BOLD_FONT)|13|soft-shadow-thin")
 		end)
-		none:SetHidden(false)
-		none:SetText("All members placed.")
-		none:SetColor(0.45, 0.52, 0.62, 1)
-		none:ClearAnchors()
-		none:SetAnchor(TOPLEFT, container, TOPLEFT, OUT, y)
-		y = y + 28
-	else
-		local ux, uy = OUT, y
-		for i, kid in ipairs(unplaced) do
-			local chip = get("uChip" .. i, function()
-				return QAT.widgets.Clickable(container, "QAT_Grid_UChip" .. i, { 0.10, 0.13, 0.18, 1 })
+		uHead:SetText("UNPLACED TRACKERS")
+		uHead:SetColor(0.5, 0.57, 0.68, 1)
+		uHead:ClearAnchors()
+		uHead:SetAnchor(TOPLEFT, container, TOPLEFT, OUT, y)
+		y = y + 22
+
+		if #unplaced == 0 then
+			local none = get("uNone", function()
+				return QAT.widgets.Label(container, "QAT_Grid_UNone", "")
 			end)
-			chip:SetHidden(false)
-			local selected = QAT.editor.gridPlacing == kid.id
-			chip.bg:SetCenterColor(unpack(selected and { 0.14, 0.20, 0.30, 1 } or { 0.10, 0.13, 0.18, 1 }))
-			chip.bg:SetEdgeColor(unpack(selected and { 0.30, 0.44, 0.62, 1 } or { 0.16, 0.22, 0.30, 1 }))
-			chip.bg:SetEdgeTexture("", 1, 1, 1)
-			chip:SetDimensions(150, 30)
-			if ux + 150 > cw - OUT then
-				ux = OUT
-				uy = uy + 36
-			end
-			chip:ClearAnchors()
-			chip:SetAnchor(TOPLEFT, container, TOPLEFT, ux, uy)
-			chip.placeId = kid.id
-			chip:SetHandler("OnMouseUp", function(self, button, upInside)
-				if upInside and button == MOUSE_BUTTON_INDEX_LEFT then
-					QAT.editor.gridPlacing = (QAT.editor.gridPlacing == self.placeId) and nil or self.placeId
-					QAT.Editor_Inspector_Refresh()
+			none:SetHidden(false)
+			none:SetText("All members placed.")
+			none:SetColor(0.45, 0.52, 0.62, 1)
+			none:ClearAnchors()
+			none:SetAnchor(TOPLEFT, container, TOPLEFT, OUT, y)
+			y = y + 28
+		else
+			local ux, uy = OUT, y
+			for i, kid in ipairs(unplaced) do
+				local chip = get("uChip" .. i, function()
+					return QAT.widgets.Clickable(container, "QAT_Grid_UChip" .. i, { 0.10, 0.13, 0.18, 1 })
+				end)
+				chip:SetHidden(false)
+				local selected = QAT.editor.gridPlacing == kid.id
+				chip.bg:SetCenterColor(unpack(selected and { 0.14, 0.20, 0.30, 1 } or { 0.10, 0.13, 0.18, 1 }))
+				chip.bg:SetEdgeColor(unpack(selected and { 0.30, 0.44, 0.62, 1 } or { 0.16, 0.22, 0.30, 1 }))
+				chip.bg:SetEdgeTexture("", 1, 1, 1)
+				chip:SetDimensions(150, 30)
+				if ux + 150 > cw - OUT then
+					ux = OUT
+					uy = uy + 36
 				end
-			end)
-			local ci = get("uChipIc" .. i, function()
-				local t = WM:CreateControl("QAT_Grid_UChipIc" .. i, container, CT_TEXTURE)
-				t:SetDimensions(18, 18)
-				return t
-			end)
-			ci:SetHidden(false)
-			ci:SetTexture(memberIcon(kid))
-			ci:ClearAnchors()
-			ci:SetAnchor(LEFT, chip, LEFT, 8, 0)
-			local cl = get("uChipL" .. i, function()
-				return QAT.widgets.Label(container, "QAT_Grid_UChipL" .. i, "")
-			end)
-			cl:SetHidden(false)
-			cl:SetText(kid.name or kid.id)
-			cl:SetColor(0.88, 0.91, 0.95, 1)
-			cl:ClearAnchors()
-			cl:SetAnchor(LEFT, ci, RIGHT, 8, 0)
-			cl:SetAnchor(RIGHT, chip, RIGHT, -6, 0)
-			cl:SetMaxLineCount(1)
-			ux = ux + 150 + 8
+				chip:ClearAnchors()
+				chip:SetAnchor(TOPLEFT, container, TOPLEFT, ux, uy)
+				chip.placeId = kid.id
+				chip:SetHandler("OnMouseUp", function(self, button, upInside)
+					if upInside and button == MOUSE_BUTTON_INDEX_LEFT then
+						QAT.editor.gridPlacing = (QAT.editor.gridPlacing == self.placeId) and nil or self.placeId
+						QAT.Editor_Inspector_Refresh()
+					end
+				end)
+				local ci = get("uChipIc" .. i, function()
+					local t = WM:CreateControl("QAT_Grid_UChipIc" .. i, container, CT_TEXTURE)
+					t:SetDimensions(18, 18)
+					return t
+				end)
+				ci:SetHidden(false)
+				ci:SetTexture(memberIcon(kid))
+				ci:ClearAnchors()
+				ci:SetAnchor(LEFT, chip, LEFT, 8, 0)
+				local cl = get("uChipL" .. i, function()
+					return QAT.widgets.Label(container, "QAT_Grid_UChipL" .. i, "")
+				end)
+				cl:SetHidden(false)
+				cl:SetText(kid.name or kid.id)
+				cl:SetColor(0.88, 0.91, 0.95, 1)
+				cl:ClearAnchors()
+				cl:SetAnchor(LEFT, ci, RIGHT, 8, 0)
+				cl:SetAnchor(RIGHT, chip, RIGHT, -6, 0)
+				cl:SetMaxLineCount(1)
+				ux = ux + 150 + 8
+			end
+			y = uy + 36 + 6
 		end
-		y = uy + 36 + 6
-	end
+	end -- end non-dynamic assignment UI
 
 	-- Bottom padding so the scroll child fits everything.
 	local spacer = get("spacer", function()
