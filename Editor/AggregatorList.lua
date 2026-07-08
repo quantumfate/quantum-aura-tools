@@ -385,10 +385,12 @@ function QAT.Aggregator_List_Build(pane)
 
 	-- Collapse by name toggle (default on): deduplicate rows with the same name.
 	local collapseBtn = W.TextButton(tb, "QAT_AggList_Collapse", "Collapse by name", function()
-		local a = QAT.aggregator
-		a.filter.collapseByName = not a.filter.collapseByName
-		collapseBtn:SetSelected(a.filter.collapseByName)
-		QAT.Aggregator_Refresh()
+		local f = QAT.aggregator and QAT.aggregator.filter
+		if f then
+			f.collapseByName = not f.collapseByName
+			collapseBtn:SetSelected(f.collapseByName)
+			QAT.Aggregator_Refresh()
+		end
 	end)
 	collapseBtn:SetHeight(28)
 	collapseBtn:SetAnchor(LEFT, count, RIGHT, 12, 0)
