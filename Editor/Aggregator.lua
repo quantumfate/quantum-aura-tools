@@ -53,6 +53,7 @@ local function defaultFilter()
 		hasStacks = false,
 		favouritesOnly = false,
 		prioritiseMine = false, -- float effects the character can produce to the top
+		collapseByName = true, -- deduplicate by name in the list
 		zoneId = nil, -- nil = all zones
 		sort = "lastSeen", -- lastSeen | seen | name
 	}
@@ -826,6 +827,38 @@ function QAT.Aggregator_ToggleSelected(key)
 	end
 end
 
+-- Toggle all keys in a collapsed group together. If any is already selected,
+-- deselect all; if none selected, select all.
+function QAT.Aggregator_ToggleSelectedCollapsed(keys)
+	local a = QAT.aggregator
+	if not keys or #keys == 0 then
+		return
+	end
+	local add = not a.selectedSet[keys[1]]
+	for _, key in ipairs(keys) do
+		if add then
+			if not a.selectedSet[key] then
+				a.selectedSet[key] = true
+				a.selected[#a.selected + 1] = key
+			end
+		elseif a.selectedSet[key] then
+			a.selectedSet[key] = nil
+			for i, k in ipairs(a.selected) do
+				if k == key then
+					table.remove(a.selected, i)
+					break
+				end
+			end
+		end
+	end
+	if QAT.Aggregator_List_Render then
+		QAT.Aggregator_List_Render()
+	end
+	if QAT.Aggregator_Inspector_RenderBuilder then
+		QAT.Aggregator_Inspector_RenderBuilder()
+	end
+end
+
 -- Remove a row from the selection (the builder's Selected-list × button).
 function QAT.Aggregator_RemoveSelected(key)
 	if QAT.aggregator.selectedSet[key] then
@@ -890,6 +923,100 @@ local function selectionRows()
 	return rows
 end
 
+-- Group selected rows by lowercased name for collapsed building.
+-- Returns {{ name, unit, ids = {}, icon }, ...} in selection order.
+local function groupRowsByName(rows)
+	local order, lookup = {}, {}
+	for _, r in ipairs(rows) do
+		local nk = (r.name or ""):lower()
+		local g = lookup[nk]
+		if not g then
+			g = {
+				name = r.name,
+				unit = (r.targetRole == "me") and "player" or "reticleover",
+				ids = {},
+				icon = r.icon,
+			}
+			lookup[nk] = g
+			order[#order + 1] = g
+		end
+		local seen = false
+		for _, id in ipairs(g.ids) do
+			if id == r.abilityId then
+				seen = true
+				break
+			end
+		end
+		if not seen then
+			g.ids[#g.ids + 1] = r.abilityId
+		end
+	end
+	return order
+end
+
+-- Build a switch tracker def from merged groups (each group has multiple abilityIds
+-- merged into one phase).
+local function buildMergedSwitchDef(groups, opts)
+	local used = {}
+	local function slug(text, fallback)
+		return QAT.util.UniqueSlug(text, fallback, used)
+	end
+
+	local fallbackId = slug("Inactive", "fallback")
+	local stages = {}
+	for i, g in ipairs(groups) do
+		stages[i] = {
+			name = g.name,
+			ids = g.ids,
+			phaseId = slug(g.name, "stage_" .. i),
+			unit = g.unit,
+			icon = g.icon,
+		}
+	end
+
+	local function meshExcept(selfPhaseId)
+		local trs = {}
+		for _, s in ipairs(stages) do
+			if s.phaseId ~= selfPhaseId then
+				trs[#trs + 1] = {
+					when = { kind = "effect", result = "gained", abilityIds = s.ids, unit = s.unit },
+					to = s.phaseId,
+				}
+			end
+		end
+		return trs
+	end
+
+	local phases = {
+		{
+			id = fallbackId,
+			look = { display = "bar", name = "Inactive", showTime = false },
+			duration = { type = "none" },
+			transitions = meshExcept(fallbackId),
+		},
+	}
+	for _, s in ipairs(stages) do
+		phases[#phases + 1] = {
+			id = s.phaseId,
+			look = { display = "bar", name = s.name, icon = s.icon },
+			duration = { type = "effect", abilityIds = s.ids, unit = s.unit },
+			transitions = meshExcept(s.phaseId),
+		}
+	end
+
+	return QAT.CanonicalizeDef({
+		id = "tracker_mutex_" .. GetTimeStamp() .. "_" .. (opts.suffix or 0),
+		kind = "tracker",
+		name = opts.name or (groups[1] and groups[1].name or "New Multi Tracker"),
+		unit = groups[1] and groups[1].unit or "player",
+		initial = fallbackId,
+		phases = phases,
+		x = opts.x,
+		y = opts.y,
+		enabled = true,
+	})
+end
+
 -- Construct (but do not insert) a def from the current selection: 1 effect -> a simple
 -- tracker, 2+ -> one switch (mutex) tracker. Returns def, effectCount, or nil.
 local function selectionToDef()
@@ -901,11 +1028,68 @@ local function selectionToDef()
 	if #rows == 1 then
 		return rowToDef(rows[1]), 1
 	end
+
+	-- When collapse-by-name is on, group rows by name and merge IDs into one phase
+	-- per group. Otherwise build one phase per row (existing behavior).
+	if a.filter.collapseByName then
+		local groups = groupRowsByName(rows)
+		if #groups == 1 then
+			-- All rows had the same name; build a simple tracker watching all IDs.
+			local g = groups[1]
+			buildCounter = buildCounter + 1
+			local phaseId = QAT.util.Slug(g.name, "merged_" .. buildCounter)
+			local unit = g.unit
+			local def = QAT.CanonicalizeDef({
+				id = "tracker_agg_" .. GetTimeStamp() .. "_" .. buildCounter,
+				kind = "tracker",
+				name = g.name,
+				unit = unit,
+				initial = "idle",
+				phases = {
+					{
+						id = "idle",
+						look = { display = "none" },
+						duration = { type = "none" },
+						transitions = {
+							{
+								when = { kind = "effect", result = "gained", abilityIds = g.ids, unit = unit },
+								to = phaseId,
+							},
+						},
+					},
+					{
+						id = phaseId,
+						look = { display = "icon", name = g.name, icon = g.icon, showTime = true },
+						duration = { type = "effect", abilityIds = g.ids, unit = unit },
+						transitions = {
+							{
+								when = { kind = "effect", result = "faded", abilityIds = g.ids, unit = unit },
+								to = "idle",
+							},
+						},
+					},
+				},
+				x = math.floor(GuiRoot:GetWidth() / 2 - 32),
+				y = math.floor(GuiRoot:GetHeight() / 2 - 32),
+				enabled = true,
+			})
+			return def, 1
+		end
+
+		buildCounter = buildCounter + 1
+		local def = buildMergedSwitchDef(groups, {
+			name = "New Multi Tracker",
+			manual = a.builderManual,
+			x = math.floor(GuiRoot:GetWidth() / 2 - 110),
+			y = math.floor(GuiRoot:GetHeight() / 2 - 20),
+			suffix = buildCounter,
+		})
+		return def, #groups
+	end
+
+	-- Existing non-collapsed path: one phase per effect.
 	local effects = {}
 	for _, r in ipairs(rows) do
-		-- Watch each effect on the unit it actually lives on: a self→self buff on the
-		-- player, anything else (a debuff you put on the boss, a boss mechanic) on the
-		-- reticle target.
 		effects[#effects + 1] = {
 			id = r.abilityId,
 			name = r.name,
@@ -913,7 +1097,6 @@ local function selectionToDef()
 		}
 	end
 	buildCounter = buildCounter + 1
-	-- Generic name the user renames; guessing from the effects read arbitrary.
 	local def = QAT.BuildMutexTrackerDef({
 		name = "New Multi Tracker",
 		effects = effects,

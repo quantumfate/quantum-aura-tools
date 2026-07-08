@@ -175,16 +175,16 @@ local function makeRow(parent, name)
 		if not (upInside and button == MOUSE_BUTTON_INDEX_LEFT) then
 			return
 		end
-		-- In multi-select the whole row toggles its selection; otherwise it opens the
-		-- single-row detail as before.
 		if QAT.aggregator.selecting then
-			QAT.Aggregator_ToggleSelected(self.rowKey)
+			if self.collapseKeys then
+				QAT.Aggregator_ToggleSelectedCollapsed(self.collapseKeys)
+			else
+				QAT.Aggregator_ToggleSelected(self.rowKey)
+			end
 		else
-			-- Resolve the clicked row directly. List_Render binds rows asynchronously
-			-- (LibAsync), so a.selectedRow isn't updated yet this frame — reading it here
-			-- would render the previously selected effect (a selection desync).
-			local row = QAT.capture.store[self.rowKey]
-			QAT.aggregator.selectedKey = self.rowKey
+			local rowKey = (self.collapseKeys and self.collapseKeys[1]) or self.rowKey
+			local row = QAT.capture.store[rowKey]
+			QAT.aggregator.selectedKey = rowKey
 			QAT.aggregator.selectedRow = row
 			QAT.Aggregator_List_Render()
 			if QAT.Aggregator_Inspector_Render then
@@ -195,10 +195,14 @@ local function makeRow(parent, name)
 	return c
 end
 
-local function bindRow(c, row, y)
+local function bindRow(c, row, y, collapseKeys, collapseIds)
 	local a = QAT.aggregator
 	local selecting = a.selecting
+	local nCollapsed = collapseKeys and #collapseKeys or 0
+	local collapsed = nCollapsed > 1
 	c.rowKey = row.key
+	c.collapseKeys = collapsed and collapseKeys or nil
+	c.collapseIds = collapsed and collapseIds or nil
 	c:SetWidth(rowW)
 	c:ClearAnchors()
 	c:SetAnchor(TOPLEFT, a.listContent, TOPLEFT, 0, y)
@@ -227,7 +231,13 @@ local function bindRow(c, row, y)
 		c.scribeL:SetText("from  " .. scribedName)
 	end
 	c.seenL:SetText("seen " .. (row.seenCount or 0))
-	c.idL:SetText("#" .. row.abilityId)
+	local idText = "#" .. row.abilityId
+	if collapsed then
+		-- Show the first ability ID with a count of collapsed entries.
+		local more = nCollapsed - 1
+		idText = idText .. string.format("  |c556070+%d|r", more)
+	end
+	c.idL:SetText(idText)
 
 	if row.effectType == BUFF_EFFECT_TYPE_DEBUFF then
 		c.effBadge:SetText("DEBUFF")
@@ -250,7 +260,19 @@ local function bindRow(c, row, y)
 	-- accent bar, the row highlight, and (in select mode) the check mark.
 	local active
 	if selecting then
-		active = a.selectedSet[row.key] and true or false
+		if collapsed then
+			-- Collapsed row is active if ANY of the underlying keys is selected.
+			local found = false
+			for _, k in ipairs(collapseKeys) do
+				if a.selectedSet[k] then
+					found = true
+					break
+				end
+			end
+			active = found
+		else
+			active = a.selectedSet[row.key] and true or false
+		end
 		c.checkMark:SetHidden(not active)
 	else
 		active = (a.selectedKey == row.key)
@@ -361,6 +383,21 @@ function QAT.Aggregator_List_Build(pane)
 	count:SetAnchor(LEFT, selectBtn, RIGHT, 12, 0)
 	QAT.aggregator.listCountLabel = count
 
+	-- Collapse by name toggle (default on): deduplicate rows with the same name.
+	local collapseBtn = W.TextButton(tb, "QAT_AggList_Collapse", "Collapse by name", function()
+		local on = not QAT.aggregator.filter.collapseByName
+		QAT.aggregator.filter.collapseByName = on
+		collapseBtn:SetSelected(on)
+		QAT.Aggregator_List_Render()
+	end)
+	collapseBtn:SetHeight(28)
+	collapseBtn:SetAnchor(LEFT, count, RIGHT, 12, 0)
+	collapseBtn:SetSelected(QAT.aggregator.filter.collapseByName)
+	QAT.widgets.Tooltip(
+		collapseBtn,
+		"Group effects with the same name together. Building a tracker from a collapsed group merges all matching ability IDs into one phase."
+	)
+
 	-- Sort segment (right).
 	local sortOpts = { { v = "lastSeen", l = "Last seen" }, { v = "seen", l = "× Seen" }, { v = "name", l = "Name" } }
 	local prev
@@ -377,7 +414,7 @@ function QAT.Aggregator_List_Build(pane)
 		if prev then
 			b:SetAnchor(LEFT, prev, RIGHT, -1, 0)
 		else
-			b:SetAnchor(LEFT, count, RIGHT, 20, 0)
+			b:SetAnchor(LEFT, collapseBtn, RIGHT, 12, 0)
 		end
 		b:SetSelected(o.v == QAT.aggregator.filter.sort)
 		QAT.aggregator.sortButtons[o.v] = b
@@ -468,11 +505,14 @@ local function windowBind()
 				local rc = W.PoolGet(rowPool, slot, function()
 					return makeRow(content, "QAT_AggRow_" .. slot)
 				end)
-				-- Skip the ~20 control ops when this slot already shows this row for the
-				-- current render (unchanged data + anchor). This is the scroll fast path.
-				if rc._boundKey ~= item.row.key or rc._boundGen ~= renderGen then
-					bindRow(rc, item.row, item.y)
-					rc._boundKey, rc._boundGen = item.row.key, renderGen
+				-- Bind key includes collapse state so a toggle invalidates stale slots.
+				local bindKey = item.row.key
+				if item.collapseKeys then
+					bindKey = "_collapsed_" .. item.row.key
+				end
+				if rc._boundKey ~= bindKey or rc._boundGen ~= renderGen then
+					bindRow(rc, item.row, item.y, item.collapseKeys, item.collapseIds)
+					rc._boundKey, rc._boundGen = bindKey, renderGen
 				end
 			end
 			rOrd = rOrd + 1
@@ -555,6 +595,53 @@ function QAT.Aggregator_List_Render()
 		table.sort(g, cmp)
 	end
 
+	-- Collapse by name: deduplicate rows within each bucket so only one row per
+	-- unique name is displayed. The collapsed row carries the extra keys/IDs for
+	-- multi-select.
+	if fq.collapseByName then
+		for bucket, g in pairs(groups) do
+			local seen = {}
+			local deduped = {}
+			for _, row in ipairs(g) do
+				local nk = (row.name or ""):lower()
+				local e = seen[nk]
+				if not e then
+					e = { row = row, keys = {}, ids = {} }
+					seen[nk] = e
+					table.insert(deduped, e)
+				end
+				e.keys[#e.keys + 1] = row.key
+				e.ids[#e.ids + 1] = row.abilityId
+			end
+			groups[bucket] = deduped
+		end
+	end
+
+	local function iterRows(g)
+		if fq.collapseByName then
+			-- Each entry is { row, keys, ids } — yield the first row once.
+			local i = 0
+			return function()
+				i = i + 1
+				local e = g and g[i]
+				if not e then
+					return nil
+				end
+				return e.row, e.keys, e.ids
+			end
+		else
+			local i = 0
+			return function()
+				i = i + 1
+				local r = g and g[i]
+				if not r then
+					return nil
+				end
+				return r, nil, nil
+			end
+		end
+	end
+
 	-- Build the flat draw plan (layout math only — no control ops, so it's cheap even
 	-- for a big catch). The binding happens later, spread across frames.
 	local plan, y = {}, 0
@@ -564,8 +651,14 @@ function QAT.Aggregator_List_Render()
 			plan[#plan + 1] = { kind = "hdr", bucket = bucket, n = #g, y = y }
 			y = y + HEADER_H + 2
 			if bucket == "ss" or not a.collapsed[bucket] then
-				for _, row in ipairs(g) do
-					plan[#plan + 1] = { kind = "row", row = row, y = y }
+				for row, collapseKeys, collapseIds in iterRows(g) do
+					plan[#plan + 1] = {
+						kind = "row",
+						row = row,
+						y = y,
+						collapseKeys = collapseKeys,
+						collapseIds = collapseIds,
+					}
 					y = y + ROW_H + 2
 				end
 			end

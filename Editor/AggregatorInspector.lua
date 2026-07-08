@@ -585,12 +585,15 @@ function QAT.Aggregator_Inspector_RenderBuilder()
 			"One phase per effect plus a fallback, with no transitions — you wire the switching yourself in the editor."
 		)
 	elseif switch then
+		local collapseSuffix = a.filter.collapseByName and " (same-name IDs are merged into one phase)" or ""
 		I.bBuildNote:SetText("one switch tracker from " .. n)
 		I.bInfo:SetTitle("Builds a switch tracker")
 		I.bInfoText:SetText(
 			"One aura that shows whichever of these "
 				.. n
-				.. " effects is active right now, switching as they come and go — like the four vampire stages."
+				.. " effects is active right now, switching as they come and go"
+				.. collapseSuffix
+				.. "."
 		)
 	else
 		I.bBuildNote:SetText("a simple tracker")
