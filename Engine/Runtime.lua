@@ -148,6 +148,16 @@ local function BuildTrackers(defs, parentLoads, anchor)
 			if not isDynamic then
 				BuildTrackers(def.children, childLoads, childAnchor)
 			end
+		elseif def.kind == "dynamic" then
+			-- Dynamic tracker: not a real Tracker object. Register with GridLayout so the
+			-- layout pass builds an instance pool and positions them per tick.
+			local childLoads = QAT.util.DeepCopy(parentLoads)
+			if def.load then
+				table.insert(childLoads, def.load)
+			end
+			if QAT.GridLayout_Register then
+				QAT.GridLayout_Register(def, childLoads, anchor)
+			end
 		else
 			local chain = QAT.util.DeepCopy(parentLoads)
 			if def.load then
@@ -204,10 +214,10 @@ function QAT.Runtime_ApplyDragSelection()
 			phase.control.tlw:SetMouseEnabled(on)
 		end
 	end
-	-- Show the drag outline for a selected group (folder), hide it otherwise.
+	-- Show the drag outline for a selected group (folder) or dynamic tracker, hide otherwise.
 	if QAT.GroupOutline_Show then
-		local groupId = (movable and selScope ~= nil and selId and not QAT.runtime.trackers[selId]) and selId or nil
-		QAT.GroupOutline_Show(groupId)
+		local outlineId = (movable and selScope ~= nil and selId and not QAT.runtime.trackers[selId]) and selId or nil
+		QAT.GroupOutline_Show(outlineId)
 	end
 end
 
@@ -310,6 +320,9 @@ end
 
 -- A target changed: re-seed target-unit effects (debuffs already on the new target).
 local function OnTargetChanged()
+	if QAT.Targeting and QAT.Targeting.UpdateReticle then
+		QAT.Targeting.UpdateReticle()
+	end
 	QAT.Safe("scan buffs (target)", QAT.Runtime_ScanBuffs)
 end
 

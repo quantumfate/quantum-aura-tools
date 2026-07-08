@@ -13,7 +13,7 @@ local TITLE_H, TAB_H, SPLITTER_W, HEADER_H, PHASESEL_H = 28, 28, 6, 74, 36
 local HEADER_GAP = 30 -- breathing space between the header and the tab content
 QAT.editor.HEADER_H, QAT.editor.TAB_H, QAT.editor.PHASESEL_H = HEADER_H, TAB_H, PHASESEL_H
 QAT.editor.HEADER_GAP = HEADER_GAP
-local MIN_TREE, MIN_INSPECTOR = 300, 320
+local MIN_TREE, MIN_INSPECTOR = 370, 320
 
 local function saveGeometry()
 	local f = QAT.editor.frame
@@ -143,7 +143,7 @@ function QAT.Editor_Init()
 	f:SetMouseEnabled(true)
 	f:SetMovable(true)
 	f:SetResizeHandleSize(SPLITTER_W)
-	f:SetDimensionConstraints(600, 360, 0, 0)
+	f:SetDimensionConstraints(660, 360, 0, 0)
 	f:SetHidden(true)
 	f:ClearAnchors()
 	f:SetAnchor(TOPLEFT, GuiRoot, TOPLEFT, sv.x, sv.y)

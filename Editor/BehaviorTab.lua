@@ -80,10 +80,13 @@ local function selectedPhase(def)
 	return def.phases[1]
 end
 
-local function phaseOptions(def)
+local function phaseOptions(def, sourcePhase)
+	local layer = sourcePhase and (sourcePhase.layer or 0) or 0
 	local opts = { { label = "(hidden)", value = nil } }
 	for _, p in ipairs(def.phases) do
-		table.insert(opts, { label = p.id, value = p.id })
+		if p ~= sourcePhase and (p.layer or 0) == layer then
+			table.insert(opts, { label = p.id, value = p.id })
+		end
 	end
 	return opts
 end
@@ -228,7 +231,6 @@ local function render(container, def)
 	durDD.onSelect = function(v)
 		phase.duration.type = v
 		commit(def)
-		render(container, def)
 	end
 	durDD:SetValue(phase.duration.type or "none")
 	durDD:ClearAnchors()
@@ -356,18 +358,17 @@ local function render(container, def)
 
 		local x = PAD + 26
 		local trigDD = get("trTrig" .. i, function()
-			return QAT.widgets.Dropdown(container, "QAT_Beh_TrTrig" .. i, 134, TRIGGER_OPTS, "gained")
+			return QAT.widgets.Dropdown(container, "QAT_Beh_TrTrig" .. i, 170, TRIGGER_OPTS, "gained")
 		end)
 		trigDD:SetOptions(trigOpts)
 		trigDD.onSelect = function(v)
 			setTriggerKind(when, v)
 			commit(def)
-			render(container, def)
 		end
 		trigDD:SetValue(triggerValue(when))
 		trigDD:ClearAnchors()
 		trigDD:SetAnchor(TOPLEFT, container, TOPLEFT, x, y)
-		x = x + 140
+		x = x + 176
 
 		local unitDD = get("trUnit" .. i, function()
 			return QAT.widgets.Dropdown(container, "QAT_Beh_TrUnit" .. i, 86, UNIT_OPTS, "player")
@@ -441,7 +442,7 @@ local function render(container, def)
 		local toDD = get("trTo" .. i, function()
 			return QAT.widgets.Dropdown(container, "QAT_Beh_TrTo" .. i, 110, {}, nil)
 		end)
-		toDD:SetOptions(phaseOptions(def))
+		toDD:SetOptions(phaseOptions(def, phase))
 		toDD.onSelect = function(v)
 			tr.to = v
 			commit(def)
@@ -461,7 +462,6 @@ local function render(container, def)
 		del.onClick = function()
 			table.remove(phase.transitions, idx)
 			commit(def)
-			render(container, def)
 		end
 
 		y = y + ROW_H + GAP
@@ -477,7 +477,6 @@ local function render(container, def)
 	addTrans.onClick = function()
 		table.insert(phase.transitions, { when = { kind = "effect", result = "gained", abilityIds = {} }, to = nil })
 		commit(def)
-		render(container, def)
 	end
 	y = y + ROW_H + GAP
 

@@ -41,9 +41,16 @@ end
 
 -- Resolve a phase's icon: an explicit look.icon override, else the game icon of
 -- the first tracked ability id (duration or an effect transition), else nil.
-function QAT.util.PhaseIcon(phase)
+function QAT.util.PhaseIcon(phase, def)
 	if phase.look and phase.look.icon and phase.look.icon ~= "" then
 		return phase.look.icon
+	end
+	-- For dynamic defs, fall back to the source's icon when the phase has none.
+	if def and def.kind == "dynamic" and def.source then
+		local srcIcon = QAT.Targeting and QAT.Targeting.GetIcon(def.source)
+		if srcIcon then
+			return srcIcon
+		end
 	end
 	local sources = { phase.duration and phase.duration.abilityIds }
 	for _, tr in ipairs(phase.transitions or {}) do

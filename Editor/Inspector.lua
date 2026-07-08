@@ -54,7 +54,7 @@ function QAT.Editor_AddPhase(def, layer)
 	end
 	table.insert(
 		def.phases,
-		{ id = id, layer = layer or 0, look = { display = "bar" }, duration = { type = "none" }, transitions = {} }
+		{ id = id, layer = layer or 0, look = { display = "none" }, duration = { type = "none" }, transitions = {} }
 	)
 	QAT.editor.selectedPhaseId = id
 	QAT.editor.selectedScope = "phase"
@@ -165,6 +165,25 @@ function QAT.Editor_AddLayer(def)
 		end
 	end
 	QAT.Editor_AddPhase(def, maxLayer + 1)
+end
+
+function QAT.Editor_DeleteLayer(def, layer)
+	layer = layer or 0
+	local kept = {}
+	for i, p in ipairs(def.phases) do
+		if (p.layer or 0) ~= layer then
+			kept[#kept + 1] = p
+		end
+	end
+	if #kept == #def.phases then
+		return -- layer not found or would remove everything
+	end
+	if #kept == 0 then
+		return -- cannot delete the last phase
+	end
+	def.phases = kept
+	QAT.CanonicalizeDef(def)
+	QAT.widgets.NotifyTrackerChanged(def.id)
 end
 
 -- Transplant another tracker def's phases into `target` as a brand-new parallel layer
@@ -469,9 +488,14 @@ function QAT.Editor_Inspector_Build(pane)
 	crumb:SetHeight(22)
 	insp.crumb = crumb
 
+	insp.crumbIcon = WM:CreateControl("QAT_Insp_CrumbIcon", crumb, CT_TEXTURE)
+	insp.crumbIcon:SetDimensions(20, 20)
+	insp.crumbIcon:SetAnchor(LEFT, crumb, LEFT, 0, 0)
+	insp.crumbIcon:SetHidden(true)
+
 	insp.crumbRoot = QAT.widgets.Label(crumb, "QAT_Insp_CrumbRoot", "")
 	insp.crumbRoot:SetColor(0.55, 0.62, 0.74, 1)
-	insp.crumbRoot:SetAnchor(LEFT, crumb, LEFT, 0, 0)
+	insp.crumbRoot:SetAnchor(LEFT, insp.crumbIcon, RIGHT, 6, 0)
 	insp.crumbRoot:SetMouseEnabled(true)
 	insp.crumbRoot:SetHandler("OnMouseUp", function(_, button, upInside)
 		if upInside and button == MOUSE_BUTTON_INDEX_LEFT and insp.currentId then
@@ -502,6 +526,16 @@ function QAT.Editor_Inspector_Build(pane)
 	insp.delPhaseBtn:SetHeight(22)
 	insp.delPhaseBtn:SetAnchor(RIGHT, crumb, RIGHT, 0, 0)
 	QAT.widgets.Tooltip(insp.delPhaseBtn, "Delete the selected phase.")
+
+	insp.delLayerBtn = QAT.widgets.TextButton(crumb, "QAT_Insp_DelLayer", "Delete layer", function()
+		local def = curDef()
+		if def then
+			QAT.Editor_DeleteLayer(def, QAT.editor.selectedLayer or 0)
+		end
+	end)
+	insp.delLayerBtn:SetHeight(22)
+	insp.delLayerBtn:SetAnchor(RIGHT, crumb, RIGHT, 0, 0)
+	QAT.widgets.Tooltip(insp.delLayerBtn, "Delete the selected layer and all its phases.")
 
 	insp.setInitBtn = QAT.widgets.TextButton(crumb, "QAT_Insp_SetInit", "Set initial", function()
 		local def = curDef()
@@ -556,37 +590,69 @@ end
 
 QAT.editor.tabRenderers = QAT.editor.tabRenderers or {}
 
+-- Resolve the best icon to show beside the tracker name in the breadcrumb.
+local function crumbIcon(def)
+	if def.icon and def.icon ~= "" then
+		return def.icon
+	end
+	if def.kind == "dynamic" and def.source then
+		local srcIcon = QAT.Targeting and QAT.Targeting.GetIcon(def.source)
+		if srcIcon then
+			return srcIcon
+		end
+	end
+	for _, p in ipairs(def.phases or {}) do
+		local ic = QAT.util.PhaseIcon(p, def)
+		if ic then
+			return ic
+		end
+	end
+	return nil
+end
+
 -- Update the breadcrumb + phase-action buttons for the current selection.
 local function renderCrumb(def)
 	local insp = QAT.editor.inspector
 	local isFolder = def.kind == "folder"
+	local isDynamic = def.kind == "dynamic"
 	local scope = QAT.editor.selectedScope or "load"
+	local ic = crumbIcon(def)
+	if ic then
+		insp.crumbIcon:SetTexture(ic)
+		insp.crumbIcon:SetHidden(false)
+	else
+		insp.crumbIcon:SetHidden(true)
+	end
 	insp.crumbRoot:SetText(def.name or def.id)
 	if scope == "phase" and not isFolder then
 		insp.crumbLeaf:SetText(QAT.editor.selectedPhaseId or "")
 		local isInitial = QAT.Editor_IsInitialPhase(def, QAT.editor.selectedPhaseId)
 		insp.crumbBadge:SetText("INITIAL")
 		insp.crumbBadge:SetHidden(not isInitial)
-		insp.setInitBtn:SetHidden(false)
-		insp.setInitBtn:SetSelected(isInitial)
+		-- Dynamic trackers: allow delete but not Set initial (locked to source).
+		insp.setInitBtn:SetHidden(isDynamic)
 		insp.delPhaseBtn:SetHidden(false)
+		insp.delLayerBtn:SetHidden(true)
 	elseif scope == "layer" and not isFolder then
 		insp.crumbLeaf:SetText("Layer " .. ((QAT.editor.selectedLayer or 0) + 1))
 		insp.crumbBadge:SetHidden(true)
 		insp.setInitBtn:SetHidden(true)
 		insp.delPhaseBtn:SetHidden(true)
+		insp.delLayerBtn:SetHidden(false)
 	elseif scope == "grid" and isFolder then
 		insp.crumbLeaf:SetText("Grid layout")
-		insp.crumbBadge:SetText(QAT.IsDynamicGroup(def) and "DYNAMIC" or "GROUP")
+		insp.crumbBadge:SetText("GROUP")
 		insp.crumbBadge:SetHidden(false)
 		insp.setInitBtn:SetHidden(true)
 		insp.delPhaseBtn:SetHidden(true)
+		insp.delLayerBtn:SetHidden(true)
 	else
 		insp.crumbLeaf:SetText("Load")
-		insp.crumbBadge:SetText(QAT.IsDynamicGroup(def) and "DYNAMIC" or (isFolder and "GROUP" or "AURA"))
+		insp.crumbBadge:SetText(isDynamic and "DYNAMIC" or (isFolder and "GROUP" or "AURA"))
 		insp.crumbBadge:SetHidden(false)
 		insp.setInitBtn:SetHidden(true)
 		insp.delPhaseBtn:SetHidden(true)
+		insp.delLayerBtn:SetHidden(true)
 	end
 end
 

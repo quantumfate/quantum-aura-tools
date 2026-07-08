@@ -232,40 +232,11 @@ local function newTrackerDef()
 	})
 end
 
--- A template tracker for a dynamic group: its first phase subscribes to the group's
--- emitter (source), so the state machine runs once per emitted element.
-local function sourceTemplateDef()
-	return QAT.CanonicalizeDef({
-		id = newId("tracker_"),
-		kind = "tracker",
-		name = "Template",
-		unit = QAT.DYN_UNIT,
-		enabled = true,
-		pos = { x = 0, y = 0, width = 220, height = 30 },
-		initial = "idle",
-		phases = {
-			{
-				id = "idle",
-				look = { display = "none" },
-				duration = { type = "none" },
-				transitions = { { when = { kind = "source", result = "gained" }, to = "active" } },
-			},
-			{
-				id = "active",
-				look = { display = "bar", showTime = true },
-				duration = { type = "source" },
-				transitions = {},
-			},
-		},
-	})
-end
-
 local function addTracker()
 	local def = newTrackerDef()
 	table.insert(QAT.sv.trackers, def)
 	QAT.log.editor:Debug("added tracker '%s'", def.id)
-	selectNode(def.id) -- expands the new tracker and shows its Load scope
-	-- First-run hint: a new tracker is hidden until its effect triggers.
+	selectNode(def.id)
 	if QAT.Editor_ShowAddTrackerHint then
 		QAT.Editor_ShowAddTrackerHint()
 	end
@@ -278,30 +249,42 @@ local function addGroup()
 	selectNode(def.id)
 end
 
--- Add a dynamic group: a table fed by a target source (emitter), pre-seeded with one
--- template tracker whose first phase subscribes to that source. The template is stamped
--- once per emitted element at runtime.
-local function addDynamicGroup()
+-- Add a dynamic tracker: a top-level entry whose own phases are stamped once per live
+-- target emitted by a source (e.g. taunt). Pre-seeded with idle + active phases wired
+-- to the source.
+local function addDynamicTracker()
 	local source = (QAT.Targeting and QAT.Targeting.SourceNames() or {})[1]
 	local cx = math.floor(GuiRoot:GetWidth() / 2 - 110)
-	local def = {
-		id = newId("group_"),
-		kind = "folder",
-		name = "Dynamic Group",
+	local def = QAT.CanonicalizeDef({
+		id = newId("dyn_"),
+		kind = "dynamic",
+		name = "Dynamic Tracker",
 		enabled = true,
-		children = { sourceTemplateDef() },
-		pos = { x = cx, y = 300 },
-		grid = {
-			enabled = true,
-			cols = 1,
-			rows = 8,
-			fill = { enabled = false },
-			dynamic = { source = source, slot = { width = 220, height = 30 } },
+		source = source,
+		columns = 2,
+		fill = { axis = "rows", from = "left" },
+		pos = { x = cx, y = 300, width = 220, height = 30 },
+		initial = "idle",
+		phases = {
+			{
+				id = "idle",
+				layer = 0,
+				look = { display = "none" },
+				duration = { type = "none" },
+				transitions = { { when = { kind = "source", result = "gained" }, to = "active" } },
+			},
+			{
+				id = "active",
+				layer = 0,
+				look = { display = "bar", showTime = true },
+				duration = { type = "source" },
+				transitions = {},
+			},
 		},
-	}
+	})
+	QAT.CanonicalizeDynamicDef(def)
 	table.insert(QAT.sv.trackers, def)
-	QAT.CanonicalizeTree(QAT.sv.trackers)
-	QAT.log.editor:Debug("added dynamic group '%s' (source=%s)", def.id, tostring(source))
+	QAT.log.editor:Debug("added dynamic tracker '%s' (source=%s)", def.id, tostring(source))
 	QAT.widgets.NotifyTrackerChanged()
 	selectNode(def.id)
 end
@@ -314,10 +297,7 @@ function QAT.Editor_AddTrackerToGroup(groupId)
 		return
 	end
 	g.children = g.children or {}
-	-- A dynamic group's members are templates: pre-wire the new tracker's first phase to
-	-- the group's emitter so it works as a stamp out of the box.
-	local isDynamic = g.grid and g.grid.dynamic and g.grid.dynamic.source
-	local def = isDynamic and sourceTemplateDef() or newTrackerDef()
+	local def = newTrackerDef()
 	-- newTrackerDef centres on screen in absolute coords; re-base to the group anchor so
 	-- it lands centred rather than offset by the group's position.
 	local absx, absy = (def.pos and def.pos.x) or 0, (def.pos and def.pos.y) or 0
@@ -398,10 +378,17 @@ local BG_NONE = { 0, 0, 0, 0 }
 QAT.editor.collapsed = QAT.editor.collapsed or {}
 
 -- Best icon to represent a tracker in the tree: the resolved icon of the first
--- phase that has one, else a placeholder.
+-- phase that has one (falling back to source icon for dynamic defs), else a
+-- placeholder.
 local function trackerIcon(def)
+	if def.kind == "dynamic" and def.source then
+		local srcIcon = QAT.Targeting and QAT.Targeting.GetIcon(def.source)
+		if srcIcon then
+			return srcIcon
+		end
+	end
 	for _, p in ipairs(def.phases or {}) do
-		local ic = QAT.util.PhaseIcon(p)
+		local ic = QAT.util.PhaseIcon(p, def)
 		if ic then
 			return ic
 		end
@@ -572,6 +559,7 @@ end
 local function makeRow(parent, def, depth, y)
 	local name = "QAT_TreeRow_" .. def.id
 	local isFolder = def.kind == "folder"
+	local isDynamic = def.kind == "dynamic"
 	local enabled = def.enabled ~= false
 
 	local row = baseRow(parent, name, y)
@@ -581,8 +569,6 @@ local function makeRow(parent, def, depth, y)
 	if isFolder then
 		setBg(row, selected and BG_FULL or BG_NONE)
 	else
-		-- A tracker is never the exact target (Load/phase rows are); mark it as the
-		-- ancestor of the current selection instead.
 		setBg(row, selected and BG_SUBTLE or BG_NONE)
 	end
 
@@ -618,14 +604,20 @@ local function makeRow(parent, def, depth, y)
 	end
 
 	local leftGlyph
-	if isFolder then
+	if isFolder or isDynamic then
 		arrow:SetTexture(QAT.editor.collapsed[def.id] and ARROW_CLOSED or ARROW_OPEN)
 		arrow.onClick = function()
 			QAT.editor.collapsed[def.id] = not QAT.editor.collapsed[def.id]
 			QAT.Editor_Tree_Build()
 		end
-		iconTex:SetHidden(true)
-		leftGlyph = arrow
+		iconTex:SetHidden(not isDynamic)
+		if isDynamic then
+			iconTex:SetTexture(trackerIcon(def))
+			iconTex:SetColor(1, 1, 1, enabled and 1 or 0.35)
+			iconTex:ClearAnchors()
+			iconTex:SetAnchor(LEFT, arrow, RIGHT, 4, 0)
+		end
+		leftGlyph = isDynamic and iconTex or arrow
 	else
 		local expanded = QAT.editor.expandedTracker == def.id
 		arrow:SetTexture(expanded and ARROW_OPEN or ARROW_CLOSED)
@@ -645,30 +637,7 @@ local function makeRow(parent, def, depth, y)
 		leftGlyph = iconTex
 	end
 
-	-- Name (dimmed when disabled).
-	local label = row.label or QAT.widgets.Label(row, name .. "_Label", "")
-	row.label = label
-	label:SetText(def.name or def.id)
-	label:SetColor(0.9, 0.92, 0.95, enabled and 1 or 0.4)
-	label:ClearAnchors()
-	label:SetAnchor(LEFT, leftGlyph, RIGHT, 6, 0)
-
-	-- Groups carry an aura-count badge; trackers stretch the name to the check.
-	if isFolder then
-		local aur = countAuras(def)
-		local badge = ensureBadge(row, name .. "_Badge", 0.62, 0.72, 0.90)
-		badge:SetText(string.format("%d AURA%s", aur, aur == 1 and "" or "S"))
-		badge:SetHidden(false)
-		badge:ClearAnchors()
-		badge:SetAnchor(LEFT, label, RIGHT, 8, 0)
-	else
-		label:SetAnchor(RIGHT, row, RIGHT, -28, 0)
-		if row.badge then
-			row.badge:SetHidden(true)
-		end
-	end
-
-	-- Enable checkbox on the right edge.
+	-- Enable checkbox on the right edge (defined first so badge/label can anchor to it).
 	local check = row.check
 	if not check then
 		check = QAT.widgets.IconButton(row, name .. "_Check", nil, ICON_SIZE)
@@ -683,6 +652,38 @@ local function makeRow(parent, def, depth, y)
 		QAT.Editor_Tree_Build()
 	end
 
+	-- Name (dimmed when disabled).
+	local label = row.label or QAT.widgets.Label(row, name .. "_Label", "")
+	row.label = label
+	label:SetText(def.name or def.id)
+	label:SetColor(0.9, 0.92, 0.95, enabled and 1 or 0.4)
+	label:ClearAnchors()
+	label:SetAnchor(LEFT, leftGlyph, RIGHT, 6, 0)
+
+	-- Groups carry an aura-count badge; dynamic/tracker stretch the name to the check.
+	if isFolder then
+		local aur = countAuras(def)
+		local badge = ensureBadge(row, name .. "_Badge", 0.62, 0.72, 0.90)
+		badge:SetText(string.format("%d AURA%s", aur, aur == 1 and "" or "S"))
+		badge:SetHidden(false)
+		badge:ClearAnchors()
+		badge:SetAnchor(LEFT, label, RIGHT, 8, 0)
+	elseif isDynamic then
+		local badge = ensureBadge(row, name .. "_Badge", 0.62, 0.72, 0.90)
+		badge:SetText("DYNAMIC")
+		badge:SetHidden(false)
+		badge:ClearAnchors()
+		badge:SetAnchor(LEFT, iconTex, RIGHT, 4, 0)
+		label:ClearAnchors()
+		label:SetAnchor(LEFT, badge, RIGHT, 6, 0)
+		label:SetAnchor(RIGHT, check, LEFT, -8, 0)
+	else
+		label:SetAnchor(RIGHT, row, RIGHT, -28, 0)
+		if row.badge then
+			row.badge:SetHidden(true)
+		end
+	end
+
 	return ROW_H
 end
 
@@ -691,6 +692,7 @@ end
 local function makeLoadRow(parent, def, depth, y)
 	local name = "QAT_TreeLoad_" .. def.id
 	local isFolder = def.kind == "folder"
+	local isDynamic = def.kind == "dynamic"
 	local row = baseRow(parent, name, y)
 	row.defId = nil
 	row.dropId = def.id
@@ -712,7 +714,13 @@ local function makeLoadRow(parent, def, depth, y)
 	label:SetAnchor(LEFT, row, LEFT, 8 + depth * INDENT, 0)
 
 	local badge = ensureBadge(row, name .. "_Badge", 0.62, 0.72, 0.90)
-	badge:SetText(QAT.IsDynamicGroup(def) and "DYNAMIC" or (isFolder and "GROUP" or "AURA"))
+	if isDynamic then
+		badge:SetText("DYNAMIC")
+	elseif isFolder then
+		badge:SetText("GROUP")
+	else
+		badge:SetText("AURA")
+	end
 	badge:SetHidden(false)
 	badge:ClearAnchors()
 	badge:SetAnchor(LEFT, label, RIGHT, 8, 0)
@@ -816,7 +824,7 @@ local function makePhaseRow(parent, def, phase, depth, y)
 	-- The phase's resolved icon on the right edge (auto from the tracked ability, or an
 	-- override); hidden when the phase has no icon to show.
 	local pic = ensurePhaseIcon(row, name .. "_Icon")
-	local tex = QAT.util.PhaseIcon(phase)
+	local tex = QAT.util.PhaseIcon(phase, def)
 	pic:SetHidden(tex == nil)
 	if tex then
 		pic:SetTexture(tex)
@@ -967,8 +975,6 @@ local function buildRows(parent, defs, depth, y)
 		y = y + makeRow(parent, def, depth, y)
 		if def.kind == "folder" then
 			if not QAT.editor.collapsed[def.id] then
-				-- Group children: Load conditions row, an optional Grid layout row (when
-				-- the group is arranged as a table), member rows, then + add tracker.
 				y = y + makeLoadRow(parent, def, depth + 1, y)
 				if def.grid and def.grid.enabled then
 					y = y + makeGridRow(parent, def, depth + 1, y)
@@ -976,37 +982,62 @@ local function buildRows(parent, defs, depth, y)
 				y = buildRows(parent, def.children, depth + 1, y)
 				y = y + makeAddTrackerRow(parent, def, depth + 1, y)
 			end
-		elseif QAT.editor.expandedTracker == def.id then
-			y = y + makeLoadRow(parent, def, depth + 1, y)
-			-- Group phases by layer, preserving each layer's phase order. Layer headers
-			-- only appear once a tracker actually has more than one layer, so simple
-			-- single-layer trackers stay flat.
-			local order, byLayer = {}, {}
-			for _, p in ipairs(def.phases or {}) do
-				local L = p.layer or 0
-				if not byLayer[L] then
-					byLayer[L] = {}
-					order[#order + 1] = L
+		elseif def.kind == "dynamic" then
+			if not QAT.editor.collapsed[def.id] then
+				y = y + makeLoadRow(parent, def, depth + 1, y)
+				local order, byLayer = {}, {}
+				for _, p in ipairs(def.phases or {}) do
+					local L = p.layer or 0
+					if not byLayer[L] then
+						byLayer[L] = {}
+						order[#order + 1] = L
+					end
+					table.insert(byLayer[L], p)
 				end
-				table.insert(byLayer[L], p)
+				table.sort(order)
+				local multi = #order > 1
+				for li, L in ipairs(order) do
+					local phaseDepth = depth + 1
+					if multi then
+						local pos = (li == 1 and "back") or (li == #order and "front") or nil
+						y = y + makeLayerHeaderRow(parent, def, L, pos, #byLayer[L], depth + 1, y)
+						phaseDepth = depth + 2
+					end
+					for _, p in ipairs(byLayer[L]) do
+						y = y + makePhaseRow(parent, def, p, phaseDepth, y)
+					end
+					y = y + makeAddRow(parent, def, phaseDepth, y, L)
+				end
+				y = y + makeAddLayerRow(parent, def, depth + 1, y)
 			end
-			table.sort(order)
-			local multi = #order > 1
-			for li, L in ipairs(order) do
-				-- With more than one layer, each layer is a selectable section and its
-				-- phases indent under it; with one layer the phases sit flat (no section).
-				local phaseDepth = depth + 1
-				if multi then
-					local pos = (li == 1 and "back") or (li == #order and "front") or nil
-					y = y + makeLayerHeaderRow(parent, def, L, pos, #byLayer[L], depth + 1, y)
-					phaseDepth = depth + 2
+		else
+			if QAT.editor.expandedTracker == def.id then
+				y = y + makeLoadRow(parent, def, depth + 1, y)
+				local order, byLayer = {}, {}
+				for _, p in ipairs(def.phases or {}) do
+					local L = p.layer or 0
+					if not byLayer[L] then
+						byLayer[L] = {}
+						order[#order + 1] = L
+					end
+					table.insert(byLayer[L], p)
 				end
-				for _, p in ipairs(byLayer[L]) do
-					y = y + makePhaseRow(parent, def, p, phaseDepth, y)
+				table.sort(order)
+				local multi = #order > 1
+				for li, L in ipairs(order) do
+					local phaseDepth = depth + 1
+					if multi then
+						local pos = (li == 1 and "back") or (li == #order and "front") or nil
+						y = y + makeLayerHeaderRow(parent, def, L, pos, #byLayer[L], depth + 1, y)
+						phaseDepth = depth + 2
+					end
+					for _, p in ipairs(byLayer[L]) do
+						y = y + makePhaseRow(parent, def, p, phaseDepth, y)
+					end
+					y = y + makeAddRow(parent, def, phaseDepth, y, L)
 				end
-				y = y + makeAddRow(parent, def, phaseDepth, y, L)
+				y = y + makeAddLayerRow(parent, def, depth + 1, y)
 			end
-			y = y + makeAddLayerRow(parent, def, depth + 1, y)
 		end
 	end
 	return y
@@ -1023,8 +1054,14 @@ function QAT.Editor_Tree_Build(pane)
 		tb:SetHeight(TOOLBAR_H)
 		QAT.editor.treeToolbar = tb
 
-		-- Three toolbar actions, evenly spaced, chained left to right.
+		-- Toolbar actions. Delete pins to the right edge; the three add buttons sit
+		-- left-to-right, with addD right-anchored to delBtn so it fills whatever space
+		-- is available and never overlaps.
 		local GAP = 8
+		local delBtn = QAT.widgets.TextButton(tb, "QAT_Tree_Btn_Delete", "Delete", deleteSelected)
+		delBtn:SetHeight(TOOLBAR_H - 6)
+		delBtn:SetAnchor(RIGHT, tb, RIGHT, -GAP, 0)
+		QAT.widgets.Tooltip(delBtn, "Delete the selected tracker or group.")
 		local addT = QAT.widgets.TextButton(tb, "QAT_Tree_Btn_AddTracker", "+ Tracker", addTracker)
 		addT:SetHeight(TOOLBAR_H - 6)
 		addT:SetAnchor(LEFT, tb, LEFT, GAP, 0)
@@ -1033,19 +1070,11 @@ function QAT.Editor_Tree_Build(pane)
 		addG:SetHeight(TOOLBAR_H - 6)
 		addG:SetAnchor(LEFT, addT, RIGHT, GAP, 0)
 		QAT.widgets.Tooltip(addG, "Add a group (folder). Its Load conditions cascade to the trackers inside it.")
-		local addD = QAT.widgets.TextButton(tb, "QAT_Tree_Btn_AddDynamic", "+ Dynamic", addDynamicGroup)
+		local addD = QAT.widgets.TextButton(tb, "QAT_Tree_Btn_AddDynamic", "+ Dynamic", addDynamicTracker)
 		addD:SetHeight(TOOLBAR_H - 6)
 		addD:SetAnchor(LEFT, addG, RIGHT, GAP, 0)
-		QAT.widgets.Tooltip(
-			addD,
-			"Add a dynamic group: a table fed by an emitter (e.g. taunts). Its template tracker is stamped once per live target."
-		)
-		-- Delete is pinned to the toolbar's right edge so the three add buttons never push
-		-- it off the pane / over the content header.
-		local delBtn = QAT.widgets.TextButton(tb, "QAT_Tree_Btn_Delete", "Delete", deleteSelected)
-		delBtn:SetHeight(TOOLBAR_H - 6)
-		delBtn:SetAnchor(RIGHT, tb, RIGHT, -GAP, 0)
-		QAT.widgets.Tooltip(delBtn, "Delete the selected tracker or group.")
+		addD:SetAnchor(RIGHT, delBtn, LEFT, -GAP, 0)
+		QAT.widgets.Tooltip(addD, "Add a dynamic tracker: stamps its phases once per live target (e.g. taunts).")
 
 		-- Scroll viewport filling the pane below the toolbar: a ZO_ScrollContainer so
 		-- rows clip to the pane and scroll with a scrollbar / mouse-wheel (no manual

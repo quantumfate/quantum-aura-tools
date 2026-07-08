@@ -326,13 +326,69 @@ local function buildPool(def, anchor)
 end
 QAT.GridLayout_BuildDynamicPool = buildPool
 
--- Hide every instance control of every dynamic pool (rebuild / disable).
+-- Build a pool for a `kind="dynamic"` def: clones the def's own phases (the template)
+-- into instances, resolving source references to the emitter's ability id.
+local function buildDynamicPoolFromDef(def, anchor)
+	local cap = def.columns * 8
+	local srcAbilityId = QAT.Targeting.PrimaryAbilityId(def.source)
+	local slotW, slotH = (def.pos.width or 220), (def.pos.height or 30)
+
+	local pool = { instances = {}, slotW = slotW, slotH = slotH, ability = srcAbilityId }
+	dynSlots[def.id] = pool
+
+	local template = QAT.util.DeepCopy(def)
+	template.id = def.id .. "_template"
+	template.kind = "tracker"
+	template.enabled = true
+	template.load = nil
+	template.pos.x, template.pos.y = 0, 0
+	template.columns = nil
+	template.fill = nil
+	template.slot = nil
+
+	for i = 1, cap do
+		local idef = QAT.util.DeepCopy(template)
+		idef.id = def.id .. "_slot" .. i
+		-- Resolve source references to concrete effect on the reserved unit,
+		-- and bake the source's icon into phases that have no explicit icon so
+		-- Normalize/PhaseIcon resolves it (template hides the dynamic origin).
+		for _, p in ipairs(idef.phases or {}) do
+			if p.duration and p.duration.type == "source" then
+				p.duration = { type = "effect", abilityIds = { srcAbilityId }, unit = QAT.DYN_UNIT }
+			end
+			for _, tr in ipairs(p.transitions or {}) do
+				if tr.when and tr.when.kind == "source" then
+					tr.when = {
+						kind = "effect",
+						result = tr.when.result or "gained",
+						abilityIds = { srcAbilityId },
+						unit = QAT.DYN_UNIT,
+					}
+				end
+			end
+			if not p.look.icon or p.look.icon == "" then
+				p.look.icon = QAT.Targeting.GetIcon(def.source)
+			end
+		end
+		QAT.CanonicalizeDef(idef)
+		local inst = QAT.Tracker.New(idef, {}, anchor or { x = 0, y = 0 })
+		inst.dynAbilityId = srcAbilityId
+		inst.loaded = true
+		inst:ResetDynamic()
+		pool.instances[i] = inst
+	end
+	return pool
+end
+
+-- Hide every instance control of every dynamic pool (rebuild / disable). Also
+-- clears binding state so no stale _fading flags linger after a reset.
 local function hideAllSlots()
 	for _, pool in pairs(dynSlots) do
 		for _, inst in ipairs(pool.instances or {}) do
 			for _, phase in pairs(inst.phases) do
 				phase.control:SetState(false)
 			end
+			inst.boundKey, inst.boundEnd, inst._fading = nil, nil, nil
 		end
 	end
 end
@@ -375,19 +431,26 @@ local function layoutDynamic(entry)
 	local cap = g.rows * g.cols
 	local insts = pool.instances
 
-	-- Release instances whose bound target left the set (lets the fade phase play out).
+	-- Index live targets by key for O(1) lookup in the release pass.
 	local current = {}
 	for _, b in ipairs(snap) do
 		current[b.key] = b
 	end
+
+	-- Release: feed faded to instances whose bound target left the set. Preserve
+	-- boundKey during the 0.25s grace fade so the slot is not stolen for a new
+	-- target before the fade completes. The _fading flag prevents double-release
+	-- and excludes the instance from the packing pass.
 	for i = 1, cap do
 		local inst = insts[i]
-		if inst.boundKey and not current[inst.boundKey] then
+		if inst.boundKey and not current[inst.boundKey] and not inst._fading then
 			inst:FeedDynamic(false)
-			inst.boundKey, inst.boundEnd = nil, nil
+			inst._fading = true
 		end
 	end
-	-- Assign each live target to an instance (refresh if already bound, else a free slot).
+
+	-- Assign each live target to an instance. Already-bound ones keep their slot;
+	-- new targets get the first completely free slot (not bound, not fading).
 	for _, b in ipairs(snap) do
 		local bound
 		for i = 1, cap do
@@ -397,29 +460,45 @@ local function layoutDynamic(entry)
 			end
 		end
 		if bound then
+			-- Re-taunt or refreshed effect on an existing target: cancel any
+			-- in-progress fade and refresh the timer. The target is still live.
+			if bound._fading then
+				bound._fading = nil
+			end
 			if bound.boundEnd ~= b.endTime then
-				bound:FeedDynamic(true, b.beginTime, b.endTime, b.stacks) -- re-applied (e.g. re-taunt)
-				bound.boundEnd = b.endTime
+				bound:FeedDynamic(true, b.beginTime, b.endTime, b.stacks)
+				bound.boundEnd, bound.boundStacks = b.endTime, b.stacks
 			end
 		else
 			for i = 1, cap do
 				local inst = insts[i]
-				if not inst.boundKey then
+				if not inst.boundKey and not inst._fading then
 					inst:ResetDynamic()
 					inst:SetDisplayName(b.name)
 					inst:FeedDynamic(true, b.beginTime, b.endTime, b.stacks)
-					inst.boundKey, inst.boundEnd = b.key, b.endTime
+					inst.boundKey, inst.boundEnd, inst.boundName, inst.boundStacks = b.key, b.endTime, b.name, b.stacks
 					break
 				end
 			end
 		end
 	end
+
 	-- Advance every machine (bound counts down; released ones finish their fade).
 	for i = 1, #insts do
 		insts[i]:Tick(now)
 	end
 
-	-- Pack the visible instances, soonest-expiry-first.
+	-- After tick, clean up instances whose fade completed (now hidden).
+	for i = 1, cap do
+		local inst = insts[i]
+		if inst._fading and not instPresent(inst) then
+			inst.boundKey, inst.boundEnd, inst.boundName, inst.boundStacks, inst._fading = nil, nil, nil, nil, nil
+		end
+	end
+
+	-- Pack only active (non-fading, visible) instances. Fading ones stay at their
+	-- last position and disappear after the grace window — the active instances
+	-- pack cleanly to the top without a double-shift.
 	local s = g.style
 	local gap = s.gap
 	local slotW, slotH = pool.slotW, pool.slotH
@@ -430,8 +509,9 @@ local function layoutDynamic(entry)
 
 	local present = {}
 	for i = 1, cap do
-		if instPresent(insts[i]) then
-			present[#present + 1] = insts[i]
+		local inst = insts[i]
+		if instPresent(inst) and not inst._fading then
+			present[#present + 1] = inst
 		end
 	end
 	table.sort(present, function(a, b)
@@ -440,14 +520,23 @@ local function layoutDynamic(entry)
 
 	-- No cell chrome: the template instance owns its own background/border, so a dynamic
 	-- group draws only the instances (Begin/End still clears any stale pooled chrome).
+	local fillFrom = g.fill and g.fill.from or "left"
 	QAT.gridDisplay.Begin(id)
 	for idx, inst in ipairs(present) do
 		local n = idx - 1
 		local r, c
 		if byCols then
-			r, c = (n % g.rows) + 1, math.floor(n / g.rows) + 1
+			local colInx = math.floor(n / g.rows) + 1
+			local rowInCol = (n % g.rows) + 1
+			local itemsThisCol = math.min(g.rows, #present - (colInx - 1) * g.rows)
+			r = (fillFrom == "left") and rowInCol or (g.rows - (itemsThisCol - rowInCol))
+			c = colInx
 		else
-			r, c = math.floor(n / g.cols) + 1, (n % g.cols) + 1
+			local rowInx = math.floor(n / g.cols) + 1
+			local colInRow = (n % g.cols) + 1
+			local itemsThisRow = math.min(g.cols, #present - (rowInx - 1) * g.cols)
+			c = (fillFrom == "left") and colInRow or (g.cols - (itemsThisRow - colInRow))
+			r = rowInx
 		end
 		local x = ox + (c - 1) * (slotW + gap)
 		local y = oy + (r - 1) * (slotH + gap)
@@ -456,8 +545,224 @@ local function layoutDynamic(entry)
 	QAT.gridDisplay.End(id)
 end
 
--- Reposition + redraw every live grid group. Called each render tick after trackers
--- have ticked (so member visibility is current).
+-- Layout pass for a `kind="dynamic"` def: snapshot its source, bind targets to pooled
+-- template instances, tick each machine, then pack visible instances into a row-major
+-- or column-major grid. Auto column-width: each column matches the widest visible
+-- instance in it.
+local function layoutDynamicDef(entry)
+	local def = entry.def
+	local id = def.id
+	local pool = dynSlots[id]
+	if not (def.source and pool) then
+		QAT.gridDisplay.Hide(id)
+		return
+	end
+	local now = GetFrameTimeSeconds()
+	if entry.loadChain and not QAT.conditions.EvaluateLoad(entry.loadChain) then
+		QAT.gridDisplay.Hide(id)
+		for _, inst in ipairs(pool.instances) do
+			for _, phase in pairs(inst.phases) do
+				phase.control:SetState(false)
+			end
+		end
+		return
+	end
+
+	local snap = QAT.Targeting.Snapshot(def.source, now)
+	local cap = #pool.instances
+	local insts = pool.instances
+
+	-- Index live targets by key.
+	local current = {}
+	for _, b in ipairs(snap) do
+		current[b.key] = b
+	end
+
+	-- Release: feed faded to instances whose target left the set.
+	for i = 1, cap do
+		local inst = insts[i]
+		if inst.boundKey and not current[inst.boundKey] and not inst._fading then
+			inst:FeedDynamic(false)
+			inst._fading = true
+		end
+	end
+
+	-- Assign live targets to instances.
+	for _, b in ipairs(snap) do
+		local bound
+		for i = 1, cap do
+			if insts[i].boundKey == b.key then
+				bound = insts[i]
+				break
+			end
+		end
+		if bound then
+			if bound._fading then
+				bound._fading = nil
+			end
+			if bound.boundEnd ~= b.endTime then
+				bound:FeedDynamic(true, b.beginTime, b.endTime, b.stacks)
+				bound.boundEnd, bound.boundStacks = b.endTime, b.stacks
+			end
+		else
+			for i = 1, cap do
+				local inst = insts[i]
+				if not inst.boundKey and not inst._fading then
+					inst:ResetDynamic()
+					inst:SetDisplayName(b.name)
+					inst:FeedDynamic(true, b.beginTime, b.endTime, b.stacks)
+					inst.boundKey, inst.boundEnd, inst.boundName, inst.boundStacks = b.key, b.endTime, b.name, b.stacks
+					break
+				end
+			end
+		end
+	end
+
+	-- Tick every machine.
+	for i = 1, #insts do
+		insts[i]:Tick(now)
+	end
+
+	-- Clean up completed fades.
+	for i = 1, cap do
+		local inst = insts[i]
+		if inst._fading and not instPresent(inst) then
+			inst.boundKey, inst.boundEnd, inst.boundName, inst.boundStacks, inst._fading = nil, nil, nil, nil, nil
+		end
+	end
+
+	-- Auto column width: widest visible instance in each column.
+	local cols = def.columns
+	local byCols = def.fill and def.fill.axis == "cols"
+
+	-- Gather visible (non-fading) instances sorted by expiry.
+	local present = {}
+	for i = 1, cap do
+		local inst = insts[i]
+		if instPresent(inst) and not inst._fading then
+			present[#present + 1] = inst
+		end
+	end
+	local sortField = def.sortBy or "timeLeft"
+	local sortDesc = (def.sortDir or "asc") == "desc"
+	if sortField == "name" then
+		table.sort(present, function(a, b)
+			local na, nb = (a.boundName or ""), (b.boundName or "")
+			if sortDesc then
+				return na > nb
+			end
+			return na < nb
+		end)
+	elseif sortField == "stacks" then
+		table.sort(present, function(a, b)
+			local sa, sb = (a.boundStacks or 0), (b.boundStacks or 0)
+			if sortDesc then
+				return sa > sb
+			end
+			return sa < sb
+		end)
+	else
+		table.sort(present, function(a, b)
+			local ea, eb = (a.boundEnd or math.huge), (b.boundEnd or math.huge)
+			if sortDesc then
+				return ea > eb
+			end
+			return ea < eb
+		end)
+	end
+
+	-- Cap visible items to max rows (hide overflow off-screen).
+	if def.maxRows and def.maxRows > 0 then
+		local maxItems = def.maxRows * cols
+		if #present > maxItems then
+			for i = maxItems + 1, #present do
+				present[i]:PlaceAbsolute(-9999, -9999)
+			end
+			for i = #present, maxItems + 1, -1 do
+				present[i] = nil
+			end
+		end
+	end
+
+	-- Calculate colW from all visible (fading instances excluded) — the widest
+	-- instance in each logical column.
+	local colW = {}
+	for i = 1, cols do
+		colW[i] = pool.slotW
+	end
+	for idx, inst in ipairs(present) do
+		local n = idx - 1
+		local c
+		if byCols then
+			local rows = math.ceil(cap / cols)
+			c = math.floor(n / (rows > 0 and rows or 1)) + 1
+		else
+			c = (n % cols) + 1
+		end
+		local w = inst.footprintW or pool.slotW
+		if w > colW[c] then
+			colW[c] = w
+		end
+	end
+
+	-- Pack positions.
+	local slotH = pool.slotH
+	local gap = 6
+	local origin = def.pos or { x = 400, y = 300 }
+	local anchor = entry.anchor or { x = 0, y = 0 }
+	local ox, oy = (anchor.x or 0) + (origin.x or 400), (anchor.y or 0) + (origin.y or 300)
+
+	-- Total grid dimensions for origin anchoring (grow direction).
+	local totalW = 0
+	for i = 1, cols do
+		totalW = totalW + (colW[i] or pool.slotW)
+	end
+	totalW = totalW + (cols - 1) * gap
+	if not byCols and def.fill and def.fill.from == "right" then
+		ox = ox - totalW
+	end
+
+	QAT.gridDisplay.Begin(id)
+	for idx, inst in ipairs(present) do
+		local n = idx - 1
+		local r, c, idxInCol, itemsThisCol
+		if byCols then
+			local totalRows = math.ceil(cap / cols)
+			c = math.floor(n / (totalRows > 0 and totalRows or 1)) + 1
+			local itemsBeforeCol = (c - 1) * totalRows
+			itemsThisCol = math.min(totalRows, #present - itemsBeforeCol)
+			idxInCol = n - itemsBeforeCol -- 0-indexed within column
+			r = idxInCol + 1
+		else
+			r = math.floor(n / cols) + 1
+			c = (n % cols) + 1
+			-- Horizontal start side: left or right.
+			if def.fill and def.fill.from == "right" then
+				c = cols - (n % cols)
+			end
+		end
+
+		-- Compute cumulative x from colW.
+		local cx = ox
+		for ci = 1, c - 1 do
+			cx = cx + colW[ci] + gap
+		end
+		local x = cx
+		local y
+		if byCols and def.fill and def.fill.from == "bottom" then
+			y = oy + (r - 1) * (slotH + gap)
+		elseif byCols then
+			y = oy - idxInCol * (slotH + gap)
+		else
+			y = oy + (r - 1) * (slotH + gap)
+		end
+		inst:PlaceAbsolute(x, y)
+	end
+	QAT.gridDisplay.End(id)
+end
+
+-- Reposition + redraw every live grid group and dynamic tracker. Called each render
+-- tick after trackers have ticked (so member visibility is current).
 function QAT.GridLayout_Update()
 	for _, entry in ipairs(QAT.runtime.grids) do
 		QAT.Safe("grid layout " .. tostring(entry.def.id), function()
@@ -468,6 +773,11 @@ function QAT.GridLayout_Update()
 			end
 		end)
 	end
+	for _, entry in ipairs(QAT.runtime.dynamicTrackers or {}) do
+		QAT.Safe("dynamic tracker layout " .. tostring(entry.def.id), function()
+			layoutDynamicDef(entry)
+		end)
+	end
 end
 
 -- Forget all live grids and hide their chrome (called before a runtime rebuild).
@@ -475,18 +785,31 @@ function QAT.GridLayout_Reset()
 	for _, entry in ipairs(QAT.runtime.grids) do
 		QAT.gridDisplay.Hide(entry.def.id)
 	end
+	for _, entry in ipairs(QAT.runtime.dynamicTrackers or {}) do
+		QAT.gridDisplay.Hide(entry.def.id)
+	end
 	hideAllSlots() -- dynamic-grid slot controls (persist by name; just hide them)
 	QAT.runtime.grids = {}
+	QAT.runtime.dynamicTrackers = {}
 end
 
--- Register a grid group discovered during BuildTrackers. `anchor` is the parent's
--- absolute screen anchor (the group's own pos is added on top in layoutGroup). A dynamic
--- group also builds its template-instance pool here.
+-- Register a grid group or dynamic tracker discovered during BuildTrackers. `anchor`
+-- is the parent's absolute screen anchor. A dynamic group/tracker also builds its
+-- template-instance pool here.
 function QAT.GridLayout_Register(def, loadChain, anchor)
-	QAT.runtime.grids[#QAT.runtime.grids + 1] = { def = def, loadChain = loadChain, anchor = anchor }
-	if def.grid and def.grid.dynamic and def.grid.dynamic.source then
+	if QAT.IsDynamicDef(def) then
+		QAT.runtime.dynamicTrackers = QAT.runtime.dynamicTrackers or {}
+		QAT.runtime.dynamicTrackers[#QAT.runtime.dynamicTrackers + 1] =
+			{ def = def, loadChain = loadChain, anchor = anchor }
 		QAT.Safe("build dynamic pool " .. tostring(def.id), function()
-			buildPool(def, anchor)
+			buildDynamicPoolFromDef(def, anchor)
 		end)
+	else
+		QAT.runtime.grids[#QAT.runtime.grids + 1] = { def = def, loadChain = loadChain, anchor = anchor }
+		if def.grid and def.grid.dynamic and def.grid.dynamic.source then
+			QAT.Safe("build dynamic pool " .. tostring(def.id), function()
+				buildPool(def, anchor)
+			end)
+		end
 	end
 end

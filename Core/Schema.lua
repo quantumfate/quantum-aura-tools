@@ -352,7 +352,7 @@ function QAT.CanonicalizeDef(def)
 		phase.transitions = phase.transitions or {}
 		local kept = {}
 		for _, tr in ipairs(phase.transitions) do
-			if phaseIds[tr.to] then
+			if not tr.to or phaseIds[tr.to] then
 				tr.when = canonicalWhen(tr.when, def.unit)
 				kept[#kept + 1] = tr
 			end
@@ -452,6 +452,38 @@ function QAT.IsDynamicGroup(def)
 		and def.grid ~= nil
 		and def.grid.dynamic ~= nil
 		and def.grid.dynamic.source ~= nil
+end
+
+--- Is this def a dynamic tracker — a first-class kind that feeds its own phases as a
+--- template to a source emitter, stamping one instance per live target?
+---@param def table|nil
+---@return boolean
+function QAT.IsDynamicDef(def)
+	return def ~= nil and def.kind == "dynamic"
+end
+
+--- Normalize a dynamic tracker def in place. Seeds defaults for source, columns, fill
+--- direction, and slot dimensions.
+---@param def table dynamic def
+function QAT.CanonicalizeDynamicDef(def)
+	local sources = QAT.Targeting and QAT.Targeting.SourceNames() or {}
+	def.source = def.source or sources[1]
+	def.columns = math.max(1, math.floor(tonumber(def.columns) or 2))
+	def.fill = def.fill or {}
+	def.fill.enabled = true
+	if def.fill.axis ~= "cols" then
+		def.fill.axis = "rows"
+	end
+	if def.fill.from ~= "right" and def.fill.from ~= "top" and def.fill.from ~= "bottom" then
+		def.fill.from = "left"
+	end
+	def.maxRows = tonumber(def.maxRows) or nil
+	def.sortBy = def.sortBy or "timeLeft"
+	def.sortDir = def.sortDir or "asc"
+	def.pos = def.pos or {}
+	def.pos.width = math.max(16, math.floor(tonumber(def.pos.width) or 220))
+	def.pos.height = math.max(8, math.floor(tonumber(def.pos.height) or 30))
+	def.slot = nil
 end
 
 --- Normalize a folder's optional grid (table-layout) block in place. Absent grid =
@@ -582,6 +614,9 @@ function QAT.CanonicalizeTree(defs)
 			def.children = def.children or {}
 			QAT.CanonicalizeTree(def.children)
 			QAT.CanonicalizeFolder(def) -- after children, so member-id pruning sees them
+		elseif def.kind == "dynamic" then
+			QAT.CanonicalizeDef(def)
+			QAT.CanonicalizeDynamicDef(def)
 		else
 			QAT.CanonicalizeDef(def)
 		end

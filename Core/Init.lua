@@ -9,7 +9,7 @@ QAT = {
 	-- Internal data-schema version. Independent of the ZO_SavedVars version
 	-- (which we keep pinned at 1 so it never wipes data); migrations below own
 	-- all schema evolution. See Core/Migrations.lua.
-	schemaVersion = 11,
+	schemaVersion = 12,
 	slash = "/qat",
 }
 
@@ -22,9 +22,12 @@ QAT.defaults = {
 		backgroundCapture = false, -- passive recently-seen recording; off by default
 		persistCapture = true, -- keep captured effects across reloads (the standing library)
 		capturePopupSeen = false, -- whether the one-time capture popup has been dismissed
-		examplesSeeded = false, -- whether starter example trackers were seeded once
-		addTrackerHintSeen = false, -- whether the "trackers start hidden" hint was dismissed for good
-		customTextures = {}, -- user-added { label, path } entries for the Graphic-kind picker
+		uiFont = "default", -- LibMediaProvider font key for editor chrome (default = game font)
+		customSources = {}, -- user-defined Lua target sources
+		editorWidth = nil, -- unpinned: the editor remembers its last width
+		editorHeight = nil, -- unpinned
+		editorX = nil, -- unpinned
+		editorY = nil, -- unpinned
 	},
 	trackers = {}, -- tree of tracker and folder defs
 	userLibrary = {}, -- user-captured ability ids, kept separate from the bundled library
@@ -38,7 +41,7 @@ QAT.defaults = {
 		y = 200,
 		width = 1080,
 		height = 560,
-		treeWidth = 300,
+		treeWidth = 340,
 	},
 }
 
@@ -78,51 +81,105 @@ local function SeedExamples()
 	QAT.log.root:Info("seeded %d example tracker(s)", n)
 end
 
--- Re-add any deleted example trackers. They are restored into SavedVariables and
--- the editor tree immediately; a /reloadui makes them render on the HUD.
+-- Example custom-source code that demonstrates the taunt binding format, used as
+-- a teaching reference in the Source Manager.
+local TAUNT_EXAMPLE_CODE = [=[
+-- Taunt example: returns mock bindings for demonstration.
+-- Replace with your own logic that returns {key, name, remaining, duration, ...} per target.
+-- `now` = GetFrameTimeSeconds() float.
+function(now)
+	local targets = {
+		{ key = 1001, name = "Dummy Tank", remaining = 9.2, duration = 15 },
+		{ key = 1002, name = "Overseer Naemon", remaining = 4.7, duration = 15 },
+	}
+	local out = {}
+	for _, t in ipairs(targets) do
+		t.remaining = t.remaining - (now % 1) * 0.3 -- simulate countdown
+		if t.remaining > 0 then
+			table.insert(out, {
+				key = t.key,
+				name = t.name,
+				remaining = t.remaining,
+				duration = t.duration,
+				beginTime = now - (t.duration - t.remaining),
+				endTime = now + t.remaining,
+				stacks = 0,
+			})
+		end
+	end
+	table.sort(out, function(a, b) return a.remaining < b.remaining end)
+	return out
+end
+]=]
+
+-- Re-add any deleted example trackers and example custom sources. They are restored
+-- into SavedVariables immediately; a /reloadui makes the trackers render on the HUD.
 function QAT.RestoreExamples()
 	local n = addMissingExamples()
+
+	-- Restore the taunt example custom source if missing (teaching reference).
+	QAT.sv.account = QAT.sv.account or {}
+	QAT.sv.account.customSources = QAT.sv.account.customSources or {}
+	if not QAT.sv.account.customSources["taunt_example"] then
+		QAT.sv.account.customSources["taunt_example"] = TAUNT_EXAMPLE_CODE
+		if QAT.Targeting then
+			QAT.Targeting.RegisterCode("taunt_example", TAUNT_EXAMPLE_CODE)
+		end
+		n = n + 1
+	end
+
 	if QAT.widgets and QAT.widgets.NotifyTrackerChanged then
 		QAT.widgets.NotifyTrackerChanged()
 	end
-	d(QAT.displayName .. ": restored " .. n .. " example tracker(s). /reloadui to show them on screen.")
+	d(QAT.displayName .. ": restored " .. n .. " example(s). /reloadui to show trackers on screen.")
 	return n
 end
 
--- Create the "Taunts" dynamic-grid group if it isn't already present: a single-column
--- grid fed by the taunt target source, so every enemy the player has taunted shows as a
--- name + remaining-time bar that packs/unpacks live. Minimal seed authoring for now —
--- the group is a normal folder afterward (movable/editable in the editor).
-local TAUNT_GROUP_ID = "qat_taunt_grid"
-function QAT.SeedTauntGrid()
+-- Create the "Taunts" dynamic tracker if it isn't already present: a `kind="dynamic"`
+-- entry fed by the taunt source, so every enemy the player has taunted shows as a name +
+-- remaining-time bar that packs/unpacks live.
+local TAUNT_DYN_ID = "qat_taunt_dyn"
+function QAT.SeedTauntTracker()
 	for _, def in ipairs(QAT.sv.trackers) do
-		if def.id == TAUNT_GROUP_ID then
+		if def.id == TAUNT_DYN_ID then
 			d(QAT.displayName .. ": taunt tracker already exists (see the editor tree).")
 			return
 		end
 	end
 	local cx = math.floor((GuiRoot and GuiRoot:GetWidth() or 1920) / 2) - 110
-	local group = {
-		id = TAUNT_GROUP_ID,
-		kind = "folder",
+	local def = QAT.CanonicalizeDef({
+		id = TAUNT_DYN_ID,
+		kind = "dynamic",
 		name = "Taunts",
 		enabled = true,
-		children = {},
-		pos = { x = cx, y = 260 },
-		grid = {
-			enabled = true,
-			cols = 1,
-			rows = 8, -- capacity (max simultaneous taunts shown)
-			fill = { enabled = false }, -- dynamic source packs itself
-			dynamic = { source = "taunt", slot = { width = 220, height = 30 } },
+		source = "taunt",
+		columns = 1,
+		fill = { axis = "rows", from = "left" },
+		pos = { x = cx, y = 260, width = 220, height = 30 },
+		initial = "idle",
+		phases = {
+			{
+				id = "idle",
+				layer = 0,
+				look = { display = "none" },
+				duration = { type = "none" },
+				transitions = { { when = { kind = "source", result = "gained" }, to = "active" } },
+			},
+			{
+				id = "active",
+				layer = 0,
+				look = { display = "bar", showTime = true },
+				duration = { type = "source" },
+				transitions = {},
+			},
 		},
-	}
-	QAT.CanonicalizeFolder(group)
-	table.insert(QAT.sv.trackers, group)
+	})
+	QAT.CanonicalizeDynamicDef(def)
+	table.insert(QAT.sv.trackers, def)
 	if QAT.widgets and QAT.widgets.NotifyTrackerChanged then
 		QAT.widgets.NotifyTrackerChanged()
 	end
-	d(QAT.displayName .. ": added the Taunts tracker. Taunt an enemy to see it fill.")
+	d(QAT.displayName .. ": added the Taunts dynamic tracker. Taunt an enemy to see it fill.")
 end
 
 local function OnAddOnLoaded(_, addonName)
@@ -185,7 +242,7 @@ local function HandleSlash(args)
 		return
 	end
 	if args == "taunt" or args == "taunts" then
-		QAT.SeedTauntGrid()
+		QAT.SeedTauntTracker()
 		return
 	end
 	if args == "taunt test" then
@@ -199,7 +256,7 @@ local function HandleSlash(args)
 	d("  /qat capture on / off  start / stop passive ID capture")
 	d("  /qat aggregator (agg)  open the effect aggregator window")
 	d("  /qat restore examples  re-add deleted example trackers")
-	d("  /qat taunt             add the dynamic taunt tracker group")
+	d("  /qat taunt             add the dynamic taunt tracker")
 end
 SLASH_COMMANDS["/qat"] = HandleSlash
 

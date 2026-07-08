@@ -90,15 +90,15 @@ end
 -- Forward declaration so the Members card's remove button can re-render.
 local render
 
--- The dynamic-source card (dynamic groups only): pick the emitter (source) that feeds
--- the group and jump to the single template tracker that is stamped per live target.
--- Replaces the Members card — a dynamic group binds one template to many targets, so
--- there is no free-form member list. Returns the y for the load card below.
-local function renderDynamicSource(container, def, get, cw, OUT)
+-- The dynamic-source config card (dynamic trackers only): pick the emitter (source),
+-- set columns, fill direction, and slot dimensions. Replaces the Members card from
+-- folder scope — a dynamic tracker stamps its own phases per live target, so there
+-- is no free-form member list. Returns the y for the load card below.
+local function renderDynamicConfig(container, def, get, cw, OUT)
 	local card = get("dcard", function()
-		return QAT.widgets.Card(container, "QAT_Load_DCard", "Dynamic source")
+		return QAT.widgets.Card(container, "QAT_Load_DCard", "Dynamic tracker")
 	end)
-	card:SetTitle("Dynamic source")
+	card:SetTitle("Dynamic tracker")
 	card:ClearAnchors()
 	card:SetAnchor(TOPLEFT, container, TOPLEFT, OUT, OUT)
 	local PAD = OUT + card.padX
@@ -107,21 +107,26 @@ local function renderDynamicSource(container, def, get, cw, OUT)
 	local sub = get("dSub", function()
 		return QAT.widgets.Label(container, "QAT_Load_DSub", "")
 	end)
-	sub:SetText("Fed live by an emitter. The template tracker below is stamped once per target it emits.")
+	sub:SetText("Stamps its phases once per live target emitted by the source. Configure the grid layout below.")
 	sub:SetColor(0.55, 0.6, 0.7, 1)
 	sub:ClearAnchors()
 	sub:SetAnchor(TOPLEFT, container, TOPLEFT, PAD, y + 3)
 	y = y + 26
 
+	local function commit()
+		QAT.CanonicalizeDynamicDef(def)
+		QAT.widgets.NotifyTrackerChanged(def.id)
+	end
+
 	-- Source picker: one selectable button per registered target source.
 	local srcLbl = get("dSrcLbl", function()
 		return QAT.widgets.Label(container, "QAT_Load_DSrcLbl", "")
 	end)
-	srcLbl:SetText("Emitter")
+	srcLbl:SetText("Source")
 	srcLbl:SetColor(0.62, 0.68, 0.78, 1)
 	srcLbl:ClearAnchors()
 	srcLbl:SetAnchor(TOPLEFT, container, TOPLEFT, PAD, y + 4)
-	local sx = PAD + 70
+	local sx = PAD + 68
 	local names = (QAT.Targeting and QAT.Targeting.SourceNames()) or {}
 	for i, nm in ipairs(names) do
 		local b = get("dSrc" .. i, function()
@@ -129,66 +134,168 @@ local function renderDynamicSource(container, def, get, cw, OUT)
 		end)
 		b:SetText(nm)
 		b:SetHeight(26)
-		b:SetSelected(def.grid.dynamic.source == nm)
+		b:SetSelected(def.source == nm)
 		b:ClearAnchors()
 		b:SetAnchor(TOPLEFT, container, TOPLEFT, sx, y)
 		b.onClick = function()
-			if QAT.Editor_GridSetDynamicSource then
-				QAT.Editor_GridSetDynamicSource(def, nm)
-			end
+			def.source = nm
+			commit()
 		end
 		sx = sx + b:GetWidth() + 8
 	end
 	y = y + 34
 
-	-- Template link: the single child tracker used as the stamp.
-	local tmpl = (def.children or {})[1]
-	local tLbl = get("dTmplLbl", function()
-		return QAT.widgets.Label(container, "QAT_Load_DTmplLbl", "")
+	-- Columns: number of table columns to pack instances into.
+	local colLbl = get("dColLbl", function()
+		return QAT.widgets.Label(container, "QAT_Load_DColLbl", "")
 	end)
-	tLbl:SetText("Template")
-	tLbl:SetColor(0.62, 0.68, 0.78, 1)
-	tLbl:ClearAnchors()
-	tLbl:SetAnchor(TOPLEFT, container, TOPLEFT, PAD, y + 4)
-	if tmpl then
-		local edit = get("dTmplBtn", function()
-			return QAT.widgets.TextButton(container, "QAT_Load_DTmplBtn", "", nil)
-		end)
-		edit:SetText("Edit " .. (tmpl.name or tmpl.id) .. " →")
-		edit:SetHeight(26)
-		edit:ClearAnchors()
-		edit:SetAnchor(TOPLEFT, container, TOPLEFT, PAD + 70, y)
-		edit.onClick = function()
-			if QAT.Editor_SelectNode then
-				QAT.Editor_SelectNode(tmpl.id)
-			end
-		end
-	else
-		local add = get("dTmplAdd", function()
-			return QAT.widgets.TextButton(container, "QAT_Load_DTmplAdd", "+ Add template", nil)
-		end)
-		add:SetHeight(26)
-		add:ClearAnchors()
-		add:SetAnchor(TOPLEFT, container, TOPLEFT, PAD + 70, y)
-		add.onClick = function()
-			if QAT.Editor_AddTrackerToGroup then
-				QAT.Editor_AddTrackerToGroup(def.id)
-			end
-		end
+	colLbl:SetText("Columns")
+	colLbl:SetColor(0.62, 0.68, 0.78, 1)
+	colLbl:ClearAnchors()
+	colLbl:SetAnchor(TOPLEFT, container, TOPLEFT, PAD, y + 4)
+	local cx = PAD + 68
+	local colBox = get("dColBox", function()
+		return QAT.widgets.EditBox(container, "QAT_Load_DColBox", 50, ROW_H)
+	end)
+	colBox:SetText(tostring(def.columns or 2))
+	colBox:ClearAnchors()
+	colBox:SetAnchor(TOPLEFT, container, TOPLEFT, cx, y)
+	colBox.onChange = function(text)
+		def.columns = math.max(1, math.floor(tonumber(text) or 2))
+		commit()
 	end
 	y = y + 34
 
-	-- Pointer to the arrangement scope (rows/cols/slot/flow live in Grid layout).
-	local arr = get("dArr", function()
-		return QAT.widgets.TextButton(container, "QAT_Load_DArr", "Open grid layout →", nil)
+	-- Fill direction: axis (rows/cols) + from (left/right for rows; top/bottom for cols).
+	local fillLbl = get("dFillLbl", function()
+		return QAT.widgets.Label(container, "QAT_Load_DFillLbl", "")
 	end)
-	arr:SetHeight(26)
-	arr:ClearAnchors()
-	arr:SetAnchor(TOPLEFT, container, TOPLEFT, PAD, y)
-	arr.onClick = function()
-		if QAT.Editor_SelectGrid then
-			QAT.Editor_SelectGrid(def.id)
+	fillLbl:SetText("Fill")
+	fillLbl:SetColor(0.62, 0.68, 0.78, 1)
+	fillLbl:ClearAnchors()
+	fillLbl:SetAnchor(TOPLEFT, container, TOPLEFT, PAD, y + 4)
+
+	local function fillBtn(key, text, ax)
+		local b = get("dFill" .. key, function()
+			return QAT.widgets.TextButton(container, "QAT_Load_DFill" .. key, "", nil)
+		end)
+		b:SetText(text)
+		b:SetHeight(26)
+		b:SetSelected(false)
+		b:ClearAnchors()
+		b:SetAnchor(TOPLEFT, container, TOPLEFT, ax, y)
+		return b
+	end
+
+	def.fill = def.fill or { axis = "rows", from = "left" }
+	local validFrom = { rows = { "left", "right" }, cols = { "top", "bottom" } }
+	local fromLabels = { left = "← Left", right = "→ Right", top = "↑ Top", bottom = "↓ Bottom" }
+
+	-- Reset `from` when switching axes (e.g. "bottom" makes no sense for rows).
+	local function sanitizeFrom(axis)
+		local acceptable = validFrom[axis]
+		if not acceptable then
+			return
 		end
+		local ok = false
+		for _, v in ipairs(acceptable) do
+			if def.fill.from == v then
+				ok = true
+				break
+			end
+		end
+		if not ok then
+			def.fill.from = acceptable[1]
+		end
+	end
+
+	local fx = cx
+	for _, opt in ipairs({ { "rows", "By rows" }, { "cols", "By cols" } }) do
+		local b = fillBtn("A" .. opt[1], opt[2], fx)
+		b:SetSelected(def.fill.axis == opt[1])
+		b.onClick = function()
+			def.fill.axis = opt[1]
+			sanitizeFrom(opt[1])
+			commit()
+		end
+		fx = fx + b:GetWidth() + 6
+	end
+	fx = fx + 10
+
+	-- Show only the 2 direction buttons that make sense for the current axis.
+	local axisFroms = validFrom[def.fill.axis] or validFrom.rows
+	for _, v in ipairs(axisFroms) do
+		local b = fillBtn("F" .. v, fromLabels[v], fx)
+		b:SetSelected(def.fill.from == v)
+		b.onClick = function()
+			def.fill.from = v
+			commit()
+		end
+		fx = fx + b:GetWidth() + 6
+	end
+	y = y + 34
+
+	-- Max rows: limit the vertical row count (overflows hidden).
+	local rowLbl = get("dRowLbl", function()
+		return QAT.widgets.Label(container, "QAT_Load_DRowLbl", "")
+	end)
+	rowLbl:SetText("Max rows")
+	rowLbl:SetColor(0.62, 0.68, 0.78, 1)
+	rowLbl:ClearAnchors()
+	rowLbl:SetAnchor(TOPLEFT, container, TOPLEFT, PAD, y + 4)
+	local rx = PAD + 68
+	local rowBox = get("dRowBox", function()
+		return QAT.widgets.EditBox(container, "QAT_Load_DRowBox", 50, ROW_H)
+	end)
+	rowBox:SetText(def.maxRows and tostring(def.maxRows) or "")
+	rowBox:ClearAnchors()
+	rowBox:SetAnchor(TOPLEFT, container, TOPLEFT, rx, y)
+	rowBox.onChange = function(text)
+		local v = tonumber(text)
+		def.maxRows = (v and v > 0) and v or nil
+		commit()
+	end
+	y = y + 34
+
+	-- Sort: field (time left / name / stacks) + direction (asc / desc).
+	local sortLbl = get("dSrtLbl", function()
+		return QAT.widgets.Label(container, "QAT_Load_DSrtLbl", "")
+	end)
+	sortLbl:SetText("Sort by")
+	sortLbl:SetColor(0.62, 0.68, 0.78, 1)
+	sortLbl:ClearAnchors()
+	sortLbl:SetAnchor(TOPLEFT, container, TOPLEFT, PAD, y + 4)
+	local sx2 = PAD + 68
+	for _, sf in ipairs({ { "timeLeft", "Time left" }, { "name", "Name" }, { "stacks", "Stacks" } }) do
+		local b = get("dSf" .. sf[1], function()
+			return QAT.widgets.TextButton(container, "QAT_Load_DSf" .. sf[1], "", nil)
+		end)
+		b:SetText(sf[2])
+		b:SetHeight(26)
+		b:SetSelected((def.sortBy or "timeLeft") == sf[1])
+		b:ClearAnchors()
+		b:SetAnchor(TOPLEFT, container, TOPLEFT, sx2, y)
+		b.onClick = function()
+			def.sortBy = sf[1]
+			commit()
+		end
+		sx2 = sx2 + b:GetWidth() + 6
+	end
+	sx2 = sx2 + 10
+	for _, opt in ipairs({ { "asc", "Asc" }, { "desc", "Desc" } }) do
+		local b = get("dSd" .. opt[1], function()
+			return QAT.widgets.TextButton(container, "QAT_Load_DSd" .. opt[1], "", nil)
+		end)
+		b:SetText(opt[2])
+		b:SetHeight(26)
+		b:SetSelected((def.sortDir or "asc") == opt[1])
+		b:ClearAnchors()
+		b:SetAnchor(TOPLEFT, container, TOPLEFT, sx2, y)
+		b.onClick = function()
+			def.sortDir = opt[1]
+			commit()
+		end
+		sx2 = sx2 + b:GetWidth() + 6
 	end
 	y = y + 34
 
@@ -714,9 +821,10 @@ render = function(container, def)
 	end
 	local OUT = 14
 	local isFolder = def.kind == "folder"
+	local isDynamic = def.kind == "dynamic"
 	local loadTop = OUT
-	if QAT.IsDynamicGroup(def) then
-		loadTop = renderDynamicSource(container, def, get, cw, OUT)
+	if isDynamic then
+		loadTop = renderDynamicConfig(container, def, get, cw, OUT)
 	elseif isFolder then
 		loadTop = renderMembers(container, def, get, cw, OUT)
 	end

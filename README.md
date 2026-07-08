@@ -5,7 +5,7 @@ A phase-based aura, uptime and raid-mechanic tracker for **The Elder Scrolls Onl
 One tracker changes its look as its state changes — ready → active → cooldown —
 instead of stacking several to fake states.
 
-> ⚠️ Beta (v0.2.0-beta3). The saved-data format may still change between builds.
+> ⚠️ Beta (v0.2.0-beta8). The saved-data format may still change between builds.
 
 ## Features
 
@@ -44,6 +44,31 @@ instead of stacking several to fake states.
   gaps, striped rows) and an optional "fill empty cells" mode that packs live effects
   toward one side so a row grows like a buff bar. Off by default; a group stays a
   plain folder until you switch it on.
+- **Dynamic groups.** A group driven by an external data source (e.g. a taunt tracker)
+  that creates one templated instance per live target. Each instance is self-contained
+  with its own phase machine — the group grows and shrinks as targets come and go.
+  Instance slots are stable across re-sorts so the display never churns.
+- **Grid fill modes.** In "fill empty cells" mode, choose which direction new cells pack
+  — **top-up** (new items above the anchor) or **bottom-down** (new items below). Works
+  for both static grid groups and dynamic trackers.
+- **Reticle highlight.** A runtime condition (Conditions tab) that overrides a phase's
+  border colour while your reticle is over a valid target — `stat: "Reticle on target"`
+  + `action: "Set Border Color"`. Auto-highlight is opt-in per tracker; no preset magic.
+- **Graphic display kind.** A curated-texture or custom `.dds` rendered inside the
+  tracker box, with state-driven rules that swap the texture on time-left or stack
+  thresholds.
+- **Add-to-layer.** Assign a phase to any parallel layer from the Behavior tab; the
+  tree shows each layer as its own node.
+- **Capture persistence.** The aggregator library survives reloads by default, with a
+  settings toggle to keep captures session-only. Favourite effects float to the top;
+  ignored ones hide without re-prompting.
+- **Live loadout reader.** The current-loadout panel in Load conditions shows equipped
+  sets, slotted abilities, and scribable grimoires — click any to add it as a condition
+  in one shot. Updates live as you swap gear.
+- **Self→Group scrape.** The aggregator now captures effects from group members too
+  (not just self and target), helping raid leads discover raid-wide effects.
+- **Async aggregator list.** Large libraries render without blocking the UI, thanks to
+  LibAsync.
 - **Tracks** buffs, debuffs, procs, cooldowns, and passive/permanent buffs.
 
 ## Effect Aggregator
@@ -80,7 +105,7 @@ Controls → Keybindings.
 
 ## Requirements
 
-**LibAddonMenu-2.0**, **LibSets**, **LibMediaProvider**, **LibAsync**, **LibGroupBroadcast**
+**LibAddonMenu-2.0**, **LibSets**, **LibMediaProvider**, **LibAsync** (≥30104), **LibGroupBroadcast** (≥95)
 (optional: LibDebugLogger). API 101050.
 
 ## Planned

@@ -181,7 +181,7 @@ local function render(container, def)
 		or kind == "border"
 		or kind == "gradient"
 		or kind == "graphic"
-	local canLabel = kind == "bar" or kind == "text"
+	local isDynamic = def.kind == "dynamic"
 
 	local cw = container.qatViewportW or container:GetWidth()
 	if cw < 240 then
@@ -467,7 +467,7 @@ local function render(container, def)
 		local prev = get(prevKey, function()
 			return QAT.widgets.IconWell(src, "QAT_App_" .. prevKey, ROW_H)
 		end)
-		prev:SetTexture(QAT.util.PhaseIcon(phase) or "/esoui/art/icons/icon_missing.dds")
+		prev:SetTexture(QAT.util.PhaseIcon(phase, def) or "/esoui/art/icons/icon_missing.dds")
 		prev:ClearAnchors()
 		prev:SetAnchor(LEFT, box, RIGHT, 8, 0)
 		-- Clear the override back to the tracked ability's icon (follow effect id).
@@ -494,7 +494,9 @@ local function render(container, def)
 		end)
 		chk:SetChecked(look.showIcon ~= false)
 		chk.onToggle = function(v)
-			phase.look.showIcon = v or nil -- nil = default (on)
+			-- Store false explicitly when off: nil would canonicalize back to the
+			-- default (on) via `showIcon ~= false`, making the box impossible to untick.
+			phase.look.showIcon = v and true or false
 			commit(def)
 		end
 		chk:ClearAnchors()
@@ -509,23 +511,24 @@ local function render(container, def)
 	if kind == "icon" then
 		-- The icon kind IS the icon; set/override it right here.
 		sy = iconOverrideRow(sy, "iconBox", "iconPreview")
-	elseif canLabel then
-		rowLabel(src, "Name", "Label text", sy)
-		local nameBox = get("nameBox", function()
-			return QAT.widgets.EditBox(src, "QAT_App_NameBox", 100, ROW_H)
-		end)
-		nameBox.onChange = function(text)
-			phase.look.name = text
-			commit(def)
+	elseif kind == "bar" or kind == "text" then
+		-- Label text: hidden for dynamic trackers (source supplies the instance name).
+		if not isDynamic then
+			rowLabel(src, "Name", "Label text", sy)
+			local nameBox = get("nameBox", function()
+				return QAT.widgets.EditBox(src, "QAT_App_NameBox", 100, ROW_H)
+			end)
+			nameBox.onChange = function(text)
+				phase.look.name = text
+				commit(def)
+			end
+			nameBox:SetDimensions(sFieldW, ROW_H)
+			nameBox:SetText(look.name or "")
+			nameBox:ClearAnchors()
+			nameBox:SetAnchor(TOPLEFT, src, TOPLEFT, sLX, vy(sy, ROW_H))
+			sy = sy + RH
 		end
-		nameBox:SetDimensions(sFieldW, ROW_H)
-		nameBox:SetText(look.name or "")
-		nameBox:ClearAnchors()
-		nameBox:SetAnchor(TOPLEFT, src, TOPLEFT, sLX, vy(sy, ROW_H))
-		sy = sy + RH
 
-		-- Bars carry a left icon (the tracked ability's, or an override). Toggle it,
-		-- and when shown, pick the texture — sits square on the left, height × height.
 		if kind == "bar" then
 			sy = showIconRow(sy, "siChk", "barIconBox", "barIconPrev")
 
@@ -640,6 +643,7 @@ local function render(container, def)
 		end
 		sy = sy + RH
 	end
+
 	local srcH = sy + 8
 
 	-- ===== COLORS =====

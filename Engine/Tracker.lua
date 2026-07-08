@@ -47,6 +47,7 @@ local ACTION_ELEMENT = {
 	setStacksColor = "stacks",
 	setTextColor = "text",
 	setTimerColor = "timer",
+	setSweepColor = "sweep",
 }
 local function contains(arr, v)
 	for _, x in ipairs(arr or {}) do
@@ -108,7 +109,7 @@ local function Normalize(def)
 		-- phase carries no explicit override, so authors never hunt .dds paths.
 		local icon = look.icon
 		if not icon or icon == "" then
-			icon = QAT.util.PhaseIcon(p)
+			icon = QAT.util.PhaseIcon(p, def)
 		end
 		local displayDef = {
 			id = def.id .. "_" .. p.id,
@@ -389,11 +390,13 @@ function Lane:OnEffect(unitTag, abilityId, result, beginTime, endTime, stackCoun
 			-- trigger buff is already live (a stage-up where the fade of the old stage
 			-- and the gain of the new arrive in the same frame), take it instead.
 			if not self:TakeLiveTransition() then
-				-- Nothing live yet: hold the phase (shown static) for a short grace
-				-- window. A sibling effect gained within it wins via the transition
-				-- path above; otherwise Tick falls back once the window elapses.
+				-- Nothing live yet: hold the phase for a short grace window. A sibling
+				-- effect gained within it wins via the transition path above; otherwise
+				-- Tick falls back once the window elapses.  Set a tiny remaining-time
+				-- so SetState produces frac=0 (empty bar) instead of nil→frac=1 (full).
 				local now = GetFrameTimeSeconds()
-				self.expiresAt, self.duration = nil, nil
+				self.expiresAt = now
+				self.duration = 1
 				self.pendingEnd = now + FALLBACK_GRACE
 				self:Render(now)
 			end
@@ -402,6 +405,7 @@ function Lane:OnEffect(unitTag, abilityId, result, beginTime, endTime, stackCoun
 			self.pendingEnd = nil -- the effect is back; cancel any pending fall-back
 			self:applyTiming(d, { beginTime = beginTime, endTime = endTime }, now)
 			self.stacks = stackCount or 0
+			QAT.FireCues(cur.cues) -- re-fire cues on timer refresh (taunt re-applied)
 			self:Render(now)
 		end
 		return true
@@ -439,10 +443,15 @@ function Lane:EvalRuntime(remaining)
 	local cur = self.tracker.phases[self.current]
 	local overrides, procActive = nil, false
 	for _, c in ipairs(cur.runtime or {}) do
-		local statVal = (c.stat == "stacks") and self.stacks or (remaining or 0)
-		local sat = QAT.conditions.Compare(statVal, c.op, c.value)
+		local sat
+		if c.stat == "reticle" then
+			sat = QAT.Targeting and QAT.Targeting.IsReticleActive(self, self.tracker.def)
+		else
+			local statVal = (c.stat == "stacks") and self.stacks or (remaining or 0)
+			sat = QAT.conditions.Compare(statVal, c.op, c.value)
+		end
 		if c.action == "showProc" then
-			procActive = procActive or sat -- sustained glow while the condition holds
+			procActive = procActive or sat
 		elseif sat then
 			local elem = ACTION_ELEMENT[c.action]
 			if elem and c.color then

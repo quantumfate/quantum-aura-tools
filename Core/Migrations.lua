@@ -15,7 +15,7 @@ QAT.migrations = {
 			y = 200,
 			width = 900,
 			height = 560,
-			treeWidth = 260,
+			treeWidth = 340,
 		}
 	end,
 

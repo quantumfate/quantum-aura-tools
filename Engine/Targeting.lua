@@ -44,6 +44,12 @@ function QAT.Targeting.PrimaryAbilityId(name)
 	return (src and src.abilityId) or 1
 end
 
+-- Icon provided by a registered source (nil if none).
+function QAT.Targeting.GetIcon(name)
+	local src = QAT.Targeting.sources[name]
+	return (src and src.icon) or nil
+end
+
 -- Registered source names (sorted), for the editor's source picker.
 function QAT.Targeting.SourceNames()
 	local out = {}
@@ -52,6 +58,47 @@ function QAT.Targeting.SourceNames()
 	end
 	table.sort(out)
 	return out
+end
+
+-- Stable synthetic abilityId from a source name (hash).
+local function nameAbilityId(name)
+	local h = 0
+	for i = 1, #name do
+		h = (h * 31 + string.byte(name, i)) % 99999
+	end
+	return 990000 + h
+end
+
+-- Register (or replace) a custom source from a Lua code string. The code, when called
+-- with `code(now)`, must return an array of binding tables, each with:
+--   { key = <unique id>, name = <display text>, remaining, duration, beginTime, endTime, stacks }
+-- Custom sources are persisted in `sv.account.customSources` and restored on reload.
+function QAT.Targeting.RegisterCode(name, code)
+	local obj = {
+		abilityId = nameAbilityId(name),
+		_fromCode = true,
+		_code = code,
+	}
+	function obj:Snapshot(now)
+		local fn = loadstring("return " .. self._code)
+		if not fn then
+			return {}
+		end
+		local ok, result = pcall(fn, now or GetFrameTimeSeconds())
+		if not ok or type(result) ~= "table" then
+			return {}
+		end
+		return result
+	end
+	QAT.Targeting.sources[name] = obj
+end
+
+-- Unregister a custom source (built-in sources like "taunt" are protected).
+function QAT.Targeting.Unregister(name)
+	if name == "taunt" then
+		return -- cannot unregister built-in sources
+	end
+	QAT.Targeting.sources[name] = nil
 end
 
 -- ===== Taunt source =====
@@ -64,8 +111,41 @@ end
 -- this per abilityId at the seam in OnTaunt.
 local TAUNT_DURATION = 15
 
+-- Example code string shown in the Source Manager as a teaching reference.
+local TAUNT_EXAMPLE_CODE = [=[
+-- Taunt source example: tracks enemies you are actively taunting.
+-- Receives `now` (float) and returns an array of binding tables.
+-- In the real source, `state` is maintained by combat events.
+-- function(now)
+--   local out = {}
+--   for unitId, rec in pairs(state) do
+--     local remaining = rec.expiresAt - now
+--     if remaining <= 0 then
+--       state[unitId] = nil
+--     else
+--       out[#out + 1] = {
+--         key = unitId,           -- unique per-target id (stable in combat)
+--         name = rec.name,        -- display name
+--         remaining = remaining,  -- seconds until expiry
+--         duration = rec.duration,
+--         beginTime = rec.expiresAt - rec.duration,
+--         endTime = rec.expiresAt,
+--         stacks = 0,
+--       }
+--     end
+--   end
+--   table.sort(out, function(a, b) return a.remaining < b.remaining end)
+--   return out
+-- end
+]=]
+
 -- Reserved synthetic ability the taunt source drives its instances with.
-local Taunt = { byId = {}, abilityId = 990001 }
+local Taunt = {
+	byId = {},
+	abilityId = 990001,
+	_exampleCode = TAUNT_EXAMPLE_CODE,
+	icon = "esoui/art/icons/ability_warrior_010.dds",
+}
 
 -- Record (or refresh) a taunt on a target. `now` lets tests inject time.
 function Taunt:OnTaunt(unitId, name, abilityId, now)
@@ -88,6 +168,23 @@ end
 
 function Taunt:Clear()
 	self.byId = {}
+end
+
+--- Check whether the reticleover matches this specific taunt instance by name.
+--- Only the instance whose bound target is under the reticle lights up.
+function Taunt:ReticleMatch(bindingKey)
+	if not QAT.Targeting.reticleExists then
+		return false
+	end
+	local reticleName = GetUnitName("reticleover")
+	if not reticleName or reticleName == "" then
+		return false
+	end
+	if bindingKey then
+		local rec = self.byId[bindingKey]
+		return rec ~= nil and rec.name == reticleName
+	end
+	return false
 end
 
 -- Prune expired entries, then return the live ones sorted soonest-expiry-first so the
@@ -148,6 +245,40 @@ end
 
 function QAT.Targeting_Init()
 	QAT.Targeting.Register("taunt", Taunt)
+
+	-- Restore persisted custom sources.
+	local custom = QAT.sv and QAT.sv.account and QAT.sv.account.customSources
+	if custom then
+		for name, code in pairs(custom) do
+			QAT.Targeting.RegisterCode(name, code)
+		end
+	end
+
+	-- ===== Reticle tracking =====
+
+	-- Whether the reticle is currently over a valid unit (updated on EVENT_RETICLE_TARGET_CHANGED).
+	QAT.Targeting.reticleExists = false
+
+	--- Update cached reticle state. Call from the reticle-changed event.
+	function QAT.Targeting.UpdateReticle()
+		QAT.Targeting.reticleExists = DoesUnitExist("reticleover")
+	end
+
+	--- Check whether a reticle runtime condition (`stat = "reticle"`) is active for a lane/def pair.
+	--- Source-driven dynamic trackers delegate to the source's ReticleMatch when present.
+	function QAT.Targeting.IsReticleActive(lane, def)
+		if not QAT.Targeting.reticleExists then
+			return false
+		end
+		if def and def.source then
+			local src = QAT.Targeting.sources[def.source]
+			if src and src.ReticleMatch then
+				return src:ReticleMatch(lane and lane.tracker and lane.tracker.boundKey)
+			end
+			return false
+		end
+		return true
+	end
 
 	local ev = QAT.name .. "_taunt"
 	EVENT_MANAGER:RegisterForEvent(ev, EVENT_COMBAT_EVENT, OnTauntEvent)

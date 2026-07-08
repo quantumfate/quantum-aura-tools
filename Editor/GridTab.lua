@@ -41,11 +41,15 @@ local function memberById(def, id)
 	return nil
 end
 
--- If `defId` is the template child of a dynamic group, return that group's source name
--- (so the Behavior tab can offer the "Emitter" trigger/duration). Else nil.
+-- If `defId` is a dynamic tracker (kind="dynamic"), return its source name, so the
+-- Behavior tab can offer the "Emitter" trigger/duration. Also checks folder-based
+-- dynamic groups for backward compat (a template child's id).
 function QAT.Editor_DynamicSourceFor(defId)
 	local function scan(defs)
 		for _, d in ipairs(defs or {}) do
+			if d.kind == "dynamic" and d.id == defId then
+				return d.source
+			end
 			if d.kind == "folder" then
 				if d.grid and d.grid.dynamic and d.grid.dynamic.source then
 					for _, c in ipairs(d.children or {}) do
@@ -136,41 +140,6 @@ function QAT.Editor_GridSetStyle(def, key, value)
 	local g = QAT.Editor_GridEnsure(def)
 	g.style = g.style or {}
 	g.style[key] = value
-	commit(def)
-end
-
--- ===== Dynamic (source-fed) mode =====
-
--- Toggle dynamic mode: on binds the grid to a target source (its single child tracker
--- becomes the template stamped per live target); off returns it to an authored grid.
-function QAT.Editor_GridSetDynamic(def, on)
-	local g = QAT.Editor_GridEnsure(def)
-	if on then
-		local first = (QAT.Targeting and QAT.Targeting.SourceNames() or {})[1]
-		g.dynamic = g.dynamic or { source = first, slot = { width = 220, height = 30 } }
-		if not g.dynamic.source then
-			g.dynamic.source = first
-		end
-	else
-		g.dynamic = nil
-	end
-	commit(def)
-end
-
-function QAT.Editor_GridSetDynamicSource(def, name)
-	local g = QAT.Editor_GridEnsure(def)
-	g.dynamic = g.dynamic or { slot = { width = 220, height = 30 } }
-	g.dynamic.source = name
-	commit(def)
-end
-
--- Nudge the per-target slot footprint.
-function QAT.Editor_GridSetSlot(def, key, delta)
-	local g = QAT.Editor_GridEnsure(def)
-	g.dynamic = g.dynamic or {}
-	g.dynamic.slot = g.dynamic.slot or { width = 220, height = 30 }
-	local base = g.dynamic.slot[key] or (key == "width" and 220 or 30)
-	g.dynamic.slot[key] = math.max(8, base + delta)
 	commit(def)
 end
 
@@ -401,73 +370,6 @@ function QAT.Editor_RenderGridCard(container, def)
 	end
 	y = y + 34
 
-	-- ===== Dynamic (source-fed) mode =====
-	-- A dynamic grid is fed live by a target source (e.g. taunts): its single child
-	-- tracker is a TEMPLATE stamped once per live target, instead of authored cell
-	-- assignments. Toggle + configuration here; the assignment table below is suppressed.
-	local dx = toggleButton(container, get, "dyn", "Dynamic (source-fed)", OUT, y, g.dynamic ~= nil, function()
-		QAT.Editor_GridSetDynamic(def, g.dynamic == nil)
-	end)
-	local dynHint = get("dynHint", function()
-		return QAT.widgets.Label(container, "QAT_Grid_DynHint", "", "$(MEDIUM_FONT)|13|soft-shadow-thin")
-	end)
-	dynHint:SetText(g.dynamic and "Rows × Columns = max shown" or "instance a template per live target")
-	dynHint:SetColor(0.5, 0.56, 0.66, 1)
-	dynHint:ClearAnchors()
-	dynHint:SetAnchor(TOPLEFT, container, TOPLEFT, dx, y + 5)
-	y = y + 34
-
-	if g.dynamic then
-		-- Source picker (one button per registered target source).
-		local srcLbl = get("dynSrcLbl", function()
-			return QAT.widgets.Label(container, "QAT_Grid_DynSrcLbl", "")
-		end)
-		srcLbl:SetText("Source")
-		srcLbl:SetColor(0.62, 0.68, 0.78, 1)
-		srcLbl:ClearAnchors()
-		srcLbl:SetAnchor(TOPLEFT, container, TOPLEFT, OUT, y + 4)
-		local sxx = OUT + math.ceil(srcLbl:GetTextWidth()) + 12
-		for _, name in ipairs(QAT.Targeting and QAT.Targeting.SourceNames() or {}) do
-			sxx = toggleButton(container, get, "dynSrc_" .. name, name, sxx, y, g.dynamic.source == name, function()
-				QAT.Editor_GridSetDynamicSource(def, name)
-			end)
-		end
-		y = y + 34
-
-		-- Per-target slot footprint + packing flow.
-		local slot = g.dynamic.slot or { width = 220, height = 30 }
-		local wx = stepper(container, get, "slotW", "Slot width", OUT, y, tostring(slot.width or 220), function(d)
-			QAT.Editor_GridSetSlot(def, "width", d * 5)
-		end)
-		wx = stepper(container, get, "slotH", "Slot height", wx, y, tostring(slot.height or 30), function(d)
-			QAT.Editor_GridSetSlot(def, "height", d * 2)
-		end)
-		wx = wx + 8
-		wx = toggleButton(container, get, "flowR", "Flow by rows", wx, y, (g.fill and g.fill.axis) ~= "cols", function()
-			QAT.Editor_GridSetFill(def, "axis", "rows")
-		end)
-		toggleButton(container, get, "flowC", "Flow by columns", wx, y, (g.fill and g.fill.axis) == "cols", function()
-			QAT.Editor_GridSetFill(def, "axis", "cols")
-		end)
-		y = y + 34
-
-		-- Template status: the group's single child tracker is the stamp.
-		local tmpl = members(def)[1]
-		local tLbl = get("dynTmpl", function()
-			return QAT.widgets.Label(container, "QAT_Grid_DynTmpl", "")
-		end)
-		if tmpl then
-			tLbl:SetText("Template: " .. (tmpl.name or tmpl.id) .. "  (edit it in the tree to style every bar)")
-			tLbl:SetColor(0.62, 0.82, 0.72, 1)
-		else
-			tLbl:SetText("No template — a default bar is used. Add a tracker to this group to style the bars.")
-			tLbl:SetColor(0.82, 0.72, 0.5, 1)
-		end
-		tLbl:ClearAnchors()
-		tLbl:SetAnchor(TOPLEFT, container, TOPLEFT, OUT, y + 2)
-		y = y + 30
-	end
-
 	-- TABLE STYLE card.
 	local s = g.style
 	local styleCard = get("styleCard", function()
@@ -515,8 +417,7 @@ function QAT.Editor_RenderGridCard(container, def)
 	styleCard:SetDimensions(cw - OUT * 2, (sy - y) + 8)
 	y = sy + 18
 
-	-- Authored-cell assignment UI: only for a plain (non-dynamic) grid. A dynamic grid
-	-- has no members to place — its slots are bound live by its target source.
+	-- Authored-cell assignment UI (legacy dynamic groups skip this).
 	if not g.dynamic then
 		-- Place-mode banner: while placing a member, cells become drop targets.
 		local placingId = QAT.editor.gridPlacing
