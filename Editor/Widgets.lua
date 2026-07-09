@@ -144,7 +144,7 @@ function QAT.widgets.TextButton(parent, name, text, onClick)
 	end)
 	b:SetHandler("OnMouseUp", function(self, button, upInside)
 		if upInside and button == MOUSE_BUTTON_INDEX_LEFT and self.onClick then
-			self.onClick()
+			self.onClick(self)
 		end
 	end)
 	return b
@@ -200,7 +200,7 @@ function QAT.widgets.IconButton(parent, name, texture, size, onClick)
 	end
 	b:SetHandler("OnMouseUp", function(self, button, upInside)
 		if upInside and button == MOUSE_BUTTON_INDEX_LEFT and self.onClick then
-			self.onClick()
+			self.onClick(self)
 		end
 	end)
 	return b
@@ -387,7 +387,7 @@ function QAT.widgets.CloseButton(parent, name, onClick)
 	end)
 	b:SetHandler("OnMouseUp", function(self, button, upInside)
 		if upInside and button == MOUSE_BUTTON_INDEX_LEFT and self.onClick then
-			self.onClick()
+			self.onClick(self)
 		end
 	end)
 	return b
