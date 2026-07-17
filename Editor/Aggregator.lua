@@ -16,7 +16,8 @@ local WM = GetWindowManager()
 local W = QAT.widgets
 
 local TITLE_H, CTRL_H, FILTER_H = 28, 54, 86
-local INSPECTOR_W = 468
+local INSPECTOR_W = 520 -- width of the right context pane
+local BUILDER_W = 372 -- width of the middle Tracker-builder pane (3-pane mode)
 local PANE_GAP = 6
 
 -- Relationship buckets shown as the primary segmented filter (value -> label + accent).
@@ -41,6 +42,40 @@ local COL = {
 	frozen = { 0.784, 0.694, 0.518 },
 	rec = { 1.0, 0.416, 0.353 },
 }
+
+-- Human-readable relationship direction ("You → Boss") for a bucket. Shared by the
+-- builder's phase-item subtitle and the context pane's DIRECTION card + warning, so
+-- the "who applies this to whom" story reads the same everywhere.
+local BUCKET_DIRECTION = {
+	bs = "Boss → You",
+	sb = "You → Boss",
+	xb = "Other → Boss",
+	sg = "You → Group",
+	gg = "Group → Group",
+	xg = "Other → Group",
+	gs = "Group → You",
+	os = "Other → You",
+	ss = "You → You",
+	xx = "Other",
+}
+function QAT.Aggregator_BucketDirection(bucket)
+	return BUCKET_DIRECTION[bucket] or "Other"
+end
+
+-- The direction of a collapsed stack of rows: the shared direction if every row agrees,
+-- otherwise nil (a mixed-direction merge — the caller shows a "mixed dir" warning).
+function QAT.Aggregator_StackDirection(rows)
+	local first = rows[1] and rows[1].bucket
+	if not first then
+		return nil
+	end
+	for i = 2, #rows do
+		if rows[i].bucket ~= first then
+			return nil
+		end
+	end
+	return BUCKET_DIRECTION[first] or "Other"
+end
 
 -- Default filter state: show the interesting buckets, hide Self→Self passive noise.
 local function defaultFilter()
@@ -189,18 +224,48 @@ function QAT.Aggregator_Relayout()
 	if not f then
 		return
 	end
+	local a = QAT.aggregator
 	local w, h = f:GetDimensions()
 	local bodyY = TITLE_H + CTRL_H + FILTER_H
 	local bodyH = h - bodyY
 
-	local listW = w - INSPECTOR_W - PANE_GAP
-	QAT.aggregator.listPane:ClearAnchors()
-	QAT.aggregator.listPane:SetAnchor(TOPLEFT, f, TOPLEFT, 0, bodyY)
-	QAT.aggregator.listPane:SetDimensions(listW, bodyH)
+	-- Panes, left→right: list | builder (middle) | context (right, always shown).
+	-- Three-pane while building: multi-select (B) is on, or a collapsed merged row was
+	-- picked in single mode (A). Otherwise two panes: list | context.
+	local showBuilder = a.selecting or a.singleMerge
+	a.listPane:ClearAnchors()
+	a.listPane:SetAnchor(TOPLEFT, f, TOPLEFT, 0, bodyY)
 
-	QAT.aggregator.inspectorPane:ClearAnchors()
-	QAT.aggregator.inspectorPane:SetAnchor(TOPLEFT, f, TOPLEFT, listW + PANE_GAP, bodyY)
-	QAT.aggregator.inspectorPane:SetDimensions(INSPECTOR_W, bodyH)
+	if showBuilder then
+		local builderW = BUILDER_W
+		local listW = w - builderW - INSPECTOR_W - PANE_GAP * 2
+		if listW < 260 then
+			-- Narrow window: give the list a fair minimum, shrink the context pane.
+			listW = math.max(260, math.floor((w - builderW - PANE_GAP * 2) * 0.5))
+		end
+		a.listPane:SetDimensions(listW, bodyH)
+
+		a.builderPane:SetHidden(false)
+		a.builderPane:ClearAnchors()
+		a.builderPane:SetAnchor(TOPLEFT, f, TOPLEFT, listW + PANE_GAP, bodyY)
+		a.builderPane:SetDimensions(builderW, bodyH)
+
+		local ctxX = listW + builderW + PANE_GAP * 2
+		a.contextPane:ClearAnchors()
+		a.contextPane:SetAnchor(TOPLEFT, f, TOPLEFT, ctxX, bodyY)
+		a.contextPane:SetDimensions(w - ctxX, bodyH)
+	else
+		local listW = w - INSPECTOR_W - PANE_GAP
+		a.listPane:SetDimensions(listW, bodyH)
+
+		if a.builderPane then
+			a.builderPane:SetHidden(true)
+		end
+		a.contextPane:ClearAnchors()
+		a.contextPane:SetAnchor(TOPLEFT, f, TOPLEFT, listW + PANE_GAP, bodyY)
+		a.contextPane:SetDimensions(INSPECTOR_W, bodyH)
+	end
+	a.contextPane:SetHidden(false)
 
 	if QAT.Aggregator_List_Relayout then
 		QAT.Aggregator_List_Relayout()
@@ -645,15 +710,20 @@ function QAT.Aggregator_Refresh()
 		refreshIgnoredPopup()
 	end
 
-	-- Keep the inspector in sync: the Tracker builder while selecting, otherwise the
-	-- single-row detail (following the live-updating selected row).
-	if a.selecting then
+	-- The middle Tracker-builder pane renders while building (multi-select or a
+	-- single-merge pick); the right context pane always renders (detail / stack / empty).
+	-- Resync the context target first so a "Collapse by name" toggle mid-build regroups
+	-- the phase-items and repoints the context stack in one pass (else it goes stale).
+	if a.selecting or a.singleMerge then
+		if QAT.Aggregator_SyncBuilderContext then
+			QAT.Aggregator_SyncBuilderContext()
+		end
 		if QAT.Aggregator_Inspector_RenderBuilder then
 			QAT.Aggregator_Inspector_RenderBuilder()
 		end
-	elseif QAT.Aggregator_Inspector_Render then
-		local sel = a.selectedKey and QAT.capture.store[a.selectedKey]
-		QAT.Aggregator_Inspector_Render(sel or nil)
+	end
+	if QAT.Aggregator_Context_Render then
+		QAT.Aggregator_Context_Render()
 	end
 end
 
@@ -674,6 +744,18 @@ function QAT.Aggregator_Init()
 	QAT.aggregator.selected = {}
 	QAT.aggregator.selectedSet = {}
 	QAT.aggregator.builderManual = false -- switch tracker: auto-mesh (false) vs wire-your-own
+
+	-- Single-merge (mode A): a collapsed multi-ID row was clicked while NOT multi-
+	-- selecting, so the builder shows one merged phase and the context steps its stack.
+	QAT.aggregator.singleMerge = false
+
+	-- The stack shown in the right context pane: ordered row keys plus the "leading"
+	-- index (whose direction/source/target the built phase inherits).
+	QAT.aggregator.contextTarget = nil
+
+	-- Persists which stacked ID leads each phase-item across renders (key = group name
+	-- in collapse-on mode, else the row key), so Build wires the chosen card.
+	QAT.aggregator.leadIndex = {}
 
 	local f = WM:CreateTopLevelWindow("QAT_Aggregator")
 	f:SetDimensions(g.width, g.height)
@@ -698,14 +780,18 @@ function QAT.Aggregator_Init()
 	buildFilterBar(f)
 	buildIgnoredPopup(f)
 
-	-- Body panes (list | inspector). Renderers are layered on in later steps.
+	-- Body panes, left→right: list | builder (Tracker builder, middle) | context (right).
 	QAT.aggregator.listPane = W.Panel(f, "QAT_Agg_ListPane", { 0.04, 0.05, 0.07, 1 })
-	QAT.aggregator.inspectorPane = W.Panel(f, "QAT_Agg_InspectorPane", { 0.04, 0.058, 0.078, 1 })
+	QAT.aggregator.builderPane = W.Panel(f, "QAT_Agg_BuilderPane", { 0.04, 0.058, 0.078, 1 })
+	QAT.aggregator.contextPane = W.Panel(f, "QAT_Agg_CtxPane", { 0.04, 0.058, 0.078, 1 })
 	if QAT.Aggregator_List_Build then
 		QAT.Aggregator_List_Build(QAT.aggregator.listPane)
 	end
 	if QAT.Aggregator_Inspector_Build then
-		QAT.Aggregator_Inspector_Build(QAT.aggregator.inspectorPane)
+		QAT.Aggregator_Inspector_Build(QAT.aggregator.builderPane)
+	end
+	if QAT.Aggregator_Context_Build then
+		QAT.Aggregator_Context_Build(QAT.aggregator.contextPane)
 	end
 
 	QAT.Aggregator_Relayout()
@@ -801,6 +887,112 @@ end
 -- Build selection (multi-select -> one tracker)
 -- ---------------------------------------------------------------------------
 
+-- Resolve a list of row keys to live rows, dropping any that vanished.
+local function rowsFromKeys(keys)
+	local rows = {}
+	for _, k in ipairs(keys or {}) do
+		local r = QAT.capture.store[k]
+		if r then
+			rows[#rows + 1] = r
+		end
+	end
+	return rows
+end
+
+-- The current build selection as ordered phase-items (one item == one built phase).
+-- With collapse-by-name on, same-name rows fold into a single item; otherwise every
+-- key is its own item. Each item: { keys = {rowKey,...}, nameKey }, in phase order.
+function QAT.Aggregator_GroupedSelection()
+	local a = QAT.aggregator
+	local items, lookup = {}, {}
+	for _, key in ipairs(a.selected or {}) do
+		local r = QAT.capture.store[key]
+		if r then
+			local nk
+			if a.filter.collapseByName then
+				local low = (r.name or ""):lower()
+				if low ~= "" then
+					nk = low
+				end
+			end
+			if nk and lookup[nk] then
+				local it = lookup[nk]
+				it.keys[#it.keys + 1] = key
+			else
+				local it = { keys = { key }, nameKey = nk }
+				items[#items + 1] = it
+				if nk then
+					lookup[nk] = it
+				end
+			end
+		end
+	end
+	return items
+end
+
+-- The persistence key for a phase-item's "leading" card (see a.leadIndex).
+local function itemLeadKey(item)
+	return item.nameKey or item.keys[1]
+end
+
+-- Point the right context pane at a stack of keys, remembering which card leads.
+-- `leadKey` (optional) ties the chosen index into a.leadIndex so Build inherits it.
+function QAT.Aggregator_SetContextTarget(keys, name, icon, index, leadKey)
+	local a = QAT.aggregator
+	local rows = rowsFromKeys(keys)
+	if #rows == 0 then
+		a.contextTarget = nil
+	else
+		a.contextTarget = {
+			keys = keys,
+			leadKey = leadKey,
+			index = math.max(1, math.min(index or 1, #keys)),
+			name = name or rows[1].name or ("#" .. rows[1].abilityId),
+			icon = icon or rows[1].icon,
+		}
+	end
+	if QAT.Aggregator_Context_Render then
+		QAT.Aggregator_Context_Render()
+	end
+end
+
+-- Focus the context pane on the current first phase-item (or keep the current one if it
+-- still maps to a phase-item). Called after any change to the build selection.
+function QAT.Aggregator_SyncBuilderContext()
+	local a = QAT.aggregator
+	local items = QAT.Aggregator_GroupedSelection()
+	if #items == 0 then
+		a.contextTarget = nil
+		if QAT.Aggregator_Context_Render then
+			QAT.Aggregator_Context_Render()
+		end
+		return
+	end
+	local keep
+	if a.contextTarget then
+		for _, it in ipairs(items) do
+			if it.keys[1] == a.contextTarget.keys[1] then
+				keep = it
+				break
+			end
+		end
+	end
+	local it = keep or items[1]
+	local lead = QAT.capture.store[it.keys[1]]
+	local gk = itemLeadKey(it)
+	QAT.Aggregator_SetContextTarget(it.keys, lead and lead.name, lead and lead.icon, a.leadIndex[gk] or 1, gk)
+end
+
+local function rerenderBuild()
+	if QAT.Aggregator_List_Render then
+		QAT.Aggregator_List_Render()
+	end
+	QAT.Aggregator_SyncBuilderContext()
+	if QAT.Aggregator_Inspector_RenderBuilder then
+		QAT.Aggregator_Inspector_RenderBuilder()
+	end
+end
+
 -- Toggle whether a row (by key) is in the build selection, preserving pick order.
 function QAT.Aggregator_ToggleSelected(key)
 	local a = QAT.aggregator
@@ -819,12 +1011,7 @@ function QAT.Aggregator_ToggleSelected(key)
 		a.selectedSet[key] = true
 		a.selected[#a.selected + 1] = key
 	end
-	if QAT.Aggregator_List_Render then
-		QAT.Aggregator_List_Render()
-	end
-	if QAT.Aggregator_Inspector_RenderBuilder then
-		QAT.Aggregator_Inspector_RenderBuilder()
-	end
+	rerenderBuild()
 end
 
 -- Toggle all keys in a collapsed group together. If any is already selected,
@@ -851,130 +1038,201 @@ function QAT.Aggregator_ToggleSelectedCollapsed(keys)
 			end
 		end
 	end
-	if QAT.Aggregator_List_Render then
-		QAT.Aggregator_List_Render()
-	end
-	if QAT.Aggregator_Inspector_RenderBuilder then
-		QAT.Aggregator_Inspector_RenderBuilder()
-	end
+	rerenderBuild()
 end
 
--- Remove a row from the selection (the builder's Selected-list × button).
+-- Remove a row from the selection (the builder's phase-item × button).
 function QAT.Aggregator_RemoveSelected(key)
 	if QAT.aggregator.selectedSet[key] then
 		QAT.Aggregator_ToggleSelected(key)
 	end
 end
 
--- Move a selected row up (-1) or down (+1) in the order (= stage order). Clamped.
-function QAT.Aggregator_MoveSelected(key, dir)
-	local sel = QAT.aggregator.selected
-	for i, k in ipairs(sel) do
-		if k == key then
-			local j = i + dir
-			if j >= 1 and j <= #sel then
-				sel[i], sel[j] = sel[j], sel[i]
-				if QAT.Aggregator_Inspector_RenderBuilder then
-					QAT.Aggregator_Inspector_RenderBuilder()
-				end
-			end
-			return
+-- Mode A row click. A collapsed multi-ID row becomes a one-phase merge build
+-- (singleMerge → 3-pane builder + stack context); a plain row is a 2-pane inspect.
+-- Either way the right pane shows the row's stack.
+function QAT.Aggregator_SelectRow(row, keys)
+	local a = QAT.aggregator
+	keys = keys or { row.key }
+	a.selectedKey = row.key
+	a.selectedRow = row
+	a.selected, a.selectedSet = {}, {}
+	if #keys > 1 then
+		a.singleMerge = true
+		for _, k in ipairs(keys) do
+			a.selected[#a.selected + 1] = k
+			a.selectedSet[k] = true
 		end
+	else
+		a.singleMerge = false
+	end
+	local nk = (row.name or ""):lower()
+	local gk = (#keys > 1 and nk ~= "") and nk or row.key
+	QAT.Aggregator_SetContextTarget(keys, row.name, row.icon, a.leadIndex[gk] or 1, gk)
+	QAT.Aggregator_Relayout()
+	if QAT.Aggregator_List_Render then
+		QAT.Aggregator_List_Render()
+	end
+	if a.singleMerge and QAT.Aggregator_Inspector_RenderBuilder then
+		QAT.Aggregator_Inspector_RenderBuilder()
 	end
 end
 
--- Enter/leave multi-select mode. Leaving clears the selection and returns the
--- inspector to the single-row detail.
+-- Move a whole phase-item (collapse-group block) up (-1) / down (+1) in phase order.
+function QAT.Aggregator_MovePhaseItem(displayIndex, dir)
+	local a = QAT.aggregator
+	local items = QAT.Aggregator_GroupedSelection()
+	local j = displayIndex + dir
+	if displayIndex < 1 or displayIndex > #items or j < 1 or j > #items then
+		return
+	end
+	items[displayIndex], items[j] = items[j], items[displayIndex]
+	local flat = {}
+	for _, it in ipairs(items) do
+		for _, k in ipairs(it.keys) do
+			flat[#flat + 1] = k
+		end
+	end
+	a.selected = flat
+	if QAT.Aggregator_Inspector_RenderBuilder then
+		QAT.Aggregator_Inspector_RenderBuilder()
+	end
+end
+
+-- Enter/leave multi-select mode (the top-left A/B toggle). Leaving clears the
+-- selection and returns to the single-row inspect state.
 function QAT.Aggregator_SetSelecting(on)
 	local a = QAT.aggregator
 	a.selecting = on and true or false
+	a.singleMerge = false
 	if not a.selecting then
 		a.selected, a.selectedSet = {}, {}
+		a.contextTarget = nil
 	end
 	if a.selectBtn then
 		a.selectBtn:SetText(a.selecting and "Selecting" or "Select multiple")
 		a.selectBtn:SetSelected(a.selecting)
 	end
+	QAT.Aggregator_Relayout()
 	if QAT.Aggregator_List_Render then
 		QAT.Aggregator_List_Render()
 	end
 	if a.selecting then
+		QAT.Aggregator_SyncBuilderContext()
 		if QAT.Aggregator_Inspector_RenderBuilder then
 			QAT.Aggregator_Inspector_RenderBuilder()
 		end
-	elseif QAT.Aggregator_Inspector_Render then
-		local sel = a.selectedKey and QAT.capture.store[a.selectedKey]
-		QAT.Aggregator_Inspector_Render(sel or nil)
+	elseif QAT.Aggregator_Context_Render then
+		QAT.Aggregator_Context_Render()
 	end
 end
 
--- The build action's single source of truth: 1 effect -> a simple tracker, 2+ ->
--- one switch tracker (shows whichever of the chosen effects is active). Selection
--- order is stage order. Exits select mode and opens the Editor on the result.
--- The selected rows, in pick order.
-local function selectionRows()
-	local rows = {}
-	for _, key in ipairs(QAT.aggregator.selected or {}) do
-		local r = QAT.capture.store[key]
-		if r then
-			rows[#rows + 1] = r
-		end
+-- Leave the builder (the Done button). From single-merge (A) fall back to inspecting
+-- the picked row; from multi-select (B) clear the whole selection.
+function QAT.Aggregator_ExitBuild()
+	local a = QAT.aggregator
+	if a.singleMerge and a.selectedKey and QAT.capture.store[a.selectedKey] then
+		a.selecting = false
+		QAT.Aggregator_SelectRow(QAT.capture.store[a.selectedKey], { a.selectedKey })
+	else
+		QAT.Aggregator_SetSelecting(false)
 	end
-	return rows
 end
 
--- Group selected rows by lowercased name for collapsed building.
--- Returns {{ name, unit, ids = {}, icon }, ...} in selection order.
-local function groupRowsByName(rows)
-	local order, lookup = {}, {}
-	for _, r in ipairs(rows) do
-		local nk = (r.name or ""):lower()
-		local g = lookup[nk]
-		if not g then
-			g = {
-				name = r.name,
-				unit = (r.targetRole == "me") and "player" or "reticleover",
-				ids = {},
-				icon = r.icon,
-			}
-			lookup[nk] = g
-			order[#order + 1] = g
-		end
-		local seen = false
-		for _, id in ipairs(g.ids) do
-			if id == r.abilityId then
-				seen = true
-				break
+-- The current selection resolved to ordered phase-items ready to build. Each item is
+-- exactly one phase: its watched `ids` are the unique ability ids of the whole stack
+-- (a collapse-by-name merge, or a single row), while `unit`/`name`/`icon`/`timed` are
+-- inherited from the stack's chosen LEADING card (a.leadIndex) — that is what makes the
+-- built tracker's direction/source/target deterministic when a merge is mixed.
+local function phaseItemsFromSelection()
+	local a = QAT.aggregator
+	local out = {}
+	for _, it in ipairs(QAT.Aggregator_GroupedSelection()) do
+		local rows = rowsFromKeys(it.keys)
+		if #rows > 0 then
+			local gk = itemLeadKey(it)
+			local leadIdx = math.max(1, math.min(a.leadIndex[gk] or 1, #rows))
+			local lead = rows[leadIdx]
+			local ids, seen = {}, {}
+			for _, r in ipairs(rows) do
+				if not seen[r.abilityId] then
+					seen[r.abilityId] = true
+					ids[#ids + 1] = r.abilityId
+				end
 			end
-		end
-		if not seen then
-			g.ids[#g.ids + 1] = r.abilityId
+			out[#out + 1] = {
+				name = lead.name or ("#" .. lead.abilityId),
+				icon = lead.icon,
+				ids = ids,
+				unit = (lead.targetRole == "me") and "player" or "reticleover",
+				timed = lead.timed,
+			}
 		end
 	end
-	return order
+	return out
 end
 
--- Build a switch tracker def from merged groups (each group has multiple abilityIds
--- merged into one phase).
-local function buildMergedSwitchDef(groups, opts)
+-- A single presence-tracked phase (idle when absent) watching every id in `item`.
+local function buildSingleItemDef(item)
+	buildCounter = buildCounter + 1
+	local phaseId = QAT.util.Slug(item.name, "merged_" .. buildCounter)
+	local unit = item.unit
+	return QAT.CanonicalizeDef({
+		id = "tracker_agg_" .. GetTimeStamp() .. "_" .. buildCounter,
+		kind = "tracker",
+		name = item.name,
+		unit = unit,
+		initial = "idle",
+		phases = {
+			{
+				id = "idle",
+				look = { display = "none" },
+				duration = { type = "none" },
+				transitions = {
+					{
+						when = { kind = "effect", result = "gained", abilityIds = item.ids, unit = unit },
+						to = phaseId,
+					},
+				},
+			},
+			{
+				id = phaseId,
+				look = { display = "icon", name = item.name, icon = item.icon, showTime = item.timed and nil or false },
+				duration = item.timed and { type = "effect", abilityIds = item.ids, unit = unit } or { type = "none" },
+				transitions = {
+					{
+						when = { kind = "effect", result = "faded", abilityIds = item.ids, unit = unit },
+						to = "idle",
+					},
+				},
+			},
+		},
+		x = math.floor(GuiRoot:GetWidth() / 2 - 32),
+		y = math.floor(GuiRoot:GetHeight() / 2 - 32),
+		enabled = true,
+	})
+end
+
+-- A switch tracker from 2+ phase-items. Phase 0 is a real hidden idle; each visible
+-- phase watches its item's merged ids and meshes to every sibling on gain (unless the
+-- user opted to wire the switching themselves).
+local function buildSwitchDef(items, opts)
 	local used = {}
 	local function slug(text, fallback)
 		return QAT.util.UniqueSlug(text, fallback, used)
 	end
 
-	local fallbackId = slug("Inactive", "fallback")
+	local idleId = slug("idle", "idle")
 	local stages = {}
-	for i, g in ipairs(groups) do
-		stages[i] = {
-			name = g.name,
-			ids = g.ids,
-			phaseId = slug(g.name, "stage_" .. i),
-			unit = g.unit,
-			icon = g.icon,
-		}
+	for i, it in ipairs(items) do
+		stages[i] =
+			{ name = it.name, ids = it.ids, phaseId = slug(it.name, "stage_" .. i), unit = it.unit, icon = it.icon }
 	end
 
 	local function meshExcept(selfPhaseId)
+		if opts.manual then
+			return {}
+		end
 		local trs = {}
 		for _, s in ipairs(stages) do
 			if s.phaseId ~= selfPhaseId then
@@ -989,10 +1247,10 @@ local function buildMergedSwitchDef(groups, opts)
 
 	local phases = {
 		{
-			id = fallbackId,
-			look = { display = "bar", name = "Inactive", showTime = false },
+			id = idleId,
+			look = { display = "none" },
 			duration = { type = "none" },
-			transitions = meshExcept(fallbackId),
+			transitions = meshExcept(idleId),
 		},
 	}
 	for _, s in ipairs(stages) do
@@ -1007,9 +1265,9 @@ local function buildMergedSwitchDef(groups, opts)
 	return QAT.CanonicalizeDef({
 		id = "tracker_mutex_" .. GetTimeStamp() .. "_" .. (opts.suffix or 0),
 		kind = "tracker",
-		name = opts.name or (groups[1] and groups[1].name or "New Multi Tracker"),
-		unit = groups[1] and groups[1].unit or "player",
-		initial = fallbackId,
+		name = opts.name or (items[1] and items[1].name or "New Multi Tracker"),
+		unit = items[1] and items[1].unit or "player",
+		initial = idleId,
 		phases = phases,
 		x = opts.x,
 		y = opts.y,
@@ -1017,95 +1275,26 @@ local function buildMergedSwitchDef(groups, opts)
 	})
 end
 
--- Construct (but do not insert) a def from the current selection: 1 effect -> a simple
--- tracker, 2+ -> one switch (mutex) tracker. Returns def, effectCount, or nil.
+-- Construct (but do not insert) a def from the current selection: one phase-item -> a
+-- simple tracker, 2+ -> one switch tracker. Returns def, phaseCount, or nil.
 local function selectionToDef()
 	local a = QAT.aggregator
-	local rows = selectionRows()
-	if #rows == 0 then
+	local items = phaseItemsFromSelection()
+	if #items == 0 then
 		return nil
 	end
-	if #rows == 1 then
-		return rowToDef(rows[1]), 1
-	end
-
-	-- When collapse-by-name is on, group rows by name and merge IDs into one phase
-	-- per group. Otherwise build one phase per row (existing behavior).
-	if a.filter.collapseByName then
-		local groups = groupRowsByName(rows)
-		if #groups == 1 then
-			-- All rows had the same name; build a simple tracker watching all IDs.
-			local g = groups[1]
-			buildCounter = buildCounter + 1
-			local phaseId = QAT.util.Slug(g.name, "merged_" .. buildCounter)
-			local unit = g.unit
-			local def = QAT.CanonicalizeDef({
-				id = "tracker_agg_" .. GetTimeStamp() .. "_" .. buildCounter,
-				kind = "tracker",
-				name = g.name,
-				unit = unit,
-				initial = "idle",
-				phases = {
-					{
-						id = "idle",
-						look = { display = "none" },
-						duration = { type = "none" },
-						transitions = {
-							{
-								when = { kind = "effect", result = "gained", abilityIds = g.ids, unit = unit },
-								to = phaseId,
-							},
-						},
-					},
-					{
-						id = phaseId,
-						look = { display = "icon", name = g.name, icon = g.icon, showTime = true },
-						duration = { type = "effect", abilityIds = g.ids, unit = unit },
-						transitions = {
-							{
-								when = { kind = "effect", result = "faded", abilityIds = g.ids, unit = unit },
-								to = "idle",
-							},
-						},
-					},
-				},
-				x = math.floor(GuiRoot:GetWidth() / 2 - 32),
-				y = math.floor(GuiRoot:GetHeight() / 2 - 32),
-				enabled = true,
-			})
-			return def, 1
-		end
-
-		buildCounter = buildCounter + 1
-		local def = buildMergedSwitchDef(groups, {
-			name = "New Multi Tracker",
-			manual = a.builderManual,
-			x = math.floor(GuiRoot:GetWidth() / 2 - 110),
-			y = math.floor(GuiRoot:GetHeight() / 2 - 20),
-			suffix = buildCounter,
-		})
-		return def, #groups
-	end
-
-	-- Existing non-collapsed path: one phase per effect.
-	local effects = {}
-	for _, r in ipairs(rows) do
-		effects[#effects + 1] = {
-			id = r.abilityId,
-			name = r.name,
-			unit = (r.targetRole == "me") and "player" or "reticleover",
-		}
+	if #items == 1 then
+		return buildSingleItemDef(items[1]), 1
 	end
 	buildCounter = buildCounter + 1
-	local def = QAT.BuildMutexTrackerDef({
+	local def = buildSwitchDef(items, {
 		name = "New Multi Tracker",
-		effects = effects,
 		manual = a.builderManual,
 		x = math.floor(GuiRoot:GetWidth() / 2 - 110),
 		y = math.floor(GuiRoot:GetHeight() / 2 - 20),
 		suffix = buildCounter,
 	})
-	return def, #effects
+	return def, #items
 end
 
 function QAT.Aggregator_BuildFromSelection()

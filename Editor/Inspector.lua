@@ -480,6 +480,16 @@ function QAT.Editor_Inspector_Build(pane)
 	insp.move:SetAnchor(RIGHT, row1, RIGHT, 0, 0)
 	QAT.widgets.Tooltip(insp.move, "Recentre this tracker on screen.")
 
+	-- Duplicate the open tracker/group (sits left of Center).
+	insp.copy = QAT.widgets.TextButton(row1, "QAT_Insp_Copy", "Copy", function()
+		if insp.currentId and QAT.Editor_DuplicateTracker then
+			QAT.Editor_DuplicateTracker(insp.currentId)
+		end
+	end)
+	insp.copy:SetHeight(22)
+	insp.copy:SetAnchor(RIGHT, insp.move, LEFT, -8, 0)
+	QAT.widgets.Tooltip(insp.copy, "Duplicate this tracker or group as a copy.")
+
 	-- Row 2: breadcrumb (left) + phase actions (right). A plain row on the header so
 	-- it reads as the current location, not a second navigation surface.
 	local crumb = WM:CreateControl("QAT_Insp_Crumb", header, CT_CONTROL)

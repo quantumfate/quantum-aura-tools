@@ -49,6 +49,7 @@ Editor/GridTab.lua
 Editor/Aggregator.lua
 Editor/AggregatorList.lua
 Editor/AggregatorInspector.lua
+Editor/AggregatorContext.lua
 Settings/Settings.lua
 Bindings.lua
 Bindings.xml

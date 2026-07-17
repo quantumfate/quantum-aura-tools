@@ -345,6 +345,49 @@ local function performDelete(id)
 	end
 end
 
+-- Stamp fresh ids on a duplicated node and its children so the copy never collides
+-- with the original. Phase ids are left alone — they are local to a def and referenced
+-- only by that def's own transitions, which the deep copy carries along.
+local function refreshIds(def)
+	local prefix = (def.kind == "folder" and "group_") or (def.kind == "dynamic" and "dyn_") or "tracker_"
+	def.id = newId(prefix)
+	for _, c in ipairs(def.children or {}) do
+		refreshIds(c)
+	end
+end
+
+-- Duplicate a tracker/group as a sibling inserted right after it. Exposed so the
+-- inspector header's Copy button can duplicate the open tracker too.
+function QAT.Editor_DuplicateTracker(id)
+	id = id or QAT.editor.selectedId
+	if not id then
+		return
+	end
+	local src = findNode(QAT.sv.trackers, id)
+	local list, idx = findParentList(QAT.sv.trackers, id)
+	if not src or not list then
+		return
+	end
+	local copy = QAT.util.DeepCopy(src)
+	refreshIds(copy)
+	copy.name = (src.name or "Tracker") .. " copy"
+	-- Nudge the copy so it doesn't sit exactly on top of the original on the HUD.
+	if copy.pos then
+		copy.pos.x, copy.pos.y = (copy.pos.x or 0) + 24, (copy.pos.y or 0) + 24
+	end
+	if copy.x then
+		copy.x = copy.x + 24
+	end
+	if copy.y then
+		copy.y = copy.y + 24
+	end
+	table.insert(list, idx + 1, copy)
+	QAT.CanonicalizeTree(QAT.sv.trackers)
+	QAT.log.editor:Debug("duplicated '%s' -> '%s'", id, copy.id)
+	QAT.widgets.NotifyTrackerChanged() -- rebuild runtime + HUD with the new tracker
+	selectNode(copy.id)
+end
+
 local function deleteSelected()
 	local id = QAT.editor.selectedId
 	if not id then

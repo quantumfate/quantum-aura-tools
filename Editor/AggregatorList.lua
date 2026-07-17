@@ -111,12 +111,18 @@ local function makeRow(parent, name)
 	nameL:SetAnchor(TOPLEFT, icon, TOPRIGHT, 10, 0)
 	c.nameL = nameL
 
+	-- Merge-count chip (collapse-by-name only): "+N" hidden IDs folded into this row.
+	local mergeBadge = W.Badge(c, name .. "_Merge", "", { 0.45, 0.55, 0.72 })
+	mergeBadge:SetAnchor(LEFT, nameL, RIGHT, 8, 0)
+	mergeBadge:SetHidden(true)
+	c.mergeBadge = mergeBadge
+
 	-- Gold favourite star (real texture; a glyph star boxes out in the default font).
 	local star = WM:CreateControl(name .. "_Star", c, CT_TEXTURE)
 	star:SetTexture(STAR_TEX)
 	star:SetColor(COL_FAV[1], COL_FAV[2], COL_FAV[3], 1)
 	star:SetDimensions(14, 14)
-	star:SetAnchor(LEFT, nameL, RIGHT, 8, 0)
+	star:SetAnchor(LEFT, mergeBadge, RIGHT, 8, 0)
 	c.star = star
 
 	-- Scribed source, shown on the right (like a "from <source>" column): the grimoire's
@@ -156,6 +162,11 @@ local function makeRow(parent, name)
 	stacksL:SetAnchor(LEFT, timeBadge, RIGHT, 6, 0)
 	c.stacksL = stacksL
 
+	-- Direction chip: who applies this to whom (You → Boss, mixed dir for a mixed merge).
+	local dirBadge = W.Badge(c, name .. "_Dir", "", { 0.45, 0.55, 0.72 })
+	dirBadge:SetAnchor(LEFT, stacksL, RIGHT, 8, 0)
+	c.dirBadge = dirBadge
+
 	local lastL = W.Label(c, name .. "_Last", "", "$(MEDIUM_FONT)|15|soft-shadow-thin")
 	lastL:SetColor(0.45, 0.52, 0.6, 1)
 	lastL:SetAnchor(BOTTOMRIGHT, c, BOTTOMRIGHT, -10, -6)
@@ -182,13 +193,12 @@ local function makeRow(parent, name)
 				QAT.Aggregator_ToggleSelected(self.rowKey)
 			end
 		else
+			-- Mode A: a plain row → single inspect; a collapsed row (2+ IDs) → a
+			-- one-phase merge build. Aggregator_SelectRow owns the layout + panes.
 			local rowKey = (self.collapseKeys and self.collapseKeys[1]) or self.rowKey
 			local row = QAT.capture.store[rowKey]
-			QAT.aggregator.selectedKey = rowKey
-			QAT.aggregator.selectedRow = row
-			QAT.Aggregator_List_Render()
-			if QAT.Aggregator_Inspector_Render then
-				QAT.Aggregator_Inspector_Render(row)
+			if row then
+				QAT.Aggregator_SelectRow(row, self.collapseKeys or { rowKey })
 			end
 		end
 	end)
@@ -231,13 +241,16 @@ local function bindRow(c, row, y, collapseKeys, collapseIds)
 		c.scribeL:SetText("from  " .. scribedName)
 	end
 	c.seenL:SetText("seen " .. (row.seenCount or 0))
-	local idText = "#" .. row.abilityId
+	c.idL:SetText("#" .. row.abilityId)
+
+	-- Merge-count chip: "+N" IDs folded under this collapsed row.
 	if collapsed then
-		-- Show the first ability ID with a count of collapsed entries.
-		local more = nCollapsed - 1
-		idText = idText .. string.format("  |c556070+%d|r", more)
+		c.mergeBadge:SetText("+" .. (nCollapsed - 1))
+		c.mergeBadge:SetHidden(false)
+	else
+		c.mergeBadge:SetText("")
+		c.mergeBadge:SetHidden(true)
 	end
-	c.idL:SetText(idText)
 
 	if row.effectType == BUFF_EFFECT_TYPE_DEBUFF then
 		c.effBadge:SetText("DEBUFF")
@@ -255,6 +268,25 @@ local function bindRow(c, row, y, collapseKeys, collapseIds)
 	end
 	c.stacksL:SetText((row.maxStacks or 0) > 0 and ("×" .. row.maxStacks) or "")
 	c.lastL:SetText(ago(row.lastSeen))
+
+	-- Direction chip. For a collapsed row that mixes directions show "mixed dir" (warn
+	-- colour); otherwise the row's own bucket direction in the bucket's colour.
+	local dirText, dirCol = QAT.Aggregator_BucketDirection(row.bucket), BUCKET_META[row.bucket].color
+	if collapsed then
+		local rows = {}
+		for _, k in ipairs(collapseKeys) do
+			local r = QAT.capture.store[k]
+			if r then
+				rows[#rows + 1] = r
+			end
+		end
+		if QAT.Aggregator_StackDirection(rows) == nil then
+			dirText, dirCol = "mixed dir", { 0.878, 0.686, 0.196 }
+		end
+	end
+	c.dirBadge:SetText(dirText or "")
+	c.dirBadge:SetColorRGB(dirCol)
+	c.dirBadge:SetHidden(not dirText or dirText == "")
 
 	-- "Active" = ticked in select mode, or the inspected row otherwise. Drives the
 	-- accent bar, the row highlight, and (in select mode) the check mark.
@@ -384,18 +416,12 @@ function QAT.Aggregator_List_Build(pane)
 	QAT.aggregator.listCountLabel = count
 
 	-- Collapse by name toggle (default on): deduplicate rows with the same name.
-	local collapseBtn = W.TextButton(tb, "QAT_AggList_Collapse", "Collapse by name", function()
-		local ok, err = pcall(function()
-			local f = QAT.aggregator and QAT.aggregator.filter
-			if f then
-				f.collapseByName = not f.collapseByName
-				collapseBtn:SetSelected(f.collapseByName)
-				QAT.Aggregator_Refresh()
-			end
-		end)
-		if not ok then
-			QAT.log.root:Error("collapse toggle: %s", tostring(err))
-			d("Collapse error: " .. tostring(err))
+	local collapseBtn = W.TextButton(tb, "QAT_AggList_Collapse", "Collapse by name", function(self)
+		local f = QAT.aggregator and QAT.aggregator.filter
+		if f then
+			f.collapseByName = not f.collapseByName
+			self:SetSelected(f.collapseByName)
+			QAT.Aggregator_Refresh()
 		end
 	end)
 	collapseBtn:SetHeight(28)

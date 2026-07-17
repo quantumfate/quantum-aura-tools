@@ -13,7 +13,7 @@ local TITLE_H, TAB_H, SPLITTER_W, HEADER_H, PHASESEL_H = 28, 28, 6, 74, 36
 local HEADER_GAP = 30 -- breathing space between the header and the tab content
 QAT.editor.HEADER_H, QAT.editor.TAB_H, QAT.editor.PHASESEL_H = HEADER_H, TAB_H, PHASESEL_H
 QAT.editor.HEADER_GAP = HEADER_GAP
-local MIN_TREE, MIN_INSPECTOR = 370, 320
+local MIN_TREE, MIN_INSPECTOR = 410, 320
 
 local function saveGeometry()
 	local f = QAT.editor.frame

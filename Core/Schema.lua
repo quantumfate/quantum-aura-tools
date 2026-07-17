@@ -648,8 +648,10 @@ function QAT.BuildMutexTrackerDef(opts)
 		return QAT.util.UniqueSlug(text, fallback, used)
 	end
 
-	local fallbackName = opts.fallbackName or "Inactive"
-	local fallbackId = slug(fallbackName, "fallback")
+	-- The mutex needs a resting state to sit in when none of the effects are up. It is
+	-- a real hidden phase (draws nothing) rather than a visible "Inactive" bar, matching
+	-- the addon's idle-as-phase convention.
+	local fallbackId = "idle"
 
 	-- Resolve each effect to its phase id + display name + unit up front so the mesh
 	-- below can cross-reference every sibling (and watch it on the right unit).
@@ -683,7 +685,7 @@ function QAT.BuildMutexTrackerDef(opts)
 	local phases = {
 		{
 			id = fallbackId,
-			look = { display = "bar", name = fallbackName, showTime = false },
+			look = { display = "none" },
 			duration = { type = "none" },
 			transitions = meshExcept(fallbackId),
 		},
